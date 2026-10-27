@@ -10,6 +10,7 @@ import shutil
 
 from . import theme
 from .theme import BOX
+from .version import __version__
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -65,7 +66,8 @@ def frame(title, lines, color_fn=theme.muted):
 # --- banner ------------------------------------------------------------------
 def banner():
     bar = theme.secondary("▀" * 3) if theme._unicode else "###"
-    title = theme.bold(theme.primary("Plaivid")) + theme.secondary(" CLI")
+    title = (theme.bold(theme.primary("Plaivid")) + theme.secondary(" CLI")
+             + theme.muted("  v" + __version__))
     sub = theme.muted("  PVM virtual-machine control")
     return "\n%s %s\n%s\n" % (bar, title, sub)
 
@@ -335,3 +337,74 @@ def overview(snap, prev, tapmap, agg, spin):
         _net_panel(snap, rates, tapmap, measuring),
         _storage_panel(snap),
     ])
+
+
+# --- VM detail ---------------------------------------------------------------
+def vm_detail(d):
+    fn, gl = theme.state_style(d.get("state"))
+
+    g = []
+    g.append("UUID     %s" % theme.muted(d["uuid"]))
+    g.append("State    %s %s      Host  %s      HA  %s"
+             % (fn(gl), fn(d["state"]), theme.accent(d["host"] or "-"),
+                theme.accent(d["ha"] or "-")))
+    if d.get("pid"):
+        g.append("PID      %s      Uptime  %s"
+                 % (theme.accent(str(d["pid"])), theme.muted(d.get("uptime") or "-")))
+    g.append("Enabled  %s      Auto-start  %s      Always-on  %s"
+             % (d["enabled"] or "-", d["auto_start"] or "-", d["always_on"] or "-"))
+    g.append("Created  %s      Modified  %s"
+             % (theme.muted(d["created"] or "-"), theme.muted(d["modified"] or "-")))
+    if d["description"]:
+        g.append("Note     %s" % d["description"])
+    general = frame("VM  %s  %s" % (theme.glyph("dot"), theme.bold(d["name"])),
+                    g, theme.primary)
+
+    mem_g = (d["mem_mb"] or 0) / 1024.0
+    c = [
+        "vCPU     %s   (%s = sockets x cores x threads)"
+        % (theme.accent(str(d["vcpu"])), d["vcpu_topo"]),
+        "Memory   %s GB" % theme.accent("%.1f" % mem_g),
+        "CPU      %s      Machine  %s"
+        % (d["cpu_model"] or "-", theme.muted(d["machine"] or "-")),
+        "Firmware %s      QEMU  %s"
+        % ("UEFI" if d["uefi"] == "enable" else "BIOS", d["qemu"] or "-"),
+    ]
+    compute = frame("Compute", c, theme.secondary)
+
+    drows = [theme.muted("%-14s %-7s %-8s %-5s %s"
+                         % ("NAME", "MEDIA", "BUS", "BOOT", "CACHE"))]
+    for dk in d["disks"]:
+        drows.append("%-14s %-7s %-8s %-5s %s"
+                     % (dk["name"][:14], dk["media"], dk["controller"],
+                        dk["boot"], dk["cache"]))
+    if not d["disks"]:
+        drows.append(theme.muted("none"))
+    disks = frame("Disks", drows, theme.accent)
+
+    nrows = [theme.muted("%-6s %-8s %-18s %-16s %s"
+                         % ("NAME", "DEVICE", "MAC", "TAP", "ENABLED"))]
+    for na in d["nics"]:
+        nrows.append("%-6s %-8s %-18s %-16s %s"
+                     % (na["name"], na["device"], na["mac"], na["tap"],
+                        na["enable"]))
+    if not d["nics"]:
+        nrows.append(theme.muted("none"))
+    nics = frame("Network", nrows, theme.accent)
+
+    con = d.get("console") or {}
+    if con:
+        endpoint = "%s://%s:%s" % (con.get("type") or "spice",
+                                   con.get("bind") or "?", con.get("port") or "?")
+        crows = [
+            "Type     %s      Port  %s"
+            % (con.get("type") or "-", theme.accent(con.get("port") or "-")),
+            "Endpoint %s" % theme.accent(endpoint),
+            "Password %s      TLS  %s"
+            % (con.get("password") or "-", con.get("tls") or "-"),
+        ]
+    else:
+        crows = [theme.muted("no console configured")]
+    console = frame("Console", crows, theme.secondary)
+
+    return "\n".join([general, compute, disks, nics, console])

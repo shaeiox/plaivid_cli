@@ -33,6 +33,7 @@ class Context(object):
 BUILTINS_HELP = [
     ("list | ls | refresh", "reload the VM list and host status"),
     ("overview | mon", "live monitoring: CPU, load, memory, network, storage"),
+    ("show <id|name>", "detailed view of one VM (disks, NICs, console)"),
     ("status", "refresh and show host monitoring"),
     ("<action> <id|name>", "run an action, e.g. 'stop 3' or 'start Hadi-New'"),
     ("help | ?", "show this help"),
@@ -122,6 +123,9 @@ class App(object):
             return True
         if cmd in ("overview", "mon", "monitor", "live"):
             self._overview()
+            return True
+        if cmd in ("show", "detail", "info"):
+            self._show_vm(rest)
             return True
         if cmd == "logout":
             session.logout(self.session)
@@ -231,7 +235,8 @@ class App(object):
             pass
 
     def _command_vocab(self):
-        vocab = ["list", "status", "refresh", "overview", "help", "logout", "quit"]
+        vocab = ["list", "status", "refresh", "overview", "show",
+                 "help", "logout", "quit"]
         for a in actions.all_actions():
             vocab.append(a.name)
             vocab.extend(a.aliases)
@@ -347,6 +352,27 @@ class App(object):
                 pass
         return True
 
+    # --- VM detail ----------------------------------------------------------
+    def _show_vm(self, selector):
+        vm, errmsg = vms.resolve(self.vms, selector)
+        if vm is None:
+            self.status = render.err(errmsg)
+            return
+        try:
+            detail = vms.detail(self.ctx.token, vm)
+        except transport.TransportError as exc:
+            self.status = render.err("Could not read %s: %s" % (vm.name, exc))
+            return
+        self._clear()
+        print(render.center(render.vm_detail(detail)))
+        if sys.stdin.isatty():
+            try:
+                input("\n" + " " * render.margin()
+                      + theme.muted("press Enter to return "))
+            except (EOFError, KeyboardInterrupt):
+                print()
+        self.status = render.hint("Viewed %s" % vm.name)
+
     # --- entry points -------------------------------------------------------
     def run_interactive(self):
         if not self.ensure_session():
@@ -379,6 +405,9 @@ class App(object):
             return 0
         if cmd in ("overview", "mon", "monitor", "live"):
             self._overview()
+            return 0
+        if cmd in ("show", "detail", "info"):
+            self._show_vm(" ".join(args[1:]))
             return 0
         self.dispatch(line)
         # print just the resulting status line for scripting

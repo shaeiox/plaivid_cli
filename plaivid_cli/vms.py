@@ -156,6 +156,81 @@ def aggregate(vms):
     return agg
 
 
+def detail(token, vm):
+    """Fetch and parse the full object for one VM into a structured dict.
+
+    ``vm`` may be a VM instance or a uuid string. Returns a dict grouped for
+    the detail renderer; raises TransportError if the VM cannot be read.
+    """
+    uuid = getattr(vm, "uuid", vm)
+    query = ("<params><query>/objects/object/pvm_vmm_obj"
+             "[uuid[text()='%s']]</query></params>" % uuid)
+    resp = transport.sbell("user", "objects", query, token=token)
+    if not resp.ok:
+        raise transport.TransportError(resp.error_text())
+    obj = resp.description.find(".//pvm_vmm_obj") if resp.description is not None else None
+    if obj is None:
+        raise transport.TransportError("VM not found: %s" % uuid)
+    m = obj.find("virtual_machine")
+
+    def g(path, default=""):
+        return (m.findtext(path) if m is not None else None) or default
+
+    sc = [g("hardware/cpu/vcpu/%s" % x, "1") for x in ("socket", "core", "thread")]
+    try:
+        vcpu = int(sc[0]) * int(sc[1]) * int(sc[2])
+    except ValueError:
+        vcpu = None
+
+    d = {
+        "name": obj.findtext("name") or "",
+        "uuid": obj.findtext("uuid") or uuid,
+        "description": (obj.findtext("description") or "").strip(),
+        "enabled": obj.findtext("is_enabled") or "",
+        "ha": obj.findtext("ha_enabled") or "",
+        "created": obj.findtext("created_datetime") or "",
+        "modified": obj.findtext("modified_datetime") or "",
+        "state": g("cluster/cluster_status/status", "unknown"),
+        "host": g("cluster/host"),
+        "auto_start": g("cluster/auto_start"),
+        "always_on": g("cluster/always_on"),
+        "qemu": g("cluster/cluster_status/qemu_version"),
+        "vcpu": vcpu, "vcpu_topo": "%sx%sx%s" % (sc[0], sc[1], sc[2]),
+        "cpu_model": g("hardware/cpu/model"),
+        "mem_mb": int(g("hardware/memory/size", "0") or 0),
+        "machine": g("hardware/emulated_machine/type"),
+        "uefi": g("hardware/bios/uefi"),
+        "disks": [], "nics": [], "console": {},
+    }
+    if m is not None:
+        for dk in m.findall("hardware/disk_manager/disk_list/disk"):
+            d["disks"].append({
+                "name": dk.findtext("name") or "",
+                "media": dk.findtext("media") or "",
+                "controller": dk.findtext("controller") or "",
+                "boot": dk.findtext("boot_index") or "",
+                "cache": dk.findtext("cache") or ""})
+        for na in m.findall("hardware/net_adaptor_list/net_adaptor"):
+            d["nics"].append({
+                "name": na.findtext("name") or "",
+                "device": na.findtext("device") or "",
+                "mac": na.findtext("macaddr") or "",
+                "tap": na.findtext("tap_name") or "",
+                "enable": na.findtext("enable") or ""})
+        c = m.find("hardware/console")
+        if c is not None:
+            d["console"] = {
+                "type": c.findtext("type") or "",
+                "port": c.findtext("port") or "",
+                "bind": c.findtext("bind_address") or "",
+                "password": c.findtext("password_enable") or "",
+                "tls": c.findtext("tls") or ""}
+    # live fields if we were handed an enriched VM
+    d["pid"] = getattr(vm, "pid", None)
+    d["uptime"] = getattr(vm, "uptime", None)
+    return d
+
+
 def tap_map(token):
     """Map host tap-interface name -> VM name, for per-VM network stats.
 
