@@ -1,0 +1,198 @@
+"""VM inventory: list all VMs, enrich running ones, and resolve selectors.
+
+Two data sources are merged:
+  * ``user/objects`` typed query -> every defined VM with uuid, name, state,
+    vcpu and memory (the authoritative inventory).
+  * ``pvm-running-vms`` -> live PID / uptime / console port for running VMs,
+    and the automatic uuid discovery the requirements ask for.
+"""
+
+import re
+
+from . import transport
+
+# The query the Plaivid web UI itself uses for the VM list.
+VM_QUERY = ("<params><query>/objects/object/pvm_vmm_obj"
+            "[type[text()='pvm_vmm_virtual_machine']]</query></params>")
+
+
+class VM(object):
+    def __init__(self, uuid, name):
+        self.uuid = uuid
+        self.name = name
+        self.state = "unknown"   # started | stopped | off | unknown
+        self.vcpu = None
+        self.mem_mb = None
+        self.description = ""
+        # live fields (only for running VMs)
+        self.pid = None
+        self.uptime = None
+        self.port = None
+        self.index = None        # 1-based position shown in the UI
+
+    @property
+    def running(self):
+        return self.state in ("started", "running")
+
+    @property
+    def mem_human(self):
+        if self.mem_mb is None:
+            return "-"
+        if self.mem_mb >= 1024:
+            return "%.0fG" % (self.mem_mb / 1024.0)
+        return "%dM" % self.mem_mb
+
+
+def _vcpu_count(hw_cpu):
+    if hw_cpu is None:
+        return None
+    v = hw_cpu.find("vcpu")
+    if v is None:
+        return None
+    try:
+        n = 1
+        for tag in ("socket", "core", "thread"):
+            val = v.findtext(tag)
+            if val:
+                n *= int(val)
+        return n
+    except (TypeError, ValueError):
+        return None
+
+
+def list_all(token):
+    """Every defined VM, from the object store. Raises TransportError."""
+    resp = transport.sbell("user", "objects", VM_QUERY, token=token)
+    if not resp.ok:
+        raise transport.TransportError(resp.error_text())
+    out = []
+    if resp.description is None:
+        return out
+    for obj in resp.description.iter("pvm_vmm_obj"):
+        uuid = obj.findtext("uuid") or ""
+        name = obj.findtext("name") or uuid
+        vm = VM(uuid, name)
+        vm.description = (obj.findtext("description") or "").strip()
+        machine = obj.find("virtual_machine")
+        if machine is not None:
+            vm.state = machine.findtext("cluster/cluster_status/status") \
+                or "unknown"
+            vm.vcpu = _vcpu_count(machine.find("hardware/cpu"))
+            mem = machine.findtext("hardware/memory/size")
+            try:
+                vm.mem_mb = int(mem) if mem else None
+            except ValueError:
+                vm.mem_mb = None
+        out.append(vm)
+    return out
+
+
+_ROW = re.compile(r"^\s*\d+\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+"
+                  r"([0-9a-fA-F-]{36})\s+(.+?)\s*$")
+
+
+def list_running():
+    """Running VMs from pvm-running-vms (no auth). Returns list of dicts."""
+    raw = transport.running_vms_raw()
+    raw = re.sub(r"\033\[[0-9;]*m", "", raw)  # strip color
+    rows = []
+    for line in raw.splitlines():
+        m = _ROW.match(line)
+        if not m:
+            continue
+        pid, uptime, port, vcpu, mem, uuid, name = m.groups()
+        rows.append({"uuid": uuid.lower(), "name": name.strip(),
+                     "pid": pid, "uptime": uptime, "port": port,
+                     "vcpu": int(vcpu), "mem_mb": int(mem)})
+    return rows
+
+
+def inventory(token):
+    """Merged, ordered VM list: running first, then by name. Indexed 1..N."""
+    vms = list_all(token)
+    by_uuid = dict((v.uuid.lower(), v) for v in vms)
+
+    # enrich with live info; add any running VM missing from the object store
+    try:
+        for r in list_running():
+            vm = by_uuid.get(r["uuid"])
+            if vm is None:
+                vm = VM(r["uuid"], r["name"])
+                vm.vcpu, vm.mem_mb = r["vcpu"], r["mem_mb"]
+                vms.append(vm)
+                by_uuid[r["uuid"]] = vm
+            if not vm.running:
+                vm.state = "started"
+            vm.pid, vm.uptime, vm.port = r["pid"], r["uptime"], r["port"]
+    except transport.TransportError:
+        pass  # inventory still usable without live enrichment
+
+    vms.sort(key=lambda v: (0 if v.running else 1, v.name.lower()))
+    for i, vm in enumerate(vms, 1):
+        vm.index = i
+    return vms
+
+
+def aggregate(vms):
+    """Summarize a VM list: counts by state and allocated vCPU/memory."""
+    agg = {"total": len(vms), "running": 0, "stopped": 0, "off": 0,
+           "paused": 0, "vcpu_run": 0, "vcpu_total": 0,
+           "mem_run_mb": 0, "mem_total_mb": 0}
+    for v in vms:
+        vc = v.vcpu or 0
+        mm = v.mem_mb or 0
+        agg["vcpu_total"] += vc
+        agg["mem_total_mb"] += mm
+        if v.running:
+            agg["running"] += 1
+            agg["vcpu_run"] += vc
+            agg["mem_run_mb"] += mm
+        elif v.state == "stopped":
+            agg["stopped"] += 1
+        elif v.state == "off":
+            agg["off"] += 1
+        elif v.state == "paused":
+            agg["paused"] += 1
+    return agg
+
+
+def tap_map(token):
+    """Map host tap-interface name -> VM name, for per-VM network stats.
+
+    Each VM's net adaptors carry a ``tap_name`` that equals the interface name
+    reported by monitoring/metrics, so this joins the two data sources.
+    """
+    resp = transport.sbell("user", "objects", VM_QUERY, token=token)
+    mapping = {}
+    if resp.ok and resp.description is not None:
+        for obj in resp.description.iter("pvm_vmm_obj"):
+            name = obj.findtext("name") or ""
+            for na in obj.iter("net_adaptor"):
+                tap = na.findtext("tap_name")
+                if tap:
+                    mapping[tap] = name
+    return mapping
+
+
+def resolve(vms, selector):
+    """Find a VM by 1-based index, exact name, uuid, or unique name prefix."""
+    sel = (selector or "").strip()
+    if not sel:
+        return None, "no VM given"
+    if sel.isdigit():
+        n = int(sel)
+        for vm in vms:
+            if vm.index == n:
+                return vm, None
+        return None, "no VM at index %s" % sel
+    low = sel.lower()
+    for vm in vms:                                   # exact name / uuid
+        if vm.name.lower() == low or vm.uuid.lower() == low:
+            return vm, None
+    matches = [vm for vm in vms if low in vm.name.lower()]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        names = ", ".join(vm.name for vm in matches[:6])
+        return None, "'%s' is ambiguous: %s" % (selector, names)
+    return None, "no VM matches '%s'" % selector
