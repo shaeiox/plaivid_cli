@@ -5,7 +5,21 @@ branch without touching the others. Checkboxes track progress.
 
 ---
 
-## 1. VM detail view (`show <id|name>`)  -  IN PROGRESS (this branch)
+## Done
+
+- [x] **v0.2.0** - VM detail view (`show`), live overview sections.
+- [x] **Bulk actions** - one action over many VMs: `stop 3,5,7`,
+      `stop state:running`, `kill all` (one confirmation for the whole set).
+- [x] **Audit log viewer + analyzer** (`log [N]`) - reads the live
+      `messages.db` (SQLite `Log` table), shows recent user actions
+      (time / user / IP / command / result) plus a summary (totals, window,
+      top commands, top users, failures).
+- [x] **Health & capacity** (`health`) - verdict + checks: cluster quorum,
+      storage pressure, CPU/RAM, vCPU & RAM overcommit, license expiry.
+
+---
+
+## 1. VM detail view (`show <id|name>`)  -  DONE
 
 A read-only, grouped detail page for a single VM.
 
@@ -51,19 +65,19 @@ Stop/Kill/Reset/Pause - driven by the server, not hard-coded.
 Acceptance: the overview shows a small trend line per metric and turns
 red when a resource is critically high.
 
-## 5. Audit / log viewer
+## 5. Audit / log viewer  -  DONE (via SQLite messages.db)
 
-- [ ] `log` command: show recent entries from `/var/log/pvm/messages`
-      (and/or `log/select`), parsed into time / user / action / result.
-- [ ] Filter by VM name or user; follow (tail -f) mode.
-
-Acceptance: `log` shows the latest PVM actions with who did what and the
-result, newest first.
+- [x] `log [N]` command: recent entries from the live `messages.db`
+      (`Log` table), parsed into time / user / IP / command / result.
+- [x] Summary analyzer: totals, time window, top commands, top users, failures.
+- [ ] Follow-ups: filter by VM/user, follow (tail -f) mode, down-rank
+      read-only polling noise (`/user/objects`, `/monitoring/metrics`).
 
 ---
 
 ### Conventions
 - One feature per branch; keep `actions/` files independent.
-- Data access goes through `transport.sbell()`; no new direct subprocess calls.
+- Data access goes through `transport.sbell()`; no new direct subprocess calls
+  (exception: `logs.py` reads the local `messages.db` via stdlib `sqlite3`).
 - Read-only by default; destructive operations require confirmation.
 - Verify against a real host before committing.

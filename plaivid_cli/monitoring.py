@@ -5,6 +5,7 @@ Uses ``sball/show`` (cheap, always available) for live CPU/RAM/load, and
 stays dumb; any field that cannot be read is simply left out.
 """
 
+import datetime
 import time
 
 from . import transport
@@ -172,3 +173,93 @@ def metrics_snapshot(token):
     except (transport.TransportError, ValueError):
         snap["load1"] = snap["load5"] = snap["load15"] = 0.0
     return snap
+
+
+def license_info(token):
+    """License status + days until expiry, or {} on failure."""
+    try:
+        resp = transport.sbell("license", "show", token=token)
+    except transport.TransportError:
+        return {}
+    if not resp.ok or resp.description is None:
+        return {}
+    o = resp.description.find(".//pvm_lcn_obj")
+    if o is None:
+        return {}
+    expire = o.findtext("expire_date") or ""
+    days = None
+    try:
+        d = datetime.datetime.strptime(expire, "%Y/%m/%d").date()
+        days = (d - datetime.date.today()).days
+    except ValueError:
+        pass
+    return {"status": o.findtext("license_status") or "",
+            "type": o.findtext("license_type") or "",
+            "expire": expire, "days_left": days}
+
+
+def health_report(snap, agg, lic, host):
+    """Build a health/capacity report: a verdict + a list of checks.
+
+    Each check is {name, level (ok|warn|crit), detail}. Pure computation over
+    data already gathered, so it makes no calls of its own.
+    """
+    checks = []
+
+    def add(name, level, detail):
+        checks.append({"name": name, "level": level, "detail": detail})
+
+    def band(v, warn, crit):
+        return "crit" if v >= crit else "warn" if v >= warn else "ok"
+
+    ss = (host or {}).get("sball_state") or snap.get("sball_state") or ""
+    add("Cluster quorum", "ok" if ss == "quorate" else "crit",
+        "sball state: %s" % (ss or "unknown"))
+
+    worst = None
+    for st in snap.get("storage", []):
+        if worst is None or st["pct"] > worst["pct"]:
+            worst = st
+    if worst:
+        add("Storage pressure", band(worst["pct"], 80, 90),
+            "%s %.0f%% full (%s)" % (worst["kind"], worst["pct"], worst["mount"]))
+
+    cpu = snap.get("cpu_pct") or 0
+    add("CPU load", band(cpu, 70, 90), "%.0f%% now" % cpu)
+    mem = snap.get("mem_pct") or 0
+    add("Memory", band(mem, 80, 90), "%.0f%% used" % mem)
+
+    cores = snap.get("logical_cores") or 0
+    if cores and agg:
+        ratio = agg["vcpu_total"] / float(cores)
+        add("vCPU overcommit", band(ratio, 2.0, 4.0),
+            "%d vCPU allocated / %d cores = %.1fx" % (agg["vcpu_total"], cores, ratio))
+    tot_gb = snap.get("mem_total_gb") or 0
+    if tot_gb and agg:
+        alloc_gb = agg["mem_total_mb"] / 1024.0
+        run_gb = agg["mem_run_mb"] / 1024.0
+        add("RAM overcommit", band(alloc_gb / tot_gb, 1.0, 1.5),
+            "%.0f GB allocated / %.0f GB host (%.0f GB running)"
+            % (alloc_gb, tot_gb, run_gb))
+
+    if lic:
+        dl = lic.get("days_left")
+        if lic.get("status") != "verified":
+            lvl = "crit"
+        elif dl is not None and dl < 30:
+            lvl = "warn"
+        else:
+            lvl = "ok"
+        det = lic.get("status") or "?"
+        if lic.get("expire"):
+            det += ", expires %s" % lic["expire"]
+            if dl is not None:
+                det += " (%d days)" % dl
+        add("License", lvl, det)
+
+    verdict = "ok"
+    if any(c["level"] == "crit" for c in checks):
+        verdict = "crit"
+    elif any(c["level"] == "warn" for c in checks):
+        verdict = "warn"
+    return {"verdict": verdict, "checks": checks}

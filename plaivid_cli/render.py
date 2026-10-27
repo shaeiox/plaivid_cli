@@ -408,3 +408,50 @@ def vm_detail(d):
     console = frame("Console", crows, theme.secondary)
 
     return "\n".join([general, compute, disks, nics, console])
+
+
+# --- health & audit ----------------------------------------------------------
+def _level_style(level):
+    if level == "ok":
+        return theme.success, theme.glyph("ok")
+    if level == "warn":
+        return theme.warning, theme.glyph("ask")
+    return theme.error, theme.glyph("err")
+
+
+def health(report):
+    v = report["verdict"]
+    fn, gl = _level_style(v)
+    word = {"ok": "HEALTHY", "warn": "WARNINGS", "crit": "CRITICAL"}[v]
+    lines = ["%s  overall: %s" % (fn(gl), theme.bold(fn(word))), ""]
+    for c in report["checks"]:
+        cfn, cgl = _level_style(c["level"])
+        lines.append("%s %s  %s"
+                     % (cfn(cgl), c["name"].ljust(18), theme.muted(c["detail"])))
+    return frame("Health & capacity", lines, fn)
+
+
+def log_view(entries, summary):
+    s = summary
+    span = "%s  →  %s" % (s["span"][0] or "-", s["span"][1] or "-")
+    fails_fn = theme.error if s["failures"] else theme.success
+    srows = [
+        "Actions  %s      Failures  %s"
+        % (theme.bold(str(s["total"])), fails_fn(str(s["failures"]))),
+        "Window   %s" % theme.muted(span),
+        "Top cmd  %s" % ", ".join("%s(%d)" % (c, n) for c, n in s["top_cmds"]),
+        "Users    %s" % ", ".join("%s(%d)" % (u, n) for u, n in s["top_users"]),
+    ]
+    summary_panel = frame("Audit summary", srows, theme.secondary)
+
+    rows = [theme.muted("%-19s %-9s %-15s %-22s %s"
+                        % ("TIME", "USER", "IP", "COMMAND", "RESULT"))]
+    for e in entries:
+        rfn = theme.success if e["ok"] else theme.error
+        rows.append("%-19s %-9s %-15s %-22s %s"
+                    % (e["time"], e["user"][:9], e["ip"][:15], e["cmd"][:22],
+                       rfn(e["result"])))
+    if not entries:
+        rows.append(theme.muted("no recent user actions"))
+    table = frame("Recent actions", rows, theme.accent)
+    return summary_panel + "\n" + table

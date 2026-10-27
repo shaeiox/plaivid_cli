@@ -16,7 +16,8 @@ try:
 except ImportError:
     readline = None
 
-from . import actions, config, monitoring, render, session, theme, transport, vms
+from . import (actions, config, logs, monitoring, render, session, theme,
+               transport, vms)
 from .version import __version__
 
 
@@ -34,9 +35,11 @@ class Context(object):
 BUILTINS_HELP = [
     ("list | ls | refresh", "reload the VM list and host status"),
     ("overview | mon", "live monitoring: CPU, load, memory, network, storage"),
+    ("health | hc", "health & capacity summary (quorum, pressure, overcommit)"),
     ("show <id|name>", "detailed view of one VM (disks, NICs, console)"),
+    ("log [N]", "audit log viewer + analyzer (recent actions)"),
     ("status", "refresh and show host monitoring"),
-    ("<action> <id|name>", "run an action, e.g. 'stop 3' or 'start Hadi-New'"),
+    ("<action> <targets>", "run an action; targets: id/name, a,b,c, or state:running / all"),
     ("version | ver", "show the Plaivid CLI version"),
     ("help | ?", "show this help"),
     ("logout", "clear the saved session and exit"),
@@ -136,6 +139,12 @@ class App(object):
         if cmd in ("show", "detail", "info"):
             self._show_vm(rest)
             return True
+        if cmd in ("log", "logs", "audit"):
+            self._show_log(rest)
+            return True
+        if cmd in ("health", "hc"):
+            self._show_health()
+            return True
         if cmd == "logout":
             session.logout(self.session)
             print(render.ok("Session cleared."))
@@ -149,34 +158,66 @@ class App(object):
         return True
 
     def _run_action(self, action, selector):
-        vm, errmsg = vms.resolve(self.vms, selector)
-        if vm is None:
-            self.status = render.err(errmsg)
+        targets, errmsg = vms.resolve_many(self.vms, selector)
+        if not targets:
+            self.status = render.err(errmsg or "no VM matched")
             return
-        if action.destructive and not self._confirm(action, vm):
+        if action.destructive and not self._confirm(action, targets):
             self.status = render.hint("%s cancelled." % action.label)
             return
+        if len(targets) == 1:
+            self.status = self._apply_one(action, targets[0])
+        else:
+            self.status = self._apply_bulk(action, targets)
+        self.refresh()
+
+    def _apply_one(self, action, vm):
         try:
             result = action.run(self.ctx, vm)
         except Exception as exc:  # an action bug must not crash the app
-            self.status = render.err("%s failed: %s: %s"
-                                     % (action.label, type(exc).__name__, exc))
-            return
+            return render.err("%s %s failed: %s: %s"
+                              % (action.label, vm.name, type(exc).__name__, exc))
         label = "%s %s" % (action.label, theme.accent(vm.name))
-        self.status = (render.ok("%s - %s" % (label, result.message))
-                       if result.ok else
-                       render.err("%s - %s" % (label, result.message)))
-        self.refresh()
+        return (render.ok("%s - %s" % (label, result.message)) if result.ok
+                else render.err("%s - %s" % (label, result.message)))
 
-    def _confirm(self, action, vm):
+    def _apply_bulk(self, action, targets):
+        ok = fail = 0
+        failed = []
+        for vm in targets:
+            try:
+                result = action.run(self.ctx, vm)
+                good = result.ok
+            except Exception:
+                good = False
+            if good:
+                ok += 1
+            else:
+                fail += 1
+                failed.append(vm.name)
+        msg = "%s on %d VMs: %s ok" % (action.label, len(targets),
+                                       theme.success(str(ok)))
+        if fail:
+            msg += ", %s failed (%s)" % (theme.error(str(fail)),
+                                         ", ".join(failed[:5]))
+        return (render.ok(msg) if not fail else render.warn(msg))
+
+    def _confirm(self, action, targets):
         if not sys.stdin.isatty():
             return True  # non-interactive: assume intent
-        print(render.frame("Confirm", [
-            render.warn("%s  %s  (%s)" % (
+        if len(targets) == 1:
+            body = [render.warn("%s  %s  (%s)" % (
                 theme.bold(action.label.upper()),
-                theme.accent(vm.name), vm.uuid[:8])),
-            render.hint(action.description),
-        ], theme.warning))
+                theme.accent(targets[0].name), targets[0].uuid[:8])),
+                render.hint(action.description)]
+        else:
+            names = ", ".join(vm.name for vm in targets[:8])
+            if len(targets) > 8:
+                names += ", +%d more" % (len(targets) - 8)
+            body = [render.warn("%s  %s VMs" % (
+                theme.bold(action.label.upper()), theme.accent(str(len(targets))))),
+                render.hint(names)]
+        print(render.frame("Confirm", body, theme.warning))
         try:
             ans = input(theme.warning("  Proceed? [y/N]: ")).strip().lower()
         except EOFError:
@@ -244,8 +285,8 @@ class App(object):
             pass
 
     def _command_vocab(self):
-        vocab = ["list", "status", "refresh", "overview", "show",
-                 "version", "help", "logout", "quit"]
+        vocab = ["list", "status", "refresh", "overview", "health", "show",
+                 "log", "version", "help", "logout", "quit"]
         for a in actions.all_actions():
             vocab.append(a.name)
             vocab.extend(a.aliases)
@@ -385,6 +426,44 @@ class App(object):
                 print()
         self.status = render.hint("Viewed %s" % vm.name)
 
+    def _page(self, body, note):
+        """Clear, print a page, wait for Enter on a TTY, set a status note."""
+        self._clear()
+        print(render.center(body))
+        if sys.stdin.isatty():
+            try:
+                input("\n" + " " * render.margin()
+                      + theme.muted("press Enter to return "))
+            except (EOFError, KeyboardInterrupt):
+                print()
+        self.status = render.hint(note)
+
+    # --- audit log ----------------------------------------------------------
+    def _show_log(self, arg):
+        limit = 40
+        if arg.strip().isdigit():
+            limit = max(1, min(int(arg.strip()), 500))
+        try:
+            entries = logs.recent(limit)
+        except logs.LogError as exc:
+            self.status = render.err("Log unavailable: %s" % exc)
+            return
+        summary = logs.summarize(entries)
+        self._page(render.log_view(entries, summary),
+                   "Audit log (%d actions)" % summary["total"])
+
+    # --- health & capacity --------------------------------------------------
+    def _show_health(self):
+        snap = monitoring.metrics_snapshot(self.ctx.token)
+        if snap.get("error"):
+            self.status = render.err("Health unavailable: %s" % snap["error"])
+            return
+        agg = vms.aggregate(self.vms)
+        lic = monitoring.license_info(self.ctx.token)
+        report = monitoring.health_report(snap, agg, lic, self.host)
+        self._page(render.health(report),
+                   "Health: %s" % report["verdict"].upper())
+
     # --- entry points -------------------------------------------------------
     def run_interactive(self):
         if not self.ensure_session():
@@ -420,6 +499,12 @@ class App(object):
             return 0
         if cmd in ("show", "detail", "info"):
             self._show_vm(" ".join(args[1:]))
+            return 0
+        if cmd in ("log", "logs", "audit"):
+            self._show_log(" ".join(args[1:]))
+            return 0
+        if cmd in ("health", "hc"):
+            self._show_health()
             return 0
         self.dispatch(line)
         # print just the resulting status line for scripting

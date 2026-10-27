@@ -271,3 +271,44 @@ def resolve(vms, selector):
         names = ", ".join(vm.name for vm in matches[:6])
         return None, "'%s' is ambiguous: %s" % (selector, names)
     return None, "no VM matches '%s'" % selector
+
+
+def _state_of(vm):
+    return "running" if vm.running else (vm.state or "unknown")
+
+
+def resolve_many(vms, selector):
+    """Resolve a selector to a LIST of VMs for bulk actions.
+
+    Supports: ``all``; a state keyword (``running`` / ``stopped`` / ``off`` /
+    ``paused``) or ``state:<name>``; a comma-separated list of indexes/names;
+    or a single selector (list of one). Returns (list, error_or_None).
+    """
+    sel = (selector or "").strip()
+    low = sel.lower()
+    if not sel:
+        return [], "no VM given"
+    if low == "all":
+        return list(vms), None
+    if low.startswith("state:"):
+        low = low.split(":", 1)[1].strip()
+    if low in ("running", "stopped", "off", "paused"):
+        matched = [vm for vm in vms if _state_of(vm) == low]
+        return matched, (None if matched else "no %s VMs" % low)
+    if "," in sel:
+        out, errs, seen = [], [], set()
+        for tok in sel.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            vm, err = resolve(vms, tok)
+            if vm and vm.uuid not in seen:
+                seen.add(vm.uuid)
+                out.append(vm)
+            elif err:
+                errs.append(err)
+        if not out:
+            return [], "; ".join(errs) or "no match"
+        return out, ("; ".join(errs) if errs else None)
+    vm, err = resolve(vms, sel)
+    return ([vm] if vm else []), err
