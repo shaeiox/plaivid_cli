@@ -33,7 +33,10 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 ./plaivid status          # one-shot: refresh + dashboard
 ./plaivid overview        # live monitoring (CPU, load, mem, network, storage)
 ./plaivid show Hadi-New    # one-shot: detailed view of one VM
+./plaivid health          # one-shot: health & capacity summary
+./plaivid log 30          # one-shot: last 30 audit actions
 ./plaivid stop Hadi-New    # one-shot: run an action by name
+./plaivid stop state:off   # one-shot: bulk action by state
 ./plaivid start 12         # ... or by the index shown in the list
 ```
 
@@ -43,14 +46,28 @@ Inside the TUI:
 | --- | --- |
 | `list` / `ls` / `refresh` | reload VMs + host status |
 | `overview` / `mon` | live monitoring page (auto-refresh; `q` / Ctrl-C to exit) |
+| `health` / `hc` | health & capacity summary (quorum, storage, overcommit, license) |
 | `show` / `detail` `<id\|name>` | detailed view of one VM (disks, NICs, console) |
+| `log` `[N]` | audit log viewer + analyzer (recent actions, who did what) |
 | `status` | refresh and show host monitoring |
-| `<action> <id|name>` | e.g. `stop 3`, `start Hadi-New`, `kill web-01` |
+| `<action> <targets>` | run an action on one or many VMs (see below) |
 | `help` / `?` | list commands and actions |
 | `logout` | clear the saved session and exit |
 | `quit` / `q` | exit (keeps the session cached) |
 
-Destructive actions (`stop`, `kill`, `reset`) ask for confirmation.
+**Targets** for actions can be a single VM *or many at once*:
+
+```
+stop 3                 # by index
+stop Hadi-New           # by name (or unique prefix)
+stop 3,5,Hadi-New       # a comma-separated list
+stop state:running      # every VM in a state (running/stopped/off/paused)
+start off               # shorthand: all VMs in that state
+kill all                # every VM
+```
+
+Destructive actions (`stop`, `kill`, `reset`) ask for one confirmation,
+showing the full list of affected VMs for a bulk action.
 
 ## Configuration (environment variables)
 
