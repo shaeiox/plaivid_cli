@@ -17,6 +17,7 @@ except ImportError:
     readline = None
 
 from . import actions, config, monitoring, render, session, theme, transport, vms
+from .version import __version__
 
 
 class Context(object):
@@ -36,6 +37,7 @@ BUILTINS_HELP = [
     ("show <id|name>", "detailed view of one VM (disks, NICs, console)"),
     ("status", "refresh and show host monitoring"),
     ("<action> <id|name>", "run an action, e.g. 'stop 3' or 'start Hadi-New'"),
+    ("version | ver", "show the Plaivid CLI version"),
     ("help | ?", "show this help"),
     ("logout", "clear the saved session and exit"),
     ("quit | q", "exit (keeps the session cached)"),
@@ -98,10 +100,12 @@ class App(object):
             print()
             print(render.center(self.status))
         print()
+        dot = theme.glyph("dot")
         print(render.center(render.hint(
-            "actions: %s   %s   Tab completes   %s   help   %s   quit" % (
+            "actions: %s   %s   Tab completes   %s   help   %s   quit   %s   %s" % (
                 ", ".join(a.name for a in actions.all_actions()),
-                theme.glyph("dot"), theme.glyph("dot"), theme.glyph("dot")))))
+                dot, dot, dot, dot,
+                theme.secondary("Plaivid CLI v" + __version__)))))
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):
@@ -116,6 +120,11 @@ class App(object):
             return False
         if cmd in ("help", "?", "h"):
             self.status = self._help_text()
+            return True
+        if cmd in ("version", "ver", "--version", "-v"):
+            self.status = render.info(
+                "Plaivid CLI v%s   (Python %s)"
+                % (__version__, sys.version.split()[0]))
             return True
         if cmd in ("list", "ls", "l", "refresh", "r", "status", "s"):
             self.refresh()
@@ -236,7 +245,7 @@ class App(object):
 
     def _command_vocab(self):
         vocab = ["list", "status", "refresh", "overview", "show",
-                 "help", "logout", "quit"]
+                 "version", "help", "logout", "quit"]
         for a in actions.all_actions():
             vocab.append(a.name)
             vocab.extend(a.aliases)
@@ -308,7 +317,10 @@ class App(object):
                 print()
                 print(render.center(render.hint(
                     "live monitoring  %s  refresh %gs  %s  q / Ctrl-C to exit"
-                    % (theme.glyph("dot"), interval, theme.glyph("dot")))))
+                    "  %s  %s"
+                    % (theme.glyph("dot"), interval, theme.glyph("dot"),
+                       theme.glyph("dot"),
+                       theme.secondary("Plaivid CLI v" + __version__)))))
                 tick += 1
                 if not sys.stdin.isatty():
                     if prev is not None:
