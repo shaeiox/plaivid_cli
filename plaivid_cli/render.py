@@ -10,6 +10,7 @@ import shutil
 
 from . import theme
 from .theme import BOX
+from .version import __version__
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -65,7 +66,8 @@ def frame(title, lines, color_fn=theme.muted):
 # --- banner ------------------------------------------------------------------
 def banner():
     bar = theme.secondary("▀" * 3) if theme._unicode else "###"
-    title = theme.bold(theme.primary("Plaivid")) + theme.secondary(" CLI")
+    title = (theme.bold(theme.primary("Plaivid")) + theme.secondary(" CLI")
+             + theme.muted("  v" + __version__))
     sub = theme.muted("  PVM virtual-machine control")
     return "\n%s %s\n%s\n" % (bar, title, sub)
 
