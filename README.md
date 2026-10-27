@@ -32,6 +32,7 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 ./plaivid list            # one-shot: print the dashboard
 ./plaivid status          # one-shot: refresh + dashboard
 ./plaivid overview        # live monitoring (CPU, load, mem, network, storage)
+./plaivid show Hadi-New    # one-shot: detailed view of one VM
 ./plaivid stop Hadi-New    # one-shot: run an action by name
 ./plaivid start 12         # ... or by the index shown in the list
 ```
@@ -42,6 +43,7 @@ Inside the TUI:
 | --- | --- |
 | `list` / `ls` / `refresh` | reload VMs + host status |
 | `overview` / `mon` | live monitoring page (auto-refresh; `q` / Ctrl-C to exit) |
+| `show` / `detail` `<id\|name>` | detailed view of one VM (disks, NICs, console) |
 | `status` | refresh and show host monitoring |
 | `<action> <id|name>` | e.g. `stop 3`, `start Hadi-New`, `kill web-01` |
 | `help` / `?` | list commands and actions |
