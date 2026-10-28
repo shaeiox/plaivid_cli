@@ -15,6 +15,20 @@ class TuiEntryTests(unittest.TestCase):
             self.assertEqual(orchestrator.main(["--tui"]), 7)
         self.assertEqual(run.call_count, 3)
 
+    def test_escape_sequences_are_consumed_without_leaking_input_bytes(self):
+        app = orchestrator.App()
+
+        def available(streams, _write, _errors, _timeout):
+            stream = streams[0]
+            return ([stream] if stream.tell() < len(stream.getvalue()) else [], [], [])
+
+        for sequence, expected in (("[6~tail", "[6~"),
+                                   ("OAcommand", "OA"),
+                                   ("[5;2~text", "[5;2~")):
+            stream = io.StringIO(sequence)
+            self.assertEqual(app._read_escape_sequence(available, stream), expected)
+            self.assertEqual(stream.read(), sequence[len(expected):])
+
     def test_fullscreen_buffer_and_cursor_are_restored(self):
         output = io.StringIO()
         output.isatty = lambda: True

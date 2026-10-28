@@ -9,6 +9,18 @@ from plaivid_cli.orchestrator import App
 
 
 class DashboardTests(unittest.TestCase):
+    def test_compact_height_mode_preserves_inventory_and_drops_rail(self):
+        vm = VM("a" * 36, "test-vm")
+        vm.state = "started"
+        vm.index = 1
+        output = render.dashboard({}, [vm], compact=True)
+        self.assertIn("test-vm", output)
+        self.assertIn("Commands:", output)
+        self.assertNotIn("SELECTED VM", output)
+        with mock.patch.object(render, "term_width", return_value=100):
+            self.assertLessEqual(max(render._vis(line) for line in
+                                     render.dashboard({}, [vm], compact=True).splitlines()), 100)
+
     def test_page_scroll_moves_by_viewport_and_never_goes_negative(self):
         app = App()
         terminal = type("Terminal", (), {"lines": 20})()

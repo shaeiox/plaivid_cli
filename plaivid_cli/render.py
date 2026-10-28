@@ -253,7 +253,8 @@ def _sparkline(values, width=12):
 
 
 def dashboard(info, vms, sort_label=None, status="", selected=None,
-              cpu_history=None, load_history=None, refreshed="on demand"):
+              cpu_history=None, load_history=None, refreshed="on demand",
+              compact=False):
     """Responsive dashboard layout, composed only from already-loaded data."""
     import datetime
 
@@ -277,7 +278,8 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
     # Seven concise metric cards. Host uptime/network rates are intentionally
     # absent here: the main refresh endpoint does not supply those values.
     total_width = screen
-    card_columns = (7 if screen >= 140 else
+    card_columns = (7 if compact and screen >= 90 else
+                    7 if screen >= 140 else
                     4 if screen >= 90 else 2 if screen >= 45 else 1)
     card_width = (total_width - gap * (card_columns - 1)) // card_columns
     host_lines = [theme.bold(info.get("name") or "unknown"),
@@ -318,7 +320,7 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
     # rows rather than squeezing the wide table columns into unreadable shards.
     rail_width = max(26, min(34, screen // 4))
     left_width = screen - rail_width - gap
-    if screen < 120:
+    if compact or screen < 120:
         left_width, rail_width = screen, 0
     context_width = rail_width or screen
     title_sort = "Sorted by " + (sort_label or "default order")
@@ -386,6 +388,8 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
         "kill <id/name>    Force stop", "reset <id/name>   Reset VM",
         "pause/resume      VM state action",
     ], context_width, theme.secondary))
+    if compact:
+        rail = []
     rail_lines = []
     if rail_width:
         # Stack the right-rail panels within a single responsive column.
@@ -429,15 +433,24 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
               theme.error("● off      powered off"),
               "VMs %d total | %d running | %d stopped | %d off" %
               (len(vms), running, stopped, off)]
-    footer_panels = [
-        _panel("COMMANDS", commands, col_width, theme.secondary),
-        _panel("VM ACTIONS", actions_help, col_width, theme.secondary),
-        _panel("STATUS LEGEND", legend,
-               screen - (footer_columns - 1) * (col_width + col_gap),
-               theme.primary),
-    ]
-    for i in range(0, len(footer_panels), footer_columns):
-        lines.extend(_hstack(footer_panels[i:i + footer_columns], gap=col_gap))
+    if compact:
+        compact_help = ("Commands: list/status, sort, overview, health, show, log, help, quit"
+                        " | VM actions: start, stop, kill, reset, pause, resume")
+        compact_legend = ("States: started %d | stopped %d | off %d | total %d" %
+                          (running, stopped, off, len(vms)))
+        for text in (compact_help, compact_legend):
+            lines.extend(textwrap.wrap(text, width=screen,
+                                       break_long_words=True))
+    else:
+        footer_panels = [
+            _panel("COMMANDS", commands, col_width, theme.secondary),
+            _panel("VM ACTIONS", actions_help, col_width, theme.secondary),
+            _panel("STATUS LEGEND", legend,
+                   screen - (footer_columns - 1) * (col_width + col_gap),
+                   theme.primary),
+        ]
+        for i in range(0, len(footer_panels), footer_columns):
+            lines.extend(_hstack(footer_panels[i:i + footer_columns], gap=col_gap))
     if status:
         lines.append(status)
     host = info.get("name") or "PVM"

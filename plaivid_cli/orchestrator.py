@@ -105,12 +105,14 @@ class App(object):
         if self.sort_key:
             sort_label = "%s %s" % (self.sort_key,
                                     "↓" if self.sort_desc else "↑")
+        is_tty = sys.stdin.isatty() and sys.stdout.isatty()
+        rows = shutil.get_terminal_size((100, 24)).lines if is_tty else 24
         dashboard = render.dashboard(
-            self.host, self.vms, sort_label, self.status)
-        if not sys.stdout.isatty():
+            self.host, self.vms, sort_label, self.status,
+            compact=is_tty and rows <= 40)
+        if not is_tty:
             print(render.center(dashboard))
             return
-        rows = shutil.get_terminal_size((100, 24)).lines
         page_size = max(4, rows - 4)  # reserve a line for the hint and one for input
         all_lines = dashboard.splitlines()
         max_offset = max(0, len(all_lines) - page_size)
@@ -388,6 +390,31 @@ class App(object):
         page = max(4, rows - 4)
         self.scroll_offset = max(0, self.scroll_offset + direction * page)
 
+    def _read_escape_sequence(self, select_fn, stream):
+        """Consume a complete CSI/SS3 key sequence so bytes never enter input."""
+        ready, _, _ = select_fn([stream], [], [], 0.20)
+        if not ready:
+            return ""
+        first = stream.read(1)
+        if first == "O":                 # SS3 cursor keys: ESC O A/B
+            ready, _, _ = select_fn([stream], [], [], 0.20)
+            return "O" + (stream.read(1) if ready else "")
+        if first != "[":
+            return ""                     # consume unsupported escape prefix
+        sequence = "["
+        # CSI parameters/intermediates continue until a final byte (0x40-0x7e).
+        for _ in range(16):
+            ready, _, _ = select_fn([stream], [], [], 0.25)
+            if not ready:
+                break
+            char = stream.read(1)
+            if not char:
+                break
+            sequence += char
+            if "@" <= char <= "~":
+                break
+        return sequence
+
     def _read_command(self):
         """Read a command while allowing PageUp/PageDown to scroll the screen."""
         if not sys.stdin.isatty():
@@ -413,25 +440,17 @@ class App(object):
                 if not char:
                     return None
                 if char == "\x1b":
-                    sequence = ""
-                    while len(sequence) < 5:
-                        ready, _, _ = select.select([sys.stdin], [], [], 0.04)
-                        if not ready:
-                            break
-                        sequence += sys.stdin.read(1)
-                        if sequence.endswith("~") or sequence.endswith("A") \
-                                or sequence.endswith("B"):
-                            break
-                    if sequence == "[5~":
+                    sequence = self._read_escape_sequence(select.select, sys.stdin)
+                    if sequence in ("[5~", "[5;2~"):
                         self._scroll_page(-1)
                         self.draw()
-                    elif sequence == "[6~":
+                    elif sequence in ("[6~", "[6;2~"):
                         self._scroll_page(1)
                         self.draw()
-                    elif sequence == "[A" and self._history:
+                    elif sequence in ("[A", "OA") and self._history:
                         history_pos = max(0, history_pos - 1)
                         buffer = self._history[history_pos]
-                    elif sequence == "[B" and self._history:
+                    elif sequence in ("[B", "OB") and self._history:
                         history_pos = min(len(self._history), history_pos + 1)
                         buffer = (self._history[history_pos]
                                   if history_pos < len(self._history) else "")
