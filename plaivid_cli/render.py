@@ -130,24 +130,25 @@ def vm_table(vms):
         return frame("Virtual machines", [theme.muted("no VMs found")],
                      theme.secondary)
     running = sum(1 for v in vms if v.running)
-    cols = ("#", "", "NAME", "STATE", "VCPU", "MEM", "UPTIME", "UUID")
-    wn = max([len(v.name) for v in vms] + [4])
-    wn = min(wn, 30)
-    rows = [theme.muted("%-3s %s %-*s %-8s %4s %5s %-12s %s"
-            % ("#", " ", wn, "NAME", "STATE", "CPU", "MEM", "UPTIME", "UUID"))]
+    wn = min(max([len(v.name) for v in vms] + [4]), 30)
+    # Pad the PLAIN text first, then color it - padding a colored string
+    # counts the escape codes as width and collapses the columns.
+    fmt = "%-3s %s %-*s %-8s %4s %5s %-12s %-8s %s"
+    rows = [theme.muted(fmt % ("#", " ", wn, "NAME", "STATE", "CPU", "MEM",
+                               "UPTIME", "PID", "UUID"))]
     for v in vms:
         fn, gl = theme.state_style(v.state)
         name = v.name if len(v.name) <= wn else v.name[:wn - 1] + "…"
-        row = "%-3s %s %s %s %4s %5s %-12s %s" % (
-            theme.bold("%d" % v.index),
+        rows.append("%s %s %s %s %s %s %s %s %s" % (
+            theme.bold(str(v.index).ljust(3)),
             fn(gl),
-            _pad(fn(name), wn),
-            _pad(fn(v.state), 8),
-            theme.fg("%s" % (v.vcpu if v.vcpu is not None else "-")),
-            theme.fg(v.mem_human),
-            theme.muted(v.uptime or "-"),
-            theme.muted(v.uuid[:8]))
-        rows.append(row)
+            fn(name.ljust(wn)),
+            fn((v.state or "-").ljust(8)),
+            theme.fg(str(v.vcpu if v.vcpu is not None else "-").rjust(4)),
+            theme.fg(v.mem_human.rjust(5)),
+            theme.muted((v.uptime or "-").ljust(12)),
+            theme.accent(str(v.pid or "-").ljust(8)),
+            theme.muted(v.uuid)))
     title = "Virtual machines  %s  %s running / %s total" % (
         theme.glyph("dot"), theme.success(running), len(vms))
     return frame(title, rows, theme.secondary)
