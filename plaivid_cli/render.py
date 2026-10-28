@@ -125,7 +125,7 @@ def _right(s, n):
 
 
 # --- VM table ----------------------------------------------------------------
-def vm_table(vms):
+def vm_table(vms, sort_label=None):
     if not vms:
         return frame("Virtual machines", [theme.muted("no VMs found")],
                      theme.secondary)
@@ -133,13 +133,14 @@ def vm_table(vms):
     wn = min(max([len(v.name) for v in vms] + [4]), 30)
     # Pad the PLAIN text first, then color it - padding a colored string
     # counts the escape codes as width and collapses the columns.
-    fmt = "%-3s %s %-*s %-8s %4s %5s %-12s %-8s %s"
+    fmt = "%-3s %s %-*s %-8s %4s %5s %-12s %-8s %-6s %s"
     rows = [theme.muted(fmt % ("#", " ", wn, "NAME", "STATE", "CPU", "MEM",
-                               "UPTIME", "PID", "UUID"))]
+                               "UPTIME", "PID", "SPICE", "UUID"))]
     for v in vms:
         fn, gl = theme.state_style(v.state)
         name = v.name if len(v.name) <= wn else v.name[:wn - 1] + "…"
-        rows.append("%s %s %s %s %s %s %s %s %s" % (
+        port = str(v.port or "-").ljust(6)
+        rows.append("%s %s %s %s %s %s %s %s %s %s" % (
             theme.bold(str(v.index).ljust(3)),
             fn(gl),
             fn(name.ljust(wn)),
@@ -148,9 +149,12 @@ def vm_table(vms):
             theme.fg(v.mem_human.rjust(5)),
             theme.muted((v.uptime or "-").ljust(12)),
             theme.accent(str(v.pid or "-").ljust(8)),
+            theme.accent(port) if v.running else theme.muted(port),
             theme.muted(v.uuid)))
     title = "Virtual machines  %s  %s running / %s total" % (
         theme.glyph("dot"), theme.success(running), len(vms))
+    if sort_label:
+        title += "  %s  sorted by %s" % (theme.glyph("dot"), sort_label)
     return frame(title, rows, theme.secondary)
 
 

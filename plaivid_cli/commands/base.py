@@ -7,6 +7,8 @@ A command module is a self-contained file that defines:
     USAGE       str   - short usage shown in help (optional; defaults to NAME)
     DESCRIPTION str   - one-line help
     ORDER       int   - sort order in help/menus
+    COMPLETE    list  - Tab-completion words for the argument (optional;
+                        defaults to VM names / indexes)
     run(ctx, args) -> CONTINUE | EXIT
 
 ``run`` receives a ``CommandContext`` (a stable, narrow view of the app) and
@@ -86,6 +88,15 @@ class CommandContext(object):
 
     def wait_or_quit(self, interval):
         return self._app._wait_or_quit(interval)
+
+    # --- VM list ordering ---------------------------------------------------
+    def get_sort(self):
+        return self._app.sort_key, self._app.sort_desc
+
+    def set_sort(self, key, desc=False):
+        """Set the VM-list order (kept across refreshes) and apply it now."""
+        self._app.sort_key, self._app.sort_desc = key, desc
+        self._app.vms = vms.sort_vms(self._app.vms, key, desc)
 
     # --- VM resolution ------------------------------------------------------
     def resolve(self, selector):

@@ -79,6 +79,9 @@ def list_all(token):
             vm.state = machine.findtext("cluster/cluster_status/status") \
                 or "unknown"
             vm.vcpu = _vcpu_count(machine.find("hardware/cpu"))
+            # configured console (SPICE) port; a running VM's live port from
+            # pvm-running-vms overrides this during enrichment
+            vm.port = machine.findtext("hardware/console/port") or None
             mem = machine.findtext("hardware/memory/size")
             try:
                 vm.mem_mb = int(mem) if mem else None
@@ -144,6 +147,55 @@ def inventory(token):
     for i, vm in enumerate(vms, 1):
         vm.index = i
     return vms
+
+
+def _uptime_secs(uptime):
+    """Parse D-HH:MM:SS / HH:MM:SS / MM:SS into seconds (-1 if unknown)."""
+    if not uptime:
+        return -1
+    try:
+        days = 0
+        if "-" in uptime:
+            d, uptime = uptime.split("-", 1)
+            days = int(d)
+        parts = [int(p) for p in uptime.split(":")]
+        while len(parts) < 3:
+            parts.insert(0, 0)
+        h, m, s = parts[-3:]
+        return days * 86400 + h * 3600 + m * 60 + s
+    except ValueError:
+        return -1
+
+
+def _num(value):
+    s = str(value or "")
+    return int(s) if s.isdigit() else -1
+
+
+def _default_order(v):
+    return (0 if v.running else 1, v.name.lower())
+
+
+SORT_KEYS = {
+    "index": _default_order,
+    "name": lambda v: v.name.lower(),
+    "state": lambda v: (0 if v.running else 1, v.state or ""),
+    "cpu": lambda v: v.vcpu or 0,
+    "mem": lambda v: v.mem_mb or 0,
+    "uptime": lambda v: _uptime_secs(v.uptime),
+    "pid": lambda v: _num(v.pid),
+    "port": lambda v: _num(v.port),
+    "uuid": lambda v: v.uuid,
+}
+
+
+def sort_vms(vms, key=None, desc=False):
+    """Return VMs sorted by ``key`` and re-indexed in display order, so an
+    index typed by the user always matches the row they see."""
+    out = sorted(vms, key=SORT_KEYS.get(key) or _default_order, reverse=desc)
+    for i, vm in enumerate(out, 1):
+        vm.index = i
+    return out
 
 
 def _fmt_elapsed(secs):

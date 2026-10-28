@@ -28,6 +28,7 @@ class _Command(object):
         self.description = getattr(module, "DESCRIPTION", "")
         self.usage = getattr(module, "USAGE", module.NAME)
         self.order = int(getattr(module, "ORDER", 100))
+        self.complete = list(getattr(module, "COMPLETE", []))
 
     def run(self, ctx, args):
         return self.module.run(ctx, args)

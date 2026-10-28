@@ -38,6 +38,8 @@ class App(object):
         self.vms = []
         self.host = {}
         self.status = ""
+        self.sort_key = None      # VM-list order, set by the `sort` command
+        self.sort_desc = False
         self.cmd_ctx = commands.CommandContext(self)
 
     # --- session ------------------------------------------------------------
@@ -69,7 +71,8 @@ class App(object):
         except transport.TransportError as exc:
             self.host = {"error": str(exc)}
         try:
-            self.vms = vms.inventory(self.ctx.token)
+            self.vms = vms.sort_vms(vms.inventory(self.ctx.token),
+                                    self.sort_key, self.sort_desc)
         except transport.TransportError as exc:
             self.vms = []
             self.status = render.err("Could not list VMs: %s" % exc)
@@ -83,7 +86,11 @@ class App(object):
         self._clear()
         print(render.center(render.banner()))
         print(render.center(render.host_panel(self.host)))
-        print(render.center(render.vm_table(self.vms)))
+        sort_label = None
+        if self.sort_key:
+            sort_label = "%s %s" % (self.sort_key,
+                                    "↓" if self.sort_desc else "↑")
+        print(render.center(render.vm_table(self.vms, sort_label)))
         if self.status:
             print()
             print(render.center(self.status))
@@ -253,7 +260,12 @@ class App(object):
             return None
         try:
             preceding = readline.get_line_buffer()[:readline.get_begidx()].split()
-            vocab = self._command_vocab() if not preceding else self._selector_vocab()
+            if not preceding:
+                vocab = self._command_vocab()
+            else:
+                # a command may declare its own argument words (e.g. sort fields)
+                cmd = commands.get(preceding[0])
+                vocab = cmd.complete if (cmd and cmd.complete) else self._selector_vocab()
             tl = text.lower()
             cands = sorted(set(v for v in vocab if v.lower().startswith(tl)))
             return cands[state] if state < len(cands) else None
