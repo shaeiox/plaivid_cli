@@ -112,31 +112,22 @@ def inventory(token):
     vms = list_all(token)
     by_uuid = dict((v.uuid.lower(), v) for v in vms)
 
-    # pvm-running-vms is the authority for which VMs actually have a live qemu
-    # process (and their uptime). The object store can mark a VM "started"
-    # before/without a running process, which would otherwise show a running
-    # VM with a blank uptime - so we reconcile against the live list.
+    # The object store's cluster_status is authoritative for VM state. We only
+    # ENRICH running VMs with live pid / uptime / port from pvm-running-vms;
+    # we never override the state with it (it can be empty or lag behind).
     try:
-        running = list_running()
-    except transport.TransportError:
-        running = None            # can't enrich; keep stored state as-is
-
-    if running is not None:
-        live = set()
-        for r in running:
+        for r in list_running():
             vm = by_uuid.get(r["uuid"])
             if vm is None:
                 vm = VM(r["uuid"], r["name"])
                 vm.vcpu, vm.mem_mb = r["vcpu"], r["mem_mb"]
                 vms.append(vm)
                 by_uuid[r["uuid"]] = vm
-            vm.state = "started"
+            if not vm.running:
+                vm.state = "started"
             vm.pid, vm.uptime, vm.port = r["pid"], r["uptime"], r["port"]
-            live.add(vm.uuid.lower())
-        # stored "started" but no live process = transitioning, not up
-        for vm in vms:
-            if vm.uuid.lower() not in live and vm.state in ("started", "running"):
-                vm.state = "starting"
+    except transport.TransportError:
+        pass  # inventory still usable without live enrichment
 
     vms.sort(key=lambda v: (0 if v.running else 1, v.name.lower()))
     for i, vm in enumerate(vms, 1):
