@@ -5,9 +5,22 @@ from unittest import mock
 
 from plaivid_cli import render
 from plaivid_cli.vms import VM
+from plaivid_cli.orchestrator import App
 
 
 class DashboardTests(unittest.TestCase):
+    def test_page_scroll_moves_by_viewport_and_never_goes_negative(self):
+        app = App()
+        terminal = type("Terminal", (), {"lines": 20})()
+        with mock.patch("plaivid_cli.orchestrator.shutil.get_terminal_size",
+                        return_value=terminal):
+            app._scroll_page(-1)
+            self.assertEqual(app.scroll_offset, 0)
+            app._scroll_page(1)
+            self.assertEqual(app.scroll_offset, 16)
+            app._scroll_page(-1)
+            self.assertEqual(app.scroll_offset, 0)
+
     def test_uptime_format_and_long_box_content(self):
         self.assertEqual(render.format_uptime(0), "0s")
         self.assertEqual(render.format_uptime(604800 + 86400 + 3661),
@@ -50,7 +63,7 @@ class DashboardTests(unittest.TestCase):
         agg = {"total": 1, "running": 1, "stopped": 0, "off": 0,
                "vcpu_run": 2, "vcpu_total": 2, "mem_run_mb": 2048,
                "mem_total_mb": 2048}
-        for width in (80, 120):
+        for width in (20, 30, 40, 80, 120):
             with mock.patch.object(render, "term_width", return_value=width):
                 output = render.overview(snap, None, {}, agg, "*")
             self.assertIn("LIVE OVERVIEW", output)
@@ -59,7 +72,8 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("STORAGE", output)
             self.assertIn("8 logical cores", output)
             self.assertIn("4 physical cores", output)
-            self.assertIn("1m: 0.10  5m: 0.20", output)
+            self.assertIn("1m: 0.10", output)
+            self.assertIn("0.20", output)
             self.assertIn("15m: 0.30", output)
             self.assertIn("Host 1d 1h 1m 1s", output)
             self.assertIn("sballd 1h 1m 1s", output)
@@ -70,7 +84,7 @@ class DashboardTests(unittest.TestCase):
         vm = VM("abcd-uuid", "test-vm")
         vm.state = "off"
         vm.index = 1
-        for width in (60, 80, 100, 120, 160):
+        for width in (20, 30, 40, 44, 45, 54, 55, 60, 80, 100, 120, 160):
             with mock.patch.object(render, "term_width", return_value=width):
                 output = render.dashboard({}, [vm])
             self.assertIn("SELECTED VM", output)

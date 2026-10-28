@@ -7,6 +7,7 @@ raises, the orchestrator catches it, shows a message, and keeps running.
 """
 
 import getpass
+import shutil
 import sys
 import time
 
@@ -40,6 +41,8 @@ class App(object):
         self.status = ""
         self.sort_key = None      # VM-list order, set by the `sort` command
         self.sort_desc = False
+        self.scroll_offset = 0
+        self._history = []
         self.cmd_ctx = commands.CommandContext(self)
 
     # --- session ------------------------------------------------------------
@@ -88,8 +91,23 @@ class App(object):
         if self.sort_key:
             sort_label = "%s %s" % (self.sort_key,
                                     "↓" if self.sort_desc else "↑")
-        print(render.center(render.dashboard(
-            self.host, self.vms, sort_label, self.status)))
+        dashboard = render.dashboard(
+            self.host, self.vms, sort_label, self.status)
+        if not sys.stdout.isatty():
+            print(render.center(dashboard))
+            return
+        rows = shutil.get_terminal_size((100, 24)).lines
+        page_size = max(4, rows - 4)  # reserve a line for the hint and one for input
+        all_lines = dashboard.splitlines()
+        max_offset = max(0, len(all_lines) - page_size)
+        self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
+        visible = all_lines[self.scroll_offset:self.scroll_offset + page_size]
+        if max_offset and visible:
+            page = self.scroll_offset // page_size + 1
+            pages = (len(all_lines) + page_size - 1) // page_size
+            visible.append(render.hint(
+                "Page %d/%d  |  Page Up / Page Down to scroll" % (page, pages)))
+        print(render.center("\n".join(visible)))
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):
@@ -319,6 +337,122 @@ class App(object):
                 print()
         self.status = render.hint(note)
 
+    def _complete_buffer(self, buffer):
+        """Simple prefix completion for the built-in raw terminal editor."""
+        parts = buffer.split()
+        if not parts:
+            token = ""
+            vocab = self._command_vocab()
+        elif len(parts) == 1 and not buffer.endswith(" "):
+            token = parts[0]
+            vocab = self._command_vocab()
+        else:
+            token = "" if buffer.endswith(" ") else parts[-1]
+            command = commands.get(parts[0])
+            vocab = (command.complete if command and command.complete
+                     else self._selector_vocab())
+        matches = sorted(set(value for value in vocab
+                             if value.lower().startswith(token.lower())))
+        if not matches:
+            return buffer
+        prefix = matches[0]
+        for candidate in matches[1:]:
+            common = 0
+            while common < min(len(prefix), len(candidate)) and \
+                    prefix[common].lower() == candidate[common].lower():
+                common += 1
+            prefix = prefix[:common]
+        if len(parts) <= 1 and not buffer.endswith(" "):
+            return prefix
+        if buffer.endswith(" "):
+            return buffer + prefix
+        return buffer[:-len(token)] + prefix if token else buffer + prefix
+
+    def _scroll_page(self, direction):
+        """Move one viewport page up (-1) or down (+1)."""
+        rows = shutil.get_terminal_size((100, 24)).lines
+        page = max(4, rows - 4)
+        self.scroll_offset = max(0, self.scroll_offset + direction * page)
+
+    def _read_command(self):
+        """Read a command while allowing PageUp/PageDown to scroll the screen."""
+        if not sys.stdin.isatty():
+            return input(self._prompt())
+        try:
+            import select
+            import termios
+            import tty
+        except ImportError:
+            return input(self._prompt())
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        buffer = ""
+        history_pos = len(self._history)
+        prompt = self._prompt()
+        try:
+            tty.setraw(fd)
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            while True:
+                char = sys.stdin.read(1)
+                if not char:
+                    return None
+                if char == "\x1b":
+                    sequence = ""
+                    while len(sequence) < 5:
+                        ready, _, _ = select.select([sys.stdin], [], [], 0.04)
+                        if not ready:
+                            break
+                        sequence += sys.stdin.read(1)
+                        if sequence.endswith("~") or sequence.endswith("A") \
+                                or sequence.endswith("B"):
+                            break
+                    if sequence == "[5~":
+                        self._scroll_page(-1)
+                        self.draw()
+                    elif sequence == "[6~":
+                        self._scroll_page(1)
+                        self.draw()
+                    elif sequence == "[A" and self._history:
+                        history_pos = max(0, history_pos - 1)
+                        buffer = self._history[history_pos]
+                    elif sequence == "[B" and self._history:
+                        history_pos = min(len(self._history), history_pos + 1)
+                        buffer = (self._history[history_pos]
+                                  if history_pos < len(self._history) else "")
+                    sys.stdout.write("\r\033[2K" + prompt + buffer)
+                    sys.stdout.flush()
+                    continue
+                if char in ("\r", "\n"):
+                    sys.stdout.write("\r\n")
+                    sys.stdout.flush()
+                    if buffer.strip():
+                        self._history.append(buffer)
+                    self.scroll_offset = 0
+                    return buffer
+                if char == "\x03":
+                    raise KeyboardInterrupt
+                if char == "\x04":
+                    return None if not buffer else buffer
+                if char in ("\x7f", "\b"):
+                    if buffer:
+                        buffer = buffer[:-1]
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                if char == "\t":
+                    buffer = self._complete_buffer(buffer)
+                    sys.stdout.write("\r\033[2K" + prompt + buffer)
+                    sys.stdout.flush()
+                    continue
+                if char.isprintable():
+                    buffer += char
+                    sys.stdout.write(char)
+                    sys.stdout.flush()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
     # --- entry points -------------------------------------------------------
     def run_interactive(self):
         if not self.ensure_session():
@@ -328,8 +462,10 @@ class App(object):
         while True:
             self.draw()
             try:
-                print()
-                line = input(self._prompt())
+                line = self._read_command()
+                if line is None:
+                    print()
+                    break
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
