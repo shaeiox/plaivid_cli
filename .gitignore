@@ -1,0 +1,37 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Caches
+*.cache
+.cache/
+
+# Virtual environments
+.env
+.venv
+venv/
+ENV/
+
+# Environment variables / secrets
+.env
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# State (session tokens) - never commit
+plaivid_cli/.state/
+.plaivid/
