@@ -84,23 +84,12 @@ class App(object):
 
     def draw(self):
         self._clear()
-        print(render.center(render.banner()))
-        print(render.center(render.host_panel(self.host)))
         sort_label = None
         if self.sort_key:
             sort_label = "%s %s" % (self.sort_key,
                                     "↓" if self.sort_desc else "↑")
-        print(render.center(render.vm_table(self.vms, sort_label)))
-        if self.status:
-            print()
-            print(render.center(self.status))
-        print()
-        dot = theme.glyph("dot")
-        print(render.center(render.hint(
-            "actions: %s   %s   Tab completes   %s   help   %s   quit   %s   %s" % (
-                ", ".join(a.name for a in actions.all_actions()),
-                dot, dot, dot, dot,
-                theme.secondary("Plaivid CLI v" + __version__)))))
+        print(render.center(render.dashboard(
+            self.host, self.vms, sort_label, self.status)))
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):

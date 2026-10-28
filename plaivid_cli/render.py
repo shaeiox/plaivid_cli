@@ -159,6 +159,48 @@ def vm_table(vms, sort_label=None):
 
 
 # --- messages ----------------------------------------------------------------
+def dashboard(info, vms, sort_label=None, status=""):
+    """Compose the interactive dashboard without touching application state.
+
+    This intentionally uses only data already loaded by the orchestrator: the
+    renderer must not introduce extra API calls or change action semantics.
+    """
+    running = sum(1 for vm in vms if vm.running)
+    stopped = sum(1 for vm in vms if vm.state == "stopped")
+    off = sum(1 for vm in vms if vm.state == "off")
+    header = (theme.muted("[?] Help    [/] Search    [r] Refresh    [q] Quit")
+              + "    " + theme.secondary("PVM virtual-machine control"))
+    parts = [banner().rstrip(), header, host_panel(info),
+             vm_table(vms, sort_label)]
+
+    # Selected VM follows the displayed ordering and is informational only.
+    if vms:
+        vm = vms[0]
+        state_fn, state_glyph = theme.state_style(vm.state)
+        detail = [
+            "%s %s    %s" % (state_fn(state_glyph), theme.bold(vm.name),
+                              state_fn(vm.state)),
+            "vCPU: %s    Memory: %s    PID: %s" % (
+                vm.vcpu if vm.vcpu is not None else "-", vm.mem_human,
+                vm.pid or "-"),
+            "Uptime: %s    SPICE: %s" % (vm.uptime or "-", vm.port or "-"),
+            "UUID: %s" % (vm.uuid or "-"),
+        ]
+        parts.append(frame("Selected VM", detail, theme.primary))
+
+    if status:
+        parts.append(status)
+    legend = ("VMs: %s total   %s running   %s stopped   %s off" % (
+        len(vms), theme.success(str(running)), theme.warning(str(stopped)),
+        theme.error(str(off))))
+    commands = ("Commands: list/status  sort  overview  health  show <id|name>  "
+                "log [N]  help  quit    |    Actions: start stop kill reset pause resume")
+    parts.extend([frame("Commands & status", [commands, legend], theme.secondary),
+                  theme.muted("Connected session  |  Data refreshed on demand  |  "
+                              "Plaivid CLI v" + __version__)])
+    return "\n".join(parts)
+
+
 def ok(msg):
     return theme.success(theme.glyph("ok") + " ") + msg
 
