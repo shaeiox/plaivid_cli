@@ -667,8 +667,11 @@ def vm_management_page(host, page_vms, page, total_pages, page_size,
         status_line += status_right
     lines.append(theme.primary(status_line[:screen]))
 
-    # Clip every line to screen width (respecting ANSI escapes)
-    return [_clip(line, screen) for line in lines]
+    # Clip every line to screen width (respecting ANSI escapes), then wrap
+    # the whole VM management page in a terminal-width box for better UI.
+    clipped = [_clip(line, screen) for line in lines]
+    framed = frame("Virtual Machines", clipped, theme.secondary)
+    return framed.split("\n")
 
 
 def _clip(line, width):

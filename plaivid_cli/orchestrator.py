@@ -59,6 +59,8 @@ class App(object):
         self.vm_cursor = 0          # cursor row within current page (0-based)
         self.vm_search = ""         # live search filter
         self.content_offset = 0     # scrollable content viewport offset
+        self.vm_action_mode = False  # typing a VM action command in the VM page
+        self.vm_action_buffer = ""  # buffer for the VM action command
 
     # --- session ------------------------------------------------------------
     def _prompt_credentials(self):
@@ -366,6 +368,26 @@ class App(object):
                 buffer += key
             # ignore all other keys while typing the search
 
+    def _read_vm_action_input(self):
+        """Read a VM action command from the VM page, char by char.
+
+        Returns the final command string, or None if cancelled with Esc.
+        """
+        buffer = self.vm_action_buffer
+        while True:
+            self.vm_action_buffer = buffer
+            self.draw_vm_management()
+            key = self._read_vm_key()
+            if key == "ENTER" or key is None:
+                return buffer
+            if key == "ESC":
+                return None
+            if key == "BACKSPACE":
+                buffer = buffer[:-1]
+            elif len(key) == 1 and key.isprintable():
+                buffer += key
+            # ignore all other keys while typing
+
     def _handle_vm_key(self, key):
         """Handle one key in VM management mode. Returns False to exit."""
         if key in ("q", "ESC"):
@@ -402,6 +424,16 @@ class App(object):
                 self.vm_search = result
                 self.vm_page = 0
                 self.vm_cursor = 0
+        elif key == ":":
+            result = self._read_vm_action_input()
+            if result is not None and result.strip():
+                cmd_text = result.strip()
+                self.vm_action_buffer = ""
+                self.vm_action_mode = False
+                self.dispatch(cmd_text)
+            elif result is not None:
+                self.vm_action_buffer = ""
+                self.vm_action_mode = False
         # ENTER, BACKSPACE, and other printable keys are no-ops in browse mode.
         return True
 
@@ -886,12 +918,17 @@ class App(object):
                 if not char:
                     continue
                 if char in ("\r", "\n"):
-                    sys.stdout.write("\r\n")
-                    sys.stdout.flush()
                     if buffer.strip():
                         self._history.append(buffer)
+                        self.scroll_offset = 0
+                        sys.stdout.write("\r\n")
+                        sys.stdout.flush()
+                        return buffer
+                    # empty input: move to a new line and accept it, no submit
                     self.scroll_offset = 0
-                    return buffer
+                    sys.stdout.write("\r\n")
+                    sys.stdout.flush()
+                    return ""
                 if char == "\x03":
                     raise KeyboardInterrupt
                 if char == "\x04":
