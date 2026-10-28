@@ -7,6 +7,7 @@ Two data sources are merged:
     and the automatic uuid discovery the requirements ask for.
 """
 
+import os
 import re
 
 from . import transport
@@ -129,10 +130,63 @@ def inventory(token):
     except transport.TransportError:
         pass  # inventory still usable without live enrichment
 
+    # Fallback: any running VM still without an uptime gets it straight from
+    # its qemu process in /proc, so uptime never depends on pvm-running-vms.
+    missing = [v for v in vms if v.running and not v.uptime]
+    if missing:
+        procs = proc_uptimes()
+        for v in missing:
+            hit = procs.get(v.uuid.lower())
+            if hit:
+                v.pid, v.uptime = hit
+
     vms.sort(key=lambda v: (0 if v.running else 1, v.name.lower()))
     for i, vm in enumerate(vms, 1):
         vm.index = i
     return vms
+
+
+def _fmt_elapsed(secs):
+    """Format seconds like pvm-running-vms: D-HH:MM:SS, HH:MM:SS or MM:SS."""
+    secs = int(max(0, secs))
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, sec = divmod(rem, 60)
+    if days:
+        return "%d-%02d:%02d:%02d" % (days, hours, mins, sec)
+    if hours:
+        return "%02d:%02d:%02d" % (hours, mins, sec)
+    return "%02d:%02d" % (mins, sec)
+
+
+def proc_uptimes():
+    """{uuid: (pid, uptime)} for every qemu process visible in /proc.
+
+    Reads each process's cmdline for ``-uuid <uuid>`` and its start time from
+    /proc/<pid>/stat. Returns {} where /proc is unavailable (e.g. Windows).
+    """
+    found = {}
+    try:
+        tick = float(os.sysconf("SC_CLK_TCK"))
+        with open("/proc/uptime") as fh:
+            sys_up = float(fh.read().split()[0])
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except (OSError, ValueError, AttributeError):
+        return found
+    for pid in pids:
+        try:
+            with open("/proc/%s/cmdline" % pid, "rb") as fh:
+                args = fh.read().split(b"\0")
+            if b"-uuid" not in args:
+                continue
+            uuid = args[args.index(b"-uuid") + 1].decode("ascii").lower()
+            with open("/proc/%s/stat" % pid) as fh:
+                fields = fh.read().rsplit(")", 1)[1].split()
+            started = float(fields[19]) / tick   # field 22: starttime (ticks)
+            found[uuid] = (pid, _fmt_elapsed(sys_up - started))
+        except (OSError, ValueError, IndexError, UnicodeDecodeError):
+            continue
+    return found
 
 
 def aggregate(vms):
