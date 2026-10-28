@@ -65,8 +65,9 @@ All modules live under `plaivid_cli/`.
 | `monitoring.py` | Host/cluster status (CPU, RAM, disk, load) from `sball show`. | `host_status(token)` -> dict |
 | `theme.py` | Palette (gemini-cli 256-color), glyphs, rounded box parts, state styling, TTY/NO_COLOR detection. | `primary/accent/...`, `glyph()`, `BOX`, `state_style()` |
 | `render.py` | Pure presentation: banner, host panel, VM table, framed boxes, messages. Knows nothing about transport or state. | `banner()`, `host_panel()`, `vm_table()`, `frame()`, `width()`, `center()` |
-| `actions/` | One file per VM action, discovered by a registry with per-file error isolation. | `load()`, `get(name)`, `all_actions()`, `load_errors` |
-| `orchestrator.py` | The controller. Owns the session, the data refresh, the screen, input (readline + Tab completion), and command dispatch. The only module that imports all the others. | `App`, `main(argv)` |
+| `actions/` | One file per **VM action** (`run(ctx, vm)`), discovered by a registry with per-file error isolation. | `load()`, `get(name)`, `all_actions()`, `load_errors` |
+| `commands/` | One file per **TUI verb** (`run(ctx, args)`: overview, health, show, log, list, …), discovered the same way. A `CommandContext` facade gives each command a stable view of the app. | `load()`, `get(name)`, `all_commands()`, `CommandContext`, `CONTINUE/EXIT` |
+| `orchestrator.py` | The controller. Owns the session, data refresh, screen and input (readline + Tab completion). Dispatch is registry-first (commands, then actions); help and completion are derived from both registries, so adding a file is all it takes to add behavior. | `App`, `main(argv)` |
 
 Dependency direction (arrows = "imports"):
 

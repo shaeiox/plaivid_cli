@@ -7,7 +7,6 @@ raises, the orchestrator catches it, shows a message, and keeps running.
 """
 
 import getpass
-import os
 import sys
 import time
 
@@ -16,7 +15,7 @@ try:
 except ImportError:
     readline = None
 
-from . import (actions, config, logs, monitoring, render, session, theme,
+from . import (actions, commands, config, monitoring, render, session, theme,
                transport, vms)
 from .version import __version__
 
@@ -32,21 +31,6 @@ class Context(object):
         return self.session.token if self.session else None
 
 
-BUILTINS_HELP = [
-    ("list | ls | refresh", "reload the VM list and host status"),
-    ("overview | mon", "live monitoring: CPU, load, memory, network, storage"),
-    ("health | hc", "health & capacity summary (quorum, pressure, overcommit)"),
-    ("show <id|name>", "detailed view of one VM (disks, NICs, console)"),
-    ("log [N]", "audit log viewer + analyzer (recent actions)"),
-    ("status", "refresh and show host monitoring"),
-    ("<action> <targets>", "run an action; targets: id/name, a,b,c, or state:running / all"),
-    ("version | ver", "show the Plaivid CLI version"),
-    ("help | ?", "show this help"),
-    ("logout", "clear the saved session and exit"),
-    ("quit | q", "exit (keeps the session cached)"),
-]
-
-
 class App(object):
     def __init__(self):
         self.session = None
@@ -54,6 +38,7 @@ class App(object):
         self.vms = []
         self.host = {}
         self.status = ""
+        self.cmd_ctx = commands.CommandContext(self)
 
     # --- session ------------------------------------------------------------
     def _prompt_credentials(self):
@@ -112,49 +97,30 @@ class App(object):
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):
-        """Handle one command line. Returns False to exit."""
+        """Handle one command line. Returns False to exit.
+
+        Registry-first: a command from the ``commands/`` registry, then an
+        action from the ``actions/`` registry (the ``<action> <targets>``
+        form), else unknown. Nothing here is hard-coded per verb, so adding a
+        file to either package is all it takes to add behavior.
+        """
         parts = line.split()
         if not parts:
             return True
         cmd = parts[0].lower()
         rest = " ".join(parts[1:])
+        self.cmd_ctx.reset()
 
-        if cmd in ("quit", "q", "exit"):
-            return False
-        if cmd in ("help", "?", "h"):
-            self.status = self._help_text()
-            return True
-        if cmd in ("version", "ver", "--version", "-v"):
-            self.status = render.info(
-                "Plaivid CLI v%s   (Python %s)"
-                % (__version__, sys.version.split()[0]))
-            return True
-        if cmd in ("list", "ls", "l", "refresh", "r", "status", "s"):
-            self.refresh()
-            self.status = render.ok("Refreshed")
-            return True
-        if cmd in ("overview", "mon", "monitor", "live"):
-            self._overview()
-            return True
-        if cmd in ("show", "detail", "info"):
-            self._show_vm(rest)
-            return True
-        if cmd in ("log", "logs", "audit"):
-            self._show_log(rest)
-            return True
-        if cmd in ("health", "hc"):
-            self._show_health()
-            return True
-        if cmd == "logout":
-            session.logout(self.session)
-            print(render.ok("Session cleared."))
-            return False
+        command = commands.get(cmd)
+        if command is not None:
+            return command.run(self.cmd_ctx, rest) != commands.EXIT
 
         action = actions.get(cmd)
-        if action is None:
-            self.status = render.err("Unknown command '%s' (try: help)" % cmd)
+        if action is not None:
+            self._run_action(action, rest)
             return True
-        self._run_action(action, rest)
+
+        self.status = render.err("Unknown command '%s' (try: help)" % cmd)
         return True
 
     def _run_action(self, action, selector):
@@ -224,25 +190,6 @@ class App(object):
             return False
         return ans in ("y", "yes")
 
-    def _help_text(self):
-        lines = [theme.bold("Commands")]
-        for name, desc in BUILTINS_HELP:
-            lines.append("  %s  %s" % (theme.accent(render_ljust(name, 22)),
-                                       theme.muted(desc)))
-        lines.append("")
-        lines.append(theme.bold("VM actions") + theme.muted("  (by id number or name)"))
-        for a in actions.all_actions():
-            mark = theme.warning(" !") if a.destructive else "  "
-            lines.append("  %s%s %s" % (
-                theme.accent(render_ljust(a.name, 10)), mark,
-                theme.muted(a.description)))
-        if actions.load_errors:
-            lines.append("")
-            lines.append(theme.error("Disabled actions (failed to load):"))
-            for name, e in actions.load_errors.items():
-                lines.append("  " + theme.error("%s - %s" % (name, e)))
-        return "\n".join(lines)
-
     # --- input: line editing + Tab completion -------------------------------
     def _setup_readline(self):
         if readline is None:
@@ -285,8 +232,10 @@ class App(object):
             pass
 
     def _command_vocab(self):
-        vocab = ["list", "status", "refresh", "overview", "health", "show",
-                 "log", "version", "help", "logout", "quit"]
+        vocab = []
+        for c in commands.all_commands():
+            vocab.append(c.name)
+            vocab.extend(c.aliases)
         for a in actions.all_actions():
             vocab.append(a.name)
             vocab.extend(a.aliases)
@@ -327,55 +276,7 @@ class App(object):
                                                     theme.glyph("arrow"))
         return "%s%s " % (pad, theme.glyph("arrow"))
 
-    # --- live overview ------------------------------------------------------
-    _SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-    def _overview(self):
-        """Live monitoring page: refresh until the user presses q / Ctrl-C."""
-        try:
-            interval = max(1.0, float(os.environ.get("PLAIVID_REFRESH", "3")))
-        except ValueError:
-            interval = 3.0
-        try:
-            tapmap = vms.tap_map(self.ctx.token)
-        except transport.TransportError:
-            tapmap = {}
-        frames = self._SPIN if theme._unicode else "|/-\\"
-        prev = None
-        tick = 0
-        try:
-            while True:
-                snap = monitoring.metrics_snapshot(self.ctx.token)
-                try:
-                    self.vms = vms.inventory(self.ctx.token)
-                except transport.TransportError:
-                    pass
-                agg = vms.aggregate(self.vms)
-                spin = theme.primary(frames[tick % len(frames)])
-                self._clear()
-                print(render.center(render.overview(
-                    snap, prev, tapmap, agg, spin)))
-                print()
-                print(render.center(render.hint(
-                    "live monitoring  %s  refresh %gs  %s  q / Ctrl-C to exit"
-                    "  %s  %s"
-                    % (theme.glyph("dot"), interval, theme.glyph("dot"),
-                       theme.glyph("dot"),
-                       theme.secondary("Plaivid CLI v" + __version__)))))
-                tick += 1
-                if not sys.stdin.isatty():
-                    if prev is not None:
-                        break          # one-shot: second pass shows rates
-                    prev = snap
-                    time.sleep(1.0)
-                    continue
-                prev = snap
-                if not self._wait_or_quit(interval):
-                    break
-        except KeyboardInterrupt:
-            pass
-        self.status = render.hint("Exited live monitoring.")
-
+    # --- live-page helpers (used by page commands like overview) ------------
     def _wait_or_quit(self, interval):
         """Sleep up to ``interval``; return False if the user asked to quit."""
         if not sys.stdin.isatty():
@@ -405,27 +306,6 @@ class App(object):
                 pass
         return True
 
-    # --- VM detail ----------------------------------------------------------
-    def _show_vm(self, selector):
-        vm, errmsg = vms.resolve(self.vms, selector)
-        if vm is None:
-            self.status = render.err(errmsg)
-            return
-        try:
-            detail = vms.detail(self.ctx.token, vm)
-        except transport.TransportError as exc:
-            self.status = render.err("Could not read %s: %s" % (vm.name, exc))
-            return
-        self._clear()
-        print(render.center(render.vm_detail(detail)))
-        if sys.stdin.isatty():
-            try:
-                input("\n" + " " * render.margin()
-                      + theme.muted("press Enter to return "))
-            except (EOFError, KeyboardInterrupt):
-                print()
-        self.status = render.hint("Viewed %s" % vm.name)
-
     def _page(self, body, note):
         """Clear, print a page, wait for Enter on a TTY, set a status note."""
         self._clear()
@@ -437,32 +317,6 @@ class App(object):
             except (EOFError, KeyboardInterrupt):
                 print()
         self.status = render.hint(note)
-
-    # --- audit log ----------------------------------------------------------
-    def _show_log(self, arg):
-        limit = 40
-        if arg.strip().isdigit():
-            limit = max(1, min(int(arg.strip()), 500))
-        try:
-            entries = logs.recent(limit)
-        except logs.LogError as exc:
-            self.status = render.err("Log unavailable: %s" % exc)
-            return
-        summary = logs.summarize(entries)
-        self._page(render.log_view(entries, summary),
-                   "Audit log (%d actions)" % summary["total"])
-
-    # --- health & capacity --------------------------------------------------
-    def _show_health(self):
-        snap = monitoring.metrics_snapshot(self.ctx.token)
-        if snap.get("error"):
-            self.status = render.err("Health unavailable: %s" % snap["error"])
-            return
-        agg = vms.aggregate(self.vms)
-        lic = monitoring.license_info(self.ctx.token)
-        report = monitoring.health_report(snap, agg, lic, self.host)
-        self._page(render.health(report),
-                   "Health: %s" % report["verdict"].upper())
 
     # --- entry points -------------------------------------------------------
     def run_interactive(self):
@@ -489,31 +343,14 @@ class App(object):
         if not self.ensure_session():
             return 1
         self.refresh()
-        line = " ".join(args)
-        cmd = args[0].lower()
-        if cmd in ("list", "ls", "status", "s"):
+        self.dispatch(" ".join(args))
+        # A page command already drew itself; a dashboard command asked for a
+        # redraw; anything else leaves just a status line to print.
+        if self.cmd_ctx.redraw:
             self.draw()
-            return 0
-        if cmd in ("overview", "mon", "monitor", "live"):
-            self._overview()
-            return 0
-        if cmd in ("show", "detail", "info"):
-            self._show_vm(" ".join(args[1:]))
-            return 0
-        if cmd in ("log", "logs", "audit"):
-            self._show_log(" ".join(args[1:]))
-            return 0
-        if cmd in ("health", "hc"):
-            self._show_health()
-            return 0
-        self.dispatch(line)
-        # print just the resulting status line for scripting
-        print(self.status or render.ok("done"))
+        elif not self.cmd_ctx.rendered:
+            print(self.status or render.ok("done"))
         return 0
-
-
-def render_ljust(s, n):
-    return s + " " * max(0, n - len(s))
 
 
 def main(argv=None):
