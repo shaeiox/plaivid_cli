@@ -6,7 +6,9 @@ session, vms, monitoring, render, and each action file). If any one of those
 raises, the orchestrator catches it, shows a message, and keeps running.
 """
 
+import codecs
 import getpass
+import os
 import shutil
 import sys
 import time
@@ -84,14 +86,17 @@ class App(object):
     def _enter_fullscreen(self):
         """Take over the terminal screen until the interactive session exits."""
         if sys.stdin.isatty() and sys.stdout.isatty():
-            sys.stdout.write("\033[?1049h\033[?25l\033[2J\033[H")
+            # Use SGR mouse reporting so wheel events arrive as complete CSI
+            # sequences and can be consumed before command-line text handling.
+            sys.stdout.write("\033[?1049h\033[?25l\033[?1000h\033[?1006h"
+                             "\033[2J\033[H")
             sys.stdout.flush()
             self._fullscreen = True
 
     def _leave_fullscreen(self):
         """Restore the shell screen and cursor on every exit path."""
         if getattr(self, "_fullscreen", False):
-            sys.stdout.write("\033[?25h\033[?1049l")
+            sys.stdout.write("\033[?1006l\033[?1000l\033[?25h\033[?1049l")
             sys.stdout.flush()
             self._fullscreen = False
 
@@ -390,30 +395,59 @@ class App(object):
         page = max(4, rows - 4)
         self.scroll_offset = max(0, self.scroll_offset + direction * page)
 
-    def _read_escape_sequence(self, select_fn, stream):
-        """Consume a complete CSI/SS3 key sequence so bytes never enter input."""
-        ready, _, _ = select_fn([stream], [], [], 0.20)
-        if not ready:
-            return ""
-        first = stream.read(1)
-        if first == "O":                 # SS3 cursor keys: ESC O A/B
-            ready, _, _ = select_fn([stream], [], [], 0.20)
-            return "O" + (stream.read(1) if ready else "")
-        if first != "[":
-            return ""                     # consume unsupported escape prefix
+    def _read_escape_sequence(self, select_fn, fd, csi_started=False):
+        """Consume complete CSI/SS3 input directly from the fd, not TextIO.
+
+        Reading ``sys.stdin`` one character at a time can pre-buffer the rest
+        of an escape sequence; ``select`` then sees an empty fd and the buffered
+        printable tail leaks into the prompt. ``os.read`` avoids that mismatch.
+        """
+        def read_after(timeout):
+            ready, _, _ = select_fn([fd], [], [], timeout)
+            return os.read(fd, 1) if ready else b""
+
+        if csi_started:
+            first = b"["
+        else:
+            first = read_after(0.25)
+        if first == b"O":               # SS3 cursor keys: ESC O A/B
+            return "O" + (read_after(0.25).decode("ascii", "ignore"))
+        if first != b"[":
+            return ""                   # consume unsupported escape prefix
         sequence = "["
         # CSI parameters/intermediates continue until a final byte (0x40-0x7e).
-        for _ in range(16):
-            ready, _, _ = select_fn([stream], [], [], 0.25)
-            if not ready:
+        for _ in range(64):
+            raw = read_after(0.25)
+            if not raw:
                 break
-            char = stream.read(1)
-            if not char:
-                break
+            char = raw.decode("latin-1")
             sequence += char
             if "@" <= char <= "~":
                 break
         return sequence
+
+    def _read_mouse_scroll(self, sequence, select_fn, fd):
+        """Return -1/+1 for wheel up/down, while consuming all mouse events."""
+        if sequence.startswith("[<") and sequence[-1:] in ("M", "m"):
+            try:
+                button = int(sequence[2:-1].split(";", 1)[0])
+            except (ValueError, IndexError):
+                return 0
+            if button & 64:
+                return -1 if button & 1 == 0 else 1
+            return 0
+        if sequence == "[M":             # consume legacy X10's 3-byte payload
+            payload = bytearray()
+            for _ in range(3):
+                ready, _, _ = select_fn([fd], [], [], 0.20)
+                if not ready:
+                    break
+                payload.extend(os.read(fd, 1))
+            if len(payload) == 3:
+                button = payload[0] - 32
+                if button & 64:
+                    return -1 if button & 1 == 0 else 1
+        return 0
 
     def _read_command(self):
         """Read a command while allowing PageUp/PageDown to scroll the screen."""
@@ -435,17 +469,30 @@ class App(object):
             tty.setraw(fd)
             sys.stdout.write(prompt)
             sys.stdout.flush()
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
             while True:
-                char = sys.stdin.read(1)
-                if not char:
+                raw = os.read(fd, 1)
+                if not raw:
                     return None
-                if char == "\x1b":
-                    sequence = self._read_escape_sequence(select.select, sys.stdin)
-                    if sequence in ("[5~", "[5;2~"):
-                        self._scroll_page(-1)
+                sequence = None
+                if raw == b"\x1b":
+                    sequence = self._read_escape_sequence(select.select, fd)
+                elif raw == b"\x9b":          # 8-bit C1 CSI form
+                    sequence = self._read_escape_sequence(
+                        select.select, fd, csi_started=True)
+                if sequence is not None:
+                    wheel = self._read_mouse_scroll(sequence, select.select, fd)
+                    if sequence in ("[5~", "[5;2~") or wheel < 0:
+                        if wheel:
+                            self.scroll_offset = max(0, self.scroll_offset - 3)
+                        else:
+                            self._scroll_page(-1)
                         self.draw()
-                    elif sequence in ("[6~", "[6;2~"):
-                        self._scroll_page(1)
+                    elif sequence in ("[6~", "[6;2~") or wheel > 0:
+                        if wheel:
+                            self.scroll_offset += 3
+                        else:
+                            self._scroll_page(1)
                         self.draw()
                     elif sequence in ("[A", "OA") and self._history:
                         history_pos = max(0, history_pos - 1)
@@ -456,6 +503,9 @@ class App(object):
                                   if history_pos < len(self._history) else "")
                     sys.stdout.write("\r\033[2K" + prompt + buffer)
                     sys.stdout.flush()
+                    continue
+                char = decoder.decode(raw)
+                if not char:
                     continue
                 if char in ("\r", "\n"):
                     sys.stdout.write("\r\n")

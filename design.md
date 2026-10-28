@@ -24,16 +24,21 @@ version. Existing action and monitoring logic remains intact.
 ## Small-screen paging follow-up
 
 ### Root cause
-The previous line editor waited only 40 ms for the tail of an Escape sequence
-and recognized a few fixed CSI values. Terminals can split escape bytes across
-reads or use SS3 sequences (for example `ESC O A`); after the short timeout,
-the remaining printable bytes such as `[6~` or `OA` were appended to the
-command buffer. Page keys therefore appeared as text instead of scrolling.
+The line editor read through buffered `sys.stdin` while polling the underlying
+file descriptor with `select`. `TextIOWrapper` can prefetch the rest of a key
+sequence, leaving the fd unreadable to `select`; the handler timed out and then
+consumed printable tails such as `[6~` or `OA` as ordinary command text. The
+short timeout and limited CSI handling made this worse for split writes and
+SS3 keys. Mouse reporting was not enabled, and there was no parser for SGR
+wheel reports.
 
 ### Architecture
-- The interactive terminal reader is the single input boundary. It consumes
-  complete CSI/SS3 sequences and maps them to semantic page/history events;
-  unknown escape sequences are consumed, never inserted into commands.
+- The interactive terminal reader is the single input boundary. It reads raw
+  bytes directly from the terminal fd, consumes complete CSI/SS3 sequences,
+  and maps Page Up/Down and wheel events to scrolling; unknown escape and mouse
+  sequences are consumed, never inserted into commands.
+- SGR mouse reporting is enabled only inside the full-screen session and both
+  mouse modes are disabled on every exit path.
 - The renderer receives a compact-layout flag derived from terminal height.
   On compact screens it prioritizes metric cards and inventory, hides the
   contextual rail, and condenses command/legend help. Wide/tall terminals keep
@@ -43,7 +48,7 @@ command buffer. Page keys therefore appeared as text instead of scrolling.
   ordinary terminals while preserving all inventory rows for small screens.
 
 ### Implemented tasks
-1. Decode complete CSI/SS3 terminal sequences with per-byte timeout tolerance.
-2. Map Page Up/Down to page-sized viewport movement; keep arrow history keys.
+1. Read terminal input directly from the raw fd and decode CSI/SS3 sequences.
+2. Enable/disable SGR mouse reporting and map wheel/Page Up/Down to scrolling.
 3. Use a height-aware compact layout and vertically stack boxes at narrow widths.
-4. Add regression tests for escape-byte consumption, compact layout, and paging.
+4. Add regression tests for key/mouse consumption, compact layout, and paging.

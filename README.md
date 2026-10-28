@@ -44,7 +44,8 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 The default launch uses the terminal's alternate full-screen buffer and hides
 its cursor while the TUI is active; `q` or `quit` exits and restores the shell
 screen. Page Up / Page Down scroll the dashboard when it exceeds the terminal
-height. One-shot subcommands such as `./plaivid list` remain available.
+height; mouse-wheel scrolling is also captured in supported terminals. One-shot
+subcommands such as `./plaivid list` remain available.
 
 Inside the TUI:
 

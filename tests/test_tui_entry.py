@@ -17,17 +17,28 @@ class TuiEntryTests(unittest.TestCase):
 
     def test_escape_sequences_are_consumed_without_leaking_input_bytes(self):
         app = orchestrator.App()
+        fd = 41
 
-        def available(streams, _write, _errors, _timeout):
-            stream = streams[0]
-            return ([stream] if stream.tell() < len(stream.getvalue()) else [], [], [])
+        for sequence, expected in ((b"[6~tail", "[6~"),
+                                   (b"OAcommand", "OA"),
+                                   (b"[5;2~text", "[5;2~")):
+            remaining = bytearray(sequence)
 
-        for sequence, expected in (("[6~tail", "[6~"),
-                                   ("OAcommand", "OA"),
-                                   ("[5;2~text", "[5;2~")):
-            stream = io.StringIO(sequence)
-            self.assertEqual(app._read_escape_sequence(available, stream), expected)
-            self.assertEqual(stream.read(), sequence[len(expected):])
+            def available(readers, _write, _errors, _timeout):
+                return (readers if remaining else [], [], [])
+
+            def read_byte(_fd, _size):
+                return bytes([remaining.pop(0)]) if remaining else b""
+
+            with mock.patch.object(orchestrator.os, "read", side_effect=read_byte):
+                self.assertEqual(app._read_escape_sequence(available, fd), expected)
+            self.assertEqual(bytes(remaining), sequence[len(expected):])
+
+    def test_mouse_wheel_codes_are_intercepted(self):
+        app = orchestrator.App()
+        self.assertEqual(app._read_mouse_scroll("[<64;10;4M", None, 41), -1)
+        self.assertEqual(app._read_mouse_scroll("[<65;10;4M", None, 41), 1)
+        self.assertEqual(app._read_mouse_scroll("[<0;10;4m", None, 41), 0)
 
     def test_fullscreen_buffer_and_cursor_are_restored(self):
         output = io.StringIO()
@@ -42,7 +53,9 @@ class TuiEntryTests(unittest.TestCase):
             app._leave_fullscreen()
             self.assertFalse(app._fullscreen)
         self.assertIn("\033[?1049h", output.getvalue())
+        self.assertIn("\033[?1000h\033[?1006h", output.getvalue())
         self.assertIn("\033[?25l", output.getvalue())
+        self.assertIn("\033[?1006l\033[?1000l", output.getvalue())
         self.assertIn("\033[?25h\033[?1049l", output.getvalue())
 
 
