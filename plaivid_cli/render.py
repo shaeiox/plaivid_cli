@@ -159,46 +159,227 @@ def vm_table(vms, sort_label=None):
 
 
 # --- messages ----------------------------------------------------------------
-def dashboard(info, vms, sort_label=None, status=""):
-    """Compose the interactive dashboard without touching application state.
+def _panel(title, lines, panel_width, color_fn=theme.muted):
+    """Draw a fixed-width panel used by the responsive dashboard grid."""
+    panel_width = max(8, panel_width)
+    inner = panel_width - 2
+    cap = " %s " % title
+    top = (color_fn(BOX["tl"]) + color_fn(cap)
+           + color_fn(BOX["h"] * max(0, inner - _vis(cap)))
+           + color_fn(BOX["tr"]))
+    out = [top]
+    for line in lines:
+        # Dashboard content uses short labels; clip plain width before padding.
+        if _vis(line) > inner - 2:
+            line = _ANSI.sub("", line)[:max(0, inner - 5)] + "..."
+        out.append(color_fn(BOX["v"]) + " " + _pad(line, inner - 2)
+                   + " " + color_fn(BOX["v"]))
+    out.append(color_fn(BOX["bl"]) + color_fn(BOX["h"] * inner)
+               + color_fn(BOX["br"]))
+    return out
 
-    This intentionally uses only data already loaded by the orchestrator: the
-    renderer must not introduce extra API calls or change action semantics.
-    """
+
+def _hstack(boxes, gap=1):
+    """Join panel line-arrays horizontally, padding to a shared height."""
+    if not boxes:
+        return []
+    height = max(len(box) for box in boxes)
+    widths = [max((_vis(line) for line in box), default=0) for box in boxes]
+    result = []
+    for row in range(height):
+        cells = []
+        for i, box in enumerate(boxes):
+            line = box[row] if row < len(box) else " " * widths[i]
+            cells.append(_pad(line, widths[i]))
+        result.append((" " * gap).join(cells))
+    return result
+
+
+def _sparkline(values, width=12):
+    """Tiny trend plot; no history means a calm placeholder line."""
+    if not values:
+        return theme.muted("·" * width if theme._unicode else "-" * width)
+    glyphs = "▁▂▃▄▅▆▇█" if theme._unicode else "._-:=+*#"
+    vals = list(values)[-width:]
+    lo, hi = min(vals), max(vals)
+    span = hi - lo or 1.0
+    return theme.accent("".join(glyphs[int((v - lo) / span * (len(glyphs)-1))]
+                                 for v in vals).rjust(width))
+
+
+def dashboard(info, vms, sort_label=None, status="", selected=None,
+              cpu_history=None, load_history=None, refreshed="on demand"):
+    """Responsive dashboard layout, composed only from already-loaded data."""
+    import datetime
+
+    screen = max(60, term_width())
+    gap = 1
     running = sum(1 for vm in vms if vm.running)
     stopped = sum(1 for vm in vms if vm.state == "stopped")
     off = sum(1 for vm in vms if vm.state == "off")
-    header = (theme.muted("[?] Help    [/] Search    [r] Refresh    [q] Quit")
-              + "    " + theme.secondary("PVM virtual-machine control"))
-    parts = [banner().rstrip(), header, host_panel(info),
-             vm_table(vms, sort_label)]
+    now = datetime.datetime.now().strftime("%H:%M:%S")
+    title = (theme.bold(theme.primary("Plaivid CLI"))
+             + theme.muted(" v" + __version__ + "   PVM virtual-machine control"))
+    shortcuts = theme.muted("[?] Help  [/] Search  [r] Refresh  [q] Quit  " + now)
+    lines = [title, shortcuts]
 
-    # Selected VM follows the displayed ordering and is informational only.
-    if vms:
-        vm = vms[0]
-        state_fn, state_glyph = theme.state_style(vm.state)
-        detail = [
-            "%s %s    %s" % (state_fn(state_glyph), theme.bold(vm.name),
-                              state_fn(vm.state)),
-            "vCPU: %s    Memory: %s    PID: %s" % (
-                vm.vcpu if vm.vcpu is not None else "-", vm.mem_human,
-                vm.pid or "-"),
-            "Uptime: %s    SPICE: %s" % (vm.uptime or "-", vm.port or "-"),
-            "UUID: %s" % (vm.uuid or "-"),
-        ]
-        parts.append(frame("Selected VM", detail, theme.primary))
+    # Seven concise metric cards. Host uptime/network rates are intentionally
+    # absent here: the main refresh endpoint does not supply those values.
+    total_width = screen
+    card_columns = 7 if screen >= 140 else (4 if screen >= 90 else 2)
+    card_width = (total_width - gap * (card_columns - 1)) // card_columns
+    host_lines = [theme.bold(info.get("name") or "unknown"),
+                  (info.get("ip") or "IP unavailable"),
+                  "PVM " + (info.get("version") or "-")]
+    cpu = info.get("cpu_pct")
+    cpu_lines = [theme.bold("--" if cpu is None else "%.0f%%" % cpu),
+                 "%s cores" % (info.get("cpu_count") or "-"),
+                 _sparkline(cpu_history)]
+    ram = info.get("ram_pct")
+    ram_lines = [theme.bold("--" if ram is None else "%.0f%%" % ram),
+                 "%.0f/%.0f GB" % (info.get("ram_used_gb") or 0,
+                                   info.get("ram_total_gb") or 0), _bar(ram, 8)]
+    disk = info.get("store_used_pct")
+    disk_lines = [theme.bold("--" if disk is None else "%.0f%%" % disk),
+                  "%.0f GB total" % (info.get("store_total_gb") or 0),
+                  _bar(disk, 8)]
+    load = " / ".join(str(info.get(k) or "-") for k in
+                      ("load1", "load5", "load15"))
+    card_specs = [
+        ("HOST", host_lines, theme.primary),
+        ("CPU", cpu_lines, theme.primary),
+        ("RAM", ram_lines, theme.primary),
+        ("DISK", disk_lines, theme.warning),
+        ("VMs", [theme.success("%d running" % running),
+                  "/ %d total" % len(vms)], theme.primary),
+        ("LOAD AVG", [load, _sparkline(load_history)], theme.primary),
+        ("UPTIME", [info.get("uptime_human") or "not reported",
+                    "host uptime"], theme.primary),
+    ]
+    cards = [_panel(label, body, card_width, color)
+             for label, body, color in card_specs]
+    for offset in range(0, len(cards), card_columns):
+        lines.extend(_hstack(cards[offset:offset + card_columns], gap=gap))
 
+    # VM table, clipped to the actual left-column width, with a context rail.
+    rail_width = max(26, min(34, screen // 4))
+    left_width = screen - rail_width - gap
+    if screen < 120:
+        left_width, rail_width = screen, 0
+    title_sort = "Sorted by " + (sort_label or "default order")
+    table_title = _panel("VIRTUAL MACHINES  " + title_sort, [], left_width,
+                         theme.secondary)
+    widths_cols = [3, max(8, int(left_width * .22)), 9, 4, 5, 12, 8, 6]
+    fixed = sum(widths_cols) + len(widths_cols) * 2 + 3
+    uuid_width = max(4, left_width - fixed - 2)
+    headings = ["ID", "NAME", "STATE", "CPU", "MEM", "UPTIME", "PID", "SPICE", "UUID"]
+    header = " ".join(value.ljust(widths_cols[i]) for i, value in enumerate(headings[:-1]))
+    header += " " + "UUID"[:uuid_width].ljust(uuid_width)
+    table_rows = [theme.muted(header)]
+    for vm in vms:
+        fn, glyph = theme.state_style(vm.state)
+        name = vm.name[:widths_cols[1]]
+        fields = [str(vm.index or "-")[:3].ljust(3), name.ljust(widths_cols[1]),
+                  (glyph + " " + (vm.state or "?")).ljust(widths_cols[2]),
+                  str(vm.vcpu if vm.vcpu is not None else "-").rjust(4),
+                  vm.mem_human.rjust(5), (vm.uptime or "-")[:12].ljust(12),
+                  str(vm.pid or "-")[:8].ljust(8), str(vm.port or "-")[:6].ljust(6),
+                  (vm.uuid or "-")[:uuid_width]]
+        row = " ".join(fields)
+        table_rows.append(fn(row))
+    if not vms:
+        table_rows.append(theme.muted("No virtual machines found"))
+    table_box = _panel("VIRTUAL MACHINES  " + title_sort, table_rows,
+                       left_width, theme.secondary)
+
+    focus = selected or (vms[0] if vms else None)
+    rail = []
+    if focus:
+        state_fn, glyph = theme.state_style(focus.state)
+        rail.append(_panel("SELECTED VM", [
+            state_fn(glyph + " " + focus.name), state_fn(focus.state),
+            "Uptime: " + (focus.uptime or "-"),
+            "CPUs: %s  Memory: %s" % (focus.vcpu or "-", focus.mem_human),
+            "PID: %s  SPICE: %s" % (focus.pid or "-", focus.port or "-"),
+            "UUID: " + (focus.uuid or "-"),
+        ], rail_width, theme.primary))
+    else:
+        rail.append(_panel("SELECTED VM", ["Select a VM with a command"],
+                           rail_width, theme.primary))
+    rail.append(_panel("RESOURCES", [
+        "CPU  %s %s" % (_bar(cpu, 9), "--" if cpu is None else "%.0f%%" % cpu),
+        "RAM  %s %s" % (_bar(ram, 9), "--" if ram is None else "%.0f%%" % ram),
+        "Disk %s %s" % (_bar(disk, 9), "--" if disk is None else "%.0f%%" % disk),
+        "Network rates: use overview",
+    ], rail_width, theme.accent))
+    rail.append(_panel("QUICK ACTIONS", [
+        "start <id/name>   Start VM", "stop <id/name>    Graceful stop",
+        "kill <id/name>    Force stop", "reset <id/name>   Reset VM",
+        "pause/resume      VM state action",
+    ], rail_width, theme.secondary))
+    rail_lines = []
+    if rail_width:
+        # Stack the right-rail panels within a single responsive column.
+        rail_lines = []
+        for panel in rail:
+            if rail_lines:
+                rail_lines.append(" " * rail_width)
+            rail_lines.extend(panel)
+    else:
+        rail_lines = []
+        for panel in rail:
+            if rail_lines:
+                rail_lines.append("")
+            rail_lines.extend(panel)
+    if rail_width:
+        while len(table_box) < len(rail_lines):
+            empty = (theme.muted(BOX["v"]) + " "
+                     + " " * max(0, left_width - 4) + " "
+                     + theme.muted(BOX["v"]))
+            table_box.insert(-1, empty)
+        rail_lines += [" " * rail_width] * max(0, len(table_box) - len(rail_lines))
+        lines.extend(_hstack([table_box, rail_lines]))
+    else:
+        lines.extend(table_box)
+        lines.extend(rail_lines)
+
+    # Compact three-column help/footer row adapts to small terminals.
+    col_gap = 1
+    col_width = max(12, (screen - 2 * col_gap) // 3)
+    commands = ["list/status  Refresh inventory", "sort <field>  Reorder list",
+                "overview     Live metrics", "health       Capacity checks",
+                "show <vm>    VM details", "log [N]      Audit history"]
+    actions_help = ["start  Power on", "stop   Graceful shutdown",
+                    "kill   Force power-off", "reset  Hard reset",
+                    "pause / resume"]
+    legend = [theme.success("● started   running"),
+              theme.warning("● stopped  stopped"),
+              theme.error("● off      powered off"),
+              "VMs %d total | %d running | %d stopped | %d off" %
+              (len(vms), running, stopped, off)]
+    footer = _hstack([
+        _panel("COMMANDS", commands, col_width, theme.secondary),
+        _panel("VM ACTIONS", actions_help, col_width, theme.secondary),
+        _panel("STATUS LEGEND", legend, screen - 2 * (col_width + col_gap),
+               theme.primary),
+    ], gap=col_gap)
+    lines.extend(footer)
     if status:
-        parts.append(status)
-    legend = ("VMs: %s total   %s running   %s stopped   %s off" % (
-        len(vms), theme.success(str(running)), theme.warning(str(stopped)),
-        theme.error(str(off))))
-    commands = ("Commands: list/status  sort  overview  health  show <id|name>  "
-                "log [N]  help  quit    |    Actions: start stop kill reset pause resume")
-    parts.extend([frame("Commands & status", [commands, legend], theme.secondary),
-                  theme.muted("Connected session  |  Data refreshed on demand  |  "
-                              "Plaivid CLI v" + __version__)])
-    return "\n".join(parts)
+        lines.append(status)
+    host = info.get("name") or "PVM"
+    ip = info.get("ip") or ""
+    status_left = "Connected to: %s (%s)" % (host, ip)
+    status_right = "Plaivid CLI v" + __version__
+    status_center = "Refreshed: " + str(refreshed)
+    status_line = status_left
+    if screen >= 90:
+        remain = max(1, screen - _vis(status_left) - _vis(status_right) - 2)
+        status_line += " " * max(1, (remain - _vis(status_center)) // 2)
+        status_line += status_center
+        status_line += " " * max(1, screen - _vis(status_line) - _vis(status_right))
+        status_line += status_right
+    lines.append(theme.primary(status_line[:screen]))
+    return "\n".join(lines)
 
 
 def ok(msg):
