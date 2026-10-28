@@ -49,6 +49,7 @@ Inside the TUI:
 | `health` / `hc` | health & capacity summary (quorum, storage, overcommit, license) |
 | `show` / `detail` `<id\|name>` | detailed view of one VM (disks, NICs, console) |
 | `log` `[N]` | audit log viewer + analyzer (recent actions, who did what) |
+| `sort` `[field] [asc\|desc]` | sort the VM list by `name`, `state`, `cpu`, `mem`, `uptime`, `pid`, `port` (SPICE), `uuid`; `sort reset` restores the default |
 | `status` | refresh and show host monitoring |
 | `<action> <targets>` | run an action on one or many VMs (see below) |
 | `help` / `?` | list commands and actions |

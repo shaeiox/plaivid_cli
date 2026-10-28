@@ -7,6 +7,7 @@ Two data sources are merged:
     and the automatic uuid discovery the requirements ask for.
 """
 
+import os
 import re
 
 from . import transport
@@ -78,6 +79,9 @@ def list_all(token):
             vm.state = machine.findtext("cluster/cluster_status/status") \
                 or "unknown"
             vm.vcpu = _vcpu_count(machine.find("hardware/cpu"))
+            # configured console (SPICE) port; a running VM's live port from
+            # pvm-running-vms overrides this during enrichment
+            vm.port = machine.findtext("hardware/console/port") or None
             mem = machine.findtext("hardware/memory/size")
             try:
                 vm.mem_mb = int(mem) if mem else None
@@ -112,7 +116,9 @@ def inventory(token):
     vms = list_all(token)
     by_uuid = dict((v.uuid.lower(), v) for v in vms)
 
-    # enrich with live info; add any running VM missing from the object store
+    # The object store's cluster_status is authoritative for VM state. We only
+    # ENRICH running VMs with live pid / uptime / port from pvm-running-vms;
+    # we never override the state with it (it can be empty or lag behind).
     try:
         for r in list_running():
             vm = by_uuid.get(r["uuid"])
@@ -127,10 +133,112 @@ def inventory(token):
     except transport.TransportError:
         pass  # inventory still usable without live enrichment
 
+    # Fallback: any running VM still without an uptime gets it straight from
+    # its qemu process in /proc, so uptime never depends on pvm-running-vms.
+    missing = [v for v in vms if v.running and not v.uptime]
+    if missing:
+        procs = proc_uptimes()
+        for v in missing:
+            hit = procs.get(v.uuid.lower())
+            if hit:
+                v.pid, v.uptime = hit
+
     vms.sort(key=lambda v: (0 if v.running else 1, v.name.lower()))
     for i, vm in enumerate(vms, 1):
         vm.index = i
     return vms
+
+
+def _uptime_secs(uptime):
+    """Parse D-HH:MM:SS / HH:MM:SS / MM:SS into seconds (-1 if unknown)."""
+    if not uptime:
+        return -1
+    try:
+        days = 0
+        if "-" in uptime:
+            d, uptime = uptime.split("-", 1)
+            days = int(d)
+        parts = [int(p) for p in uptime.split(":")]
+        while len(parts) < 3:
+            parts.insert(0, 0)
+        h, m, s = parts[-3:]
+        return days * 86400 + h * 3600 + m * 60 + s
+    except ValueError:
+        return -1
+
+
+def _num(value):
+    s = str(value or "")
+    return int(s) if s.isdigit() else -1
+
+
+def _default_order(v):
+    return (0 if v.running else 1, v.name.lower())
+
+
+SORT_KEYS = {
+    "index": _default_order,
+    "name": lambda v: v.name.lower(),
+    "state": lambda v: (0 if v.running else 1, v.state or ""),
+    "cpu": lambda v: v.vcpu or 0,
+    "mem": lambda v: v.mem_mb or 0,
+    "uptime": lambda v: _uptime_secs(v.uptime),
+    "pid": lambda v: _num(v.pid),
+    "port": lambda v: _num(v.port),
+    "uuid": lambda v: v.uuid,
+}
+
+
+def sort_vms(vms, key=None, desc=False):
+    """Return VMs sorted by ``key`` and re-indexed in display order, so an
+    index typed by the user always matches the row they see."""
+    out = sorted(vms, key=SORT_KEYS.get(key) or _default_order, reverse=desc)
+    for i, vm in enumerate(out, 1):
+        vm.index = i
+    return out
+
+
+def _fmt_elapsed(secs):
+    """Format seconds like pvm-running-vms: D-HH:MM:SS, HH:MM:SS or MM:SS."""
+    secs = int(max(0, secs))
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, sec = divmod(rem, 60)
+    if days:
+        return "%d-%02d:%02d:%02d" % (days, hours, mins, sec)
+    if hours:
+        return "%02d:%02d:%02d" % (hours, mins, sec)
+    return "%02d:%02d" % (mins, sec)
+
+
+def proc_uptimes():
+    """{uuid: (pid, uptime)} for every qemu process visible in /proc.
+
+    Reads each process's cmdline for ``-uuid <uuid>`` and its start time from
+    /proc/<pid>/stat. Returns {} where /proc is unavailable (e.g. Windows).
+    """
+    found = {}
+    try:
+        tick = float(os.sysconf("SC_CLK_TCK"))
+        with open("/proc/uptime") as fh:
+            sys_up = float(fh.read().split()[0])
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except (OSError, ValueError, AttributeError):
+        return found
+    for pid in pids:
+        try:
+            with open("/proc/%s/cmdline" % pid, "rb") as fh:
+                args = fh.read().split(b"\0")
+            if b"-uuid" not in args:
+                continue
+            uuid = args[args.index(b"-uuid") + 1].decode("ascii").lower()
+            with open("/proc/%s/stat" % pid) as fh:
+                fields = fh.read().rsplit(")", 1)[1].split()
+            started = float(fields[19]) / tick   # field 22: starttime (ticks)
+            found[uuid] = (pid, _fmt_elapsed(sys_up - started))
+        except (OSError, ValueError, IndexError, UnicodeDecodeError):
+            continue
+    return found
 
 
 def aggregate(vms):

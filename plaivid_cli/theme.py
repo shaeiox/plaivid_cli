@@ -54,7 +54,7 @@ _unicode = _enabled and os.environ.get("PLAIVID_ASCII") is None
 _GLYPHS = {
     "ok": ("✓", "+"),
     "err": ("✗", "x"),
-    "run": ("⊷", "~"),
+    "run": ("●", "*"),
     "ask": ("?", "?"),
     "pending": ("○", "o"),
     "cancel": ("-", "-"),
