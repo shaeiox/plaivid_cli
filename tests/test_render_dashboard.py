@@ -45,6 +45,10 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("VIRTUAL MACHINES", output)
             self.assertIn("NETWORK", output)
             self.assertIn("STORAGE", output)
+            self.assertIn("8 logical cores", output)
+            self.assertIn("4 physical cores", output)
+            self.assertIn("1m: 0.10  5m: 0.20", output)
+            self.assertIn("15m: 0.30", output)
             self.assertLessEqual(max(render._vis(line)
                                      for line in output.splitlines()), width)
 

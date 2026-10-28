@@ -572,11 +572,12 @@ def overview(snap, prev, tapmap, agg, spin):
     load_pct = min(100.0, 100.0 * load1 / cores) if cores else 0
     cardspec = [
         ("CPU", ["--" if cpu is None else "%.0f%%" % cpu,
-                 "%s logical / %s physical" % (cores,
-                                                  snap.get("physical_cores") or "-")], theme.primary),
-        ("LOAD", ["1m %s  5m %s  15m %s" % (
-            snap.get("load1") or "-", snap.get("load5") or "-",
-            snap.get("load15") or "-"), _bar(load_pct, 12)], theme.primary),
+                 "%s logical cores" % cores,
+                 "%s physical cores" % (snap.get("physical_cores") or "-")], theme.primary),
+        ("LOAD", ["1m: %.2f  5m: %.2f" % (
+            float(snap.get("load1") or 0), float(snap.get("load5") or 0)),
+            "15m: %.2f" % float(snap.get("load15") or 0),
+            _bar(load_pct, 12)], theme.primary),
         ("MEMORY", ["--" if ram is None else "%.0f%%" % ram,
                     "%.1f / %.1f GB" % (snap.get("mem_used_gb") or 0,
                                         snap.get("mem_total_gb") or 0),
