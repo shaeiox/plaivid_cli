@@ -81,6 +81,20 @@ class App(object):
             self.status = render.err("Could not list VMs: %s" % exc)
 
     # --- screen -------------------------------------------------------------
+    def _enter_fullscreen(self):
+        """Take over the terminal screen until the interactive session exits."""
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            sys.stdout.write("\033[?1049h\033[?25l\033[2J\033[H")
+            sys.stdout.flush()
+            self._fullscreen = True
+
+    def _leave_fullscreen(self):
+        """Restore the shell screen and cursor on every exit path."""
+        if getattr(self, "_fullscreen", False):
+            sys.stdout.write("\033[?25h\033[?1049l")
+            sys.stdout.flush()
+            self._fullscreen = False
+
     def _clear(self):
         if sys.stdout.isatty():
             sys.stdout.write("\033[2J\033[H")
@@ -455,26 +469,33 @@ class App(object):
 
     # --- entry points -------------------------------------------------------
     def run_interactive(self):
-        if not self.ensure_session():
-            return 1
-        self._setup_readline()
-        self.refresh()
-        while True:
-            self.draw()
-            try:
-                line = self._read_command()
-                if line is None:
+        self._enter_fullscreen()
+        try:
+            if not self.ensure_session():
+                # Preserve login errors on the normal terminal screen.
+                self._leave_fullscreen()
+                return 1
+            self._setup_readline()
+            self.refresh()
+            while True:
+                self.draw()
+                try:
+                    line = self._read_command()
+                    if line is None:
+                        print()
+                        break
+                except (EOFError, KeyboardInterrupt):
                     print()
                     break
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
-            try:
-                if not self.dispatch(line):
-                    break
-            except Exception as exc:  # last-resort guard for the loop
-                self.status = render.err("Error: %s: %s" % (type(exc).__name__, exc))
-        return 0
+                try:
+                    if not self.dispatch(line):
+                        break
+                except Exception as exc:  # last-resort guard for the loop
+                    self.status = render.err(
+                        "Error: %s: %s" % (type(exc).__name__, exc))
+            return 0
+        finally:
+            self._leave_fullscreen()
 
     def run_once(self, args):
         if not self.ensure_session():
@@ -494,9 +515,11 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     app = App()
     try:
-        if argv:
-            return app.run_once(argv)
-        return app.run_interactive()
+        # No arguments launches the full-screen TUI by default. `tui` and
+        # `--tui` are explicit equivalents for scripts/desktop launchers.
+        if not argv or argv == ["tui"] or argv == ["--tui"]:
+            return app.run_interactive()
+        return app.run_once(argv)
     except transport.TransportError as exc:
         print(render.err(str(exc)))
         return 1

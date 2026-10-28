@@ -28,7 +28,8 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 ## Usage
 
 ```bash
-./plaivid                 # interactive TUI
+./plaivid                 # launch the full-screen interactive TUI
+./plaivid tui             # explicit full-screen TUI launch
 ./plaivid list            # one-shot: print the dashboard
 ./plaivid status          # one-shot: refresh + dashboard
 ./plaivid overview        # live monitoring (CPU, load, mem, network, storage)
@@ -39,6 +40,11 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 ./plaivid stop state:off   # one-shot: bulk action by state
 ./plaivid start 12         # ... or by the index shown in the list
 ```
+
+The default launch uses the terminal's alternate full-screen buffer and hides
+its cursor while the TUI is active; `q` or `quit` exits and restores the shell
+screen. Page Up / Page Down scroll the dashboard when it exceeds the terminal
+height. One-shot subcommands such as `./plaivid list` remain available.
 
 Inside the TUI:
 
