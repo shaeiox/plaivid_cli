@@ -43,8 +43,9 @@ with graceful fallback to plain text when piped or when `NO_COLOR` is set.
 
 The default launch uses the terminal's alternate full-screen buffer and hides
 its cursor while the TUI is active; `q` or `quit` exits and restores the shell
-screen. Page Up / Page Down scroll the dashboard when it exceeds the terminal
-height; mouse-wheel scrolling is also captured in supported terminals. One-shot
+screen. Page Up / Page Down and the mouse wheel scroll only the VM list; the
+header and dashboard panels remain pinned. Terminal resize triggers a fresh
+layout, while unchanged rows are not repainted. One-shot
 subcommands such as `./plaivid list` remain available.
 
 Inside the TUI:

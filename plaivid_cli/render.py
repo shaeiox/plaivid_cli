@@ -252,9 +252,50 @@ def _sparkline(values, width=12):
                                  for v in vals).rjust(width))
 
 
+def _compact_vm_lines(vm, width):
+    """Plain row content for a compact VM card, shared with row measurement."""
+    _state_fn, glyph = theme.state_style(vm.state)
+    if width >= 55:
+        name_limit = max(10, min(24, width // 5))
+        name = vm.name if len(vm.name) <= name_limit else vm.name[:name_limit - 1] + "…"
+        return [
+            "#%s %s  %s  CPU:%s MEM:%s" % (
+                vm.index or "-", name, vm.state or "unknown",
+                vm.vcpu if vm.vcpu is not None else "-", vm.mem_human),
+            "Uptime:%s PID:%s SPICE:%s UUID:%s" % (
+                vm.uptime or "-", vm.pid or "-", vm.port or "-", vm.uuid or "-"),
+        ]
+    return [
+        "#%s  %s" % (vm.index or "-", vm.name),
+        "State: %s %s   CPU: %s   MEM: %s" % (
+            glyph, vm.state or "unknown",
+            vm.vcpu if vm.vcpu is not None else "-", vm.mem_human),
+        "Uptime: %s   PID: %s   SPICE: %s" % (
+            vm.uptime or "-", vm.pid or "-", vm.port or "-"),
+        "UUID: %s" % (vm.uuid or "-"),
+    ]
+
+
+def vm_row_height(screen, compact=False, vms=None):
+    """Maximum rendered body lines per VM at this width (for fixed list slots)."""
+    rail_width = max(26, min(34, screen // 4))
+    left_width = screen if compact or screen < 120 else screen - rail_width - 1
+    if left_width >= 90:
+        return 1
+    content_width = max(1, left_width - 4)
+    heights = []
+    for vm in vms or []:
+        heights.append(sum(len(textwrap.wrap(line, width=content_width,
+                                             break_long_words=True,
+                                             break_on_hyphens=False))
+                           or 1 for line in _compact_vm_lines(vm, left_width)))
+    minimum = 2 if left_width >= 55 else 4
+    return max(minimum, max(heights or [minimum]))
+
+
 def dashboard(info, vms, sort_label=None, status="", selected=None,
               cpu_history=None, load_history=None, refreshed="on demand",
-              compact=False):
+              compact=False, ultra_compact=False, vm_offset=0, vm_limit=None):
     """Responsive dashboard layout, composed only from already-loaded data."""
     import datetime
 
@@ -268,12 +309,18 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
              + theme.muted(" v" + __version__ + "   PVM virtual-machine control"))
     shortcuts = theme.muted("[?] Help  [/] Search  [r] Refresh  [q] Quit  " + now)
     lines = []
-    for header_line in (title, shortcuts):
-        if _vis(header_line) > screen:
-            lines.extend(textwrap.wrap(_ANSI.sub("", header_line), width=screen,
-                                       break_long_words=True))
-        else:
-            lines.append(header_line)
+    if ultra_compact:
+        header_line = ("Plaivid CLI v%s | %s | [PgUp/PgDn/wheel] VM list | [q] quit" %
+                       (__version__, info.get("name") or "PVM"))
+        lines.extend(textwrap.wrap(header_line, width=screen,
+                                   break_long_words=True))
+    else:
+        for header_line in (title, shortcuts):
+            if _vis(header_line) > screen:
+                lines.extend(textwrap.wrap(_ANSI.sub("", header_line), width=screen,
+                                           break_long_words=True))
+            else:
+                lines.append(header_line)
 
     # Seven concise metric cards. Host uptime/network rates are intentionally
     # absent here: the main refresh endpoint does not supply those values.
@@ -311,10 +358,20 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
                     "sballd " + format_uptime(info.get("sballd_uptime_seconds")),
                     "sball " + (info.get("sball_state") or "unknown")], theme.primary),
     ]
-    cards = [_panel(label, body, card_width, color)
-             for label, body, color in card_specs]
-    for offset in range(0, len(cards), card_columns):
-        lines.extend(_hstack(cards[offset:offset + card_columns], gap=gap))
+    if ultra_compact:
+        metric_line = ("HOST %s | CPU %s | RAM %s | DISK %s | VMs %d/%d running" % (
+            info.get("name") or "?",
+            "--" if cpu is None else "%.0f%%" % cpu,
+            "--" if ram is None else "%.0f%%" % ram,
+            "--" if disk is None else "%.0f%%" % disk,
+            running, len(vms)))
+        lines.extend(textwrap.wrap(metric_line, width=screen,
+                                   break_long_words=True))
+    else:
+        cards = [_panel(label, body, card_width, color)
+                 for label, body, color in card_specs]
+        for offset in range(0, len(cards), card_columns):
+            lines.extend(_hstack(cards[offset:offset + card_columns], gap=gap))
 
     # VM table and context rail. At constrained widths, use compact key/value
     # rows rather than squeezing the wide table columns into unreadable shards.
@@ -324,6 +381,13 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
         left_width, rail_width = screen, 0
     context_width = rail_width or screen
     title_sort = "Sorted by " + (sort_label or "default order")
+    if vm_limit is not None and vms:
+        first = min(len(vms), vm_offset + 1)
+        last = min(len(vms), vm_offset + vm_limit)
+        title_sort += "  rows %d-%d/%d  PgUp/PgDn/wheel" % (
+            first, last, len(vms))
+    visible_vms = (vms[vm_offset:vm_offset + vm_limit]
+                   if vm_limit is not None else vms)
     table_rows = []
     if left_width >= 90:
         widths_cols = [3, max(8, int(left_width * .22)), 9, 4, 5, 12, 8, 6]
@@ -334,7 +398,7 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
                           for i, value in enumerate(headings[:-1]))
         header += " " + "UUID"[:uuid_width].ljust(uuid_width)
         table_rows.append(theme.muted(header))
-        for vm in vms:
+        for vm in visible_vms:
             fn, glyph = theme.state_style(vm.state)
             fields = [str(vm.index or "-")[:3].ljust(3),
                       vm.name[:widths_cols[1]].ljust(widths_cols[1]),
@@ -347,19 +411,27 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
             table_rows.append(fn(" ".join(fields)))
     else:
         table_rows.append(theme.muted("ID / NAME / STATE / CPU / MEM / UPTIME / PID / SPICE / UUID"))
-        for vm in vms:
-            fn, glyph = theme.state_style(vm.state)
-            table_rows.extend([
-                theme.bold("#%s  %s" % (vm.index or "-", vm.name)),
-                fn("State: %s %s   CPU: %s   MEM: %s" % (
-                    glyph, vm.state or "unknown",
-                    vm.vcpu if vm.vcpu is not None else "-", vm.mem_human)),
-                "Uptime: %s   PID: %s   SPICE: %s" % (
-                    vm.uptime or "-", vm.pid or "-", vm.port or "-"),
-                "UUID: %s" % (vm.uuid or "-"),
-            ])
+        row_height = vm_row_height(screen, compact, vms)
+        content_width = max(1, left_width - 4)
+        for vm in visible_vms:
+            fn, _glyph = theme.state_style(vm.state)
+            row = _compact_vm_lines(vm, left_width)
+            rendered_count = 0
+            for index, text in enumerate(row):
+                parts = (textwrap.wrap(text, width=content_width,
+                                       break_long_words=True,
+                                       break_on_hyphens=False)
+                         if len(text) > content_width else [text])
+                rendered_count += len(parts)
+                styled = fn if (index == 0 and left_width >= 55) or index == 1 else (lambda value: value)
+                table_rows.extend(styled(part) for part in parts)
+            table_rows.extend([""] * max(0, row_height - rendered_count))
     if not vms:
         table_rows.append(theme.muted("No virtual machines found"))
+    elif vm_limit is not None:
+        target_rows = 1 + vm_limit * vm_row_height(screen, compact)
+        while len(table_rows) < target_rows:
+            table_rows.append("")
     table_box = _panel("VIRTUAL MACHINES  " + title_sort, table_rows,
                        left_width, theme.secondary)
 
@@ -434,13 +506,14 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
               "VMs %d total | %d running | %d stopped | %d off" %
               (len(vms), running, stopped, off)]
     if compact:
-        compact_help = ("Commands: list/status, sort, overview, health, show, log, help, quit"
-                        " | VM actions: start, stop, kill, reset, pause, resume")
-        compact_legend = ("States: started %d | stopped %d | off %d | total %d" %
-                          (running, stopped, off, len(vms)))
-        for text in (compact_help, compact_legend):
-            lines.extend(textwrap.wrap(text, width=screen,
-                                       break_long_words=True))
+        if not ultra_compact:
+            compact_help = ("Commands: list/status, sort, overview, health, show, log, help, quit"
+                            " | VM actions: start, stop, kill, reset, pause, resume")
+            compact_legend = ("States: started %d | stopped %d | off %d | total %d" %
+                              (running, stopped, off, len(vms)))
+            for text in (compact_help, compact_legend):
+                lines.extend(textwrap.wrap(text, width=screen,
+                                           break_long_words=True))
     else:
         footer_panels = [
             _panel("COMMANDS", commands, col_width, theme.secondary),

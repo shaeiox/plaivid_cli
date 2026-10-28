@@ -20,6 +20,7 @@ except ImportError:
 
 from . import (actions, commands, config, monitoring, render, session, theme,
                transport, vms)
+from .terminal import TerminalRenderer
 from .version import __version__
 
 
@@ -43,7 +44,13 @@ class App(object):
         self.status = ""
         self.sort_key = None      # VM-list order, set by the `sort` command
         self.sort_desc = False
-        self.scroll_offset = 0
+        self.scroll_offset = 0      # first VM row in the visible list window
+        self.vm_limit = 0
+        self._screen = None
+        self._terminal_size = None
+        self._layout_key = None
+        self._layout_compact = False
+        self._layout_ultra_compact = False
         self._history = []
         self.cmd_ctx = commands.CommandContext(self)
 
@@ -88,10 +95,10 @@ class App(object):
         if sys.stdin.isatty() and sys.stdout.isatty():
             # Use SGR mouse reporting so wheel events arrive as complete CSI
             # sequences and can be consumed before command-line text handling.
-            sys.stdout.write("\033[?1049h\033[?25l\033[?1000h\033[?1006h"
-                             "\033[2J\033[H")
+            sys.stdout.write("\033[?1049h\033[?25l\033[?1000h\033[?1006h\033[H")
             sys.stdout.flush()
             self._fullscreen = True
+            self._screen = TerminalRenderer(sys.stdout)
 
     def _leave_fullscreen(self):
         """Restore the shell screen and cursor on every exit path."""
@@ -100,35 +107,74 @@ class App(object):
             sys.stdout.flush()
             self._fullscreen = False
 
-    def _clear(self):
-        if sys.stdout.isatty():
-            sys.stdout.write("\033[2J\033[H")
-
     def draw(self):
-        self._clear()
         sort_label = None
         if self.sort_key:
             sort_label = "%s %s" % (self.sort_key,
                                     "↓" if self.sort_desc else "↑")
         is_tty = sys.stdin.isatty() and sys.stdout.isatty()
-        rows = shutil.get_terminal_size((100, 24)).lines if is_tty else 24
-        dashboard = render.dashboard(
-            self.host, self.vms, sort_label, self.status,
-            compact=is_tty and rows <= 40)
         if not is_tty:
-            print(render.center(dashboard))
+            print(render.center(render.dashboard(
+                self.host, self.vms, sort_label, self.status)))
             return
-        page_size = max(4, rows - 4)  # reserve a line for the hint and one for input
-        all_lines = dashboard.splitlines()
-        max_offset = max(0, len(all_lines) - page_size)
-        self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
-        visible = all_lines[self.scroll_offset:self.scroll_offset + page_size]
-        if max_offset and visible:
-            page = self.scroll_offset // page_size + 1
-            pages = (len(all_lines) + page_size - 1) // page_size
-            visible.append(render.hint(
-                "Page %d/%d  |  Page Up / Page Down to scroll" % (page, pages)))
-        print(render.center("\n".join(visible)))
+
+        size = shutil.get_terminal_size((100, 24))
+        rows, columns = size.lines, size.columns
+        self._terminal_size = (columns, rows)
+        sort_label = sort_label or ""
+        vm_signature = tuple((vm.name, vm.uuid, vm.state, vm.vcpu, vm.mem_human,
+                              vm.uptime, vm.pid, vm.port) for vm in self.vms)
+        host_signature = tuple(sorted((key, str(value))
+                                      for key, value in self.host.items()))
+        layout_key = (rows, columns, sort_label, len(self.status),
+                      host_signature, vm_signature)
+        if layout_key != self._layout_key:
+            compact = rows <= 40
+            if not compact:
+                full_base = render.dashboard(
+                    self.host, self.vms, sort_label or None, self.status,
+                    compact=False, vm_offset=0, vm_limit=0).splitlines()
+                full_row_height = render.vm_row_height(columns, False, self.vms)
+                # Switch to compact chrome if the full layout would leave fewer
+                # than four VM rows visible; this reduces paging on short screens.
+                if rows - 1 - len(full_base) < 4 * full_row_height:
+                    compact = True
+            ultra_compact = rows <= 18
+            baseline = render.dashboard(
+                self.host, self.vms, sort_label or None, self.status,
+                compact=compact, ultra_compact=ultra_compact,
+                vm_offset=0, vm_limit=0).splitlines()
+            row_height = render.vm_row_height(columns, compact, self.vms)
+            if self.vms:
+                self.vm_limit = min(
+                    len(self.vms), max(1, (rows - 1 - len(baseline)) // row_height))
+                self.scroll_offset = min(
+                    max(0, self.scroll_offset),
+                    max(0, len(self.vms) - self.vm_limit))
+            else:
+                self.vm_limit = 0
+                self.scroll_offset = 0
+            self._layout_key = layout_key
+            self._layout_compact = compact
+            self._layout_ultra_compact = ultra_compact
+        compact = self._layout_compact
+        ultra_compact = self._layout_ultra_compact
+        if self.vms:
+            self.scroll_offset = min(
+                max(0, self.scroll_offset),
+                max(0, len(self.vms) - self.vm_limit))
+        dashboard = render.dashboard(
+            self.host, self.vms, sort_label, self.status, compact=compact,
+            ultra_compact=ultra_compact, vm_offset=self.scroll_offset,
+            vm_limit=self.vm_limit)
+        lines = render.center(dashboard).splitlines()
+        if len(lines) > rows - 1:
+            # The terminal is too short for fixed chrome plus even one VM; keep
+            # the top/static layout stable and let the minimum list region show.
+            lines = lines[:rows - 1]
+        if self._screen is None:
+            self._screen = TerminalRenderer(sys.stdout)
+        self._screen.paint(lines, columns, rows)
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):
@@ -389,11 +435,14 @@ class App(object):
             return buffer + prefix
         return buffer[:-len(token)] + prefix if token else buffer + prefix
 
+    def _scroll_vms(self, delta):
+        """Move only the VM list window; static dashboard zones stay pinned."""
+        maximum = max(0, len(self.vms) - max(1, self.vm_limit))
+        self.scroll_offset = max(0, min(maximum, self.scroll_offset + delta))
+
     def _scroll_page(self, direction):
-        """Move one viewport page up (-1) or down (+1)."""
-        rows = shutil.get_terminal_size((100, 24)).lines
-        page = max(4, rows - 4)
-        self.scroll_offset = max(0, self.scroll_offset + direction * page)
+        """Move one visible-list page, not the entire screen viewport."""
+        self._scroll_vms(direction * max(1, self.vm_limit))
 
     def _read_escape_sequence(self, select_fn, fd, csi_started=False):
         """Consume complete CSI/SS3 input directly from the fd, not TextIO.
@@ -471,6 +520,14 @@ class App(object):
             sys.stdout.flush()
             decoder = codecs.getincrementaldecoder("utf-8")("replace")
             while True:
+                ready, _, _ = select.select([fd], [], [], 0.25)
+                if not ready:
+                    size = shutil.get_terminal_size((100, 24))
+                    if self._terminal_size != (size.columns, size.lines):
+                        self.draw()
+                        sys.stdout.write(prompt + buffer)
+                        sys.stdout.flush()
+                    continue
                 raw = os.read(fd, 1)
                 if not raw:
                     return None
@@ -483,16 +540,10 @@ class App(object):
                 if sequence is not None:
                     wheel = self._read_mouse_scroll(sequence, select.select, fd)
                     if sequence in ("[5~", "[5;2~") or wheel < 0:
-                        if wheel:
-                            self.scroll_offset = max(0, self.scroll_offset - 3)
-                        else:
-                            self._scroll_page(-1)
+                        self._scroll_vms(-3 if wheel else -max(1, self.vm_limit))
                         self.draw()
                     elif sequence in ("[6~", "[6;2~") or wheel > 0:
-                        if wheel:
-                            self.scroll_offset += 3
-                        else:
-                            self._scroll_page(1)
+                        self._scroll_vms(3 if wheel else max(1, self.vm_limit))
                         self.draw()
                     elif sequence in ("[A", "OA") and self._history:
                         history_pos = max(0, history_pos - 1)

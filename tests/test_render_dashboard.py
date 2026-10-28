@@ -9,6 +9,21 @@ from plaivid_cli.orchestrator import App
 
 
 class DashboardTests(unittest.TestCase):
+    def test_vm_list_window_keeps_static_zones_at_identical_rows(self):
+        vms = [VM("uuid-%02d" % n, "vm-%02d" % n) for n in range(8)]
+        for index, vm in enumerate(vms, 1):
+            vm.index = index
+            vm.state = "started"
+        first = render.dashboard({}, vms, compact=True, vm_offset=0, vm_limit=3).splitlines()
+        second = render.dashboard({}, vms, compact=True, vm_offset=3, vm_limit=3).splitlines()
+        table = next(i for i, line in enumerate(first)
+                     if "VIRTUAL MACHINES" in line)
+        table_height = 3 + 3  # top/bottom borders, header, three VM rows
+        self.assertEqual(len(first), len(second))
+        self.assertEqual(first[:table], second[:table])
+        self.assertEqual(first[table + table_height:],
+                         second[table + table_height:])
+
     def test_compact_height_mode_preserves_inventory_and_drops_rail(self):
         vm = VM("a" * 36, "test-vm")
         vm.state = "started"
@@ -23,15 +38,18 @@ class DashboardTests(unittest.TestCase):
 
     def test_page_scroll_moves_by_viewport_and_never_goes_negative(self):
         app = App()
+        app.vms = [VM("vm-%d" % n, "vm-%d" % n) for n in range(21)]
+        app.vm_limit = 5
+        app.scroll_offset = 5
         terminal = type("Terminal", (), {"lines": 20})()
         with mock.patch("plaivid_cli.orchestrator.shutil.get_terminal_size",
                         return_value=terminal):
             app._scroll_page(-1)
             self.assertEqual(app.scroll_offset, 0)
             app._scroll_page(1)
-            self.assertEqual(app.scroll_offset, 16)
-            app._scroll_page(-1)
-            self.assertEqual(app.scroll_offset, 0)
+            self.assertEqual(app.scroll_offset, 5)
+            app._scroll_page(1)
+            self.assertEqual(app.scroll_offset, 10)
 
     def test_uptime_format_and_long_box_content(self):
         self.assertEqual(render.format_uptime(0), "0s")

@@ -40,6 +40,15 @@ class TuiEntryTests(unittest.TestCase):
         self.assertEqual(app._read_mouse_scroll("[<65;10;4M", None, 41), 1)
         self.assertEqual(app._read_mouse_scroll("[<0;10;4m", None, 41), 0)
 
+        payload = bytearray([96, 40, 30])  # X10 wheel-up code + coordinates
+        def available(_readers, _write, _errors, _timeout):
+            return ([41] if payload else [], [], [])
+        def read_byte(_fd, _size):
+            return bytes([payload.pop(0)]) if payload else b""
+        with mock.patch.object(orchestrator.os, "read", side_effect=read_byte):
+            self.assertEqual(app._read_mouse_scroll("[M", available, 41), -1)
+        self.assertEqual(payload, bytearray())
+
     def test_fullscreen_buffer_and_cursor_are_restored(self):
         output = io.StringIO()
         output.isatty = lambda: True

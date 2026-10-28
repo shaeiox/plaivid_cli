@@ -52,3 +52,15 @@ wheel reports.
 2. Enable/disable SGR mouse reporting and map wheel/Page Up/Down to scrolling.
 3. Use a height-aware compact layout and vertically stack boxes at narrow widths.
 4. Add regression tests for key/mouse consumption, compact layout, and paging.
+
+## Zoned rendering follow-up
+
+- A fixed screen frame is painted by `TerminalRenderer` with absolute cursor
+  addressing, a previous-frame buffer, and row-level diffing. The alternate
+  screen is cleared only on first paint or resize.
+- The renderer keeps header, metric cards, context rail, and footer at fixed
+  rows. `vm_offset`/`vm_limit` window only inventory rows; Page Up/Down and
+  wheel events change this window, not the entire dashboard viewport.
+- The list window size is computed from terminal geometry and wrapped row
+  heights. On resize, the frame is recalculated and repainted; on list scroll,
+  unchanged rows are not emitted to the terminal.
