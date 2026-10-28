@@ -29,6 +29,25 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("refresh complete", output)
         self.assertIn("Sorted by uptime", output)
 
+    def test_overview_uses_dashboard_panels_responsively(self):
+        snap = {"hostname": "pvm-host", "uptime_human": "2 days",
+                "cpu_pct": 3, "logical_cores": 8, "physical_cores": 4,
+                "mem_pct": 45, "mem_used_gb": 14, "mem_total_gb": 31,
+                "swap_total_gb": 0, "load1": 0.1, "load5": 0.2,
+                "load15": 0.3, "storage": []}
+        agg = {"total": 1, "running": 1, "stopped": 0, "off": 0,
+               "vcpu_run": 2, "vcpu_total": 2, "mem_run_mb": 2048,
+               "mem_total_mb": 2048}
+        for width in (80, 120):
+            with mock.patch.object(render, "term_width", return_value=width):
+                output = render.overview(snap, None, {}, agg, "*")
+            self.assertIn("LIVE OVERVIEW", output)
+            self.assertIn("VIRTUAL MACHINES", output)
+            self.assertIn("NETWORK", output)
+            self.assertIn("STORAGE", output)
+            self.assertLessEqual(max(render._vis(line)
+                                     for line in output.splitlines()), width)
+
     def test_narrow_terminal_stacks_content_without_overflow(self):
         vm = VM("abcd-uuid", "test-vm")
         vm.state = "off"

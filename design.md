@@ -16,6 +16,7 @@ Implementation constraints:
   rows are displayed in inventory order, not interactively selected.
 
 Incremental implementation plan: (1) design analysis (this file), (2) pure
-layout primitives, (3) metric cards and responsive content/footer grids,
-(4) wire interactive draw only, (5) renderer tests, compile and smoke checks,
-(6) bump package version. Existing action and monitoring logic remains intact.
+layout primitives, (3) metric cards and responsive content/footer grids, (4) apply the same
+panel language to the live `overview` page while preserving its sampling and
+refresh loop, (5) renderer tests, compile and smoke checks, (6) bump package
+version. Existing action and monitoring logic remains intact.

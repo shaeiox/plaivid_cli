@@ -555,16 +555,102 @@ def _storage_panel(snap):
 
 
 def overview(snap, prev, tapmap, agg, spin):
+    """Render the live monitor with the same responsive panel language."""
     if snap.get("error"):
         return frame("Live monitoring", [err(snap["error"])], theme.error)
+
+    screen = max(60, term_width())
+    lines = [theme.bold(theme.primary("LIVE OVERVIEW"))
+             + theme.muted("   %s   %s   PVM %s" % (
+                 snap.get("hostname") or "host",
+                 snap.get("uptime_human") or "uptime unavailable",
+                 snap.get("pvm_version") or "?"))]
+    cpu = snap.get("cpu_pct")
+    ram = snap.get("mem_pct")
+    load1 = float(snap.get("load1") or 0)
+    cores = snap.get("logical_cores") or 0
+    load_pct = min(100.0, 100.0 * load1 / cores) if cores else 0
+    cardspec = [
+        ("CPU", ["--" if cpu is None else "%.0f%%" % cpu,
+                 "%s logical / %s physical" % (cores,
+                                                  snap.get("physical_cores") or "-")], theme.primary),
+        ("LOAD", ["1m %s  5m %s  15m %s" % (
+            snap.get("load1") or "-", snap.get("load5") or "-",
+            snap.get("load15") or "-"), _bar(load_pct, 12)], theme.primary),
+        ("MEMORY", ["--" if ram is None else "%.0f%%" % ram,
+                    "%.1f / %.1f GB" % (snap.get("mem_used_gb") or 0,
+                                        snap.get("mem_total_gb") or 0),
+                    _bar(ram, 12)], theme.primary),
+        ("SWAP", ["disabled" if (snap.get("swap_total_gb") or 0) <= 0.01
+                  else "%.0f%%" % (snap.get("swap_pct") or 0),
+                  "%.1f / %.1f GB" % (snap.get("swap_used_gb") or 0,
+                                      snap.get("swap_total_gb") or 0)], theme.warning),
+    ]
+    columns = 4 if screen >= 100 else 2
+    cw = (screen - columns + 1) // columns
+    cards = [_panel(name, content, cw, color)
+             for name, content, color in cardspec]
+    for i in range(0, len(cards), columns):
+        lines.extend(_hstack(cards[i:i + columns]))
+
+    vm_lines = ["Total %s | %s running | %s stopped | %s off" % (
+        agg.get("total", 0), agg.get("running", 0), agg.get("stopped", 0),
+        agg.get("off", 0)),
+        "vCPU %s/%s allocated | RAM %.1f/%.1f GB allocated" % (
+            agg.get("vcpu_run", 0), agg.get("vcpu_total", 0),
+            (agg.get("mem_run_mb", 0) or 0) / 1024.0,
+            (agg.get("mem_total_mb", 0) or 0) / 1024.0)]
+    lines.extend(_panel("VIRTUAL MACHINES", vm_lines, screen, theme.secondary))
+
     rates = _net_rates(snap, prev)
-    measuring = not prev
-    return "\n".join([
-        _host_panel(snap, spin),
-        _vm_panel(agg),
-        _net_panel(snap, rates, tapmap, measuring),
-        _storage_panel(snap),
-    ])
+    network_lines = []
+    if not prev:
+        network_lines.append("Measuring throughput on next refresh...")
+    else:
+        phys = {name: rate for name, rate in rates.items()
+                if rate[2] == "physical"}
+        network_lines.append("Uplink  down %s   up %s" % (
+            human_rate(sum(rate[0] for rate in phys.values())),
+            human_rate(sum(rate[1] for rate in phys.values()))))
+        for name in sorted(phys):
+            rx, tx, _kind = phys[name]
+            state = snap.get("net", {}).get(name, {}).get("state") or "-"
+            network_lines.append("%-12s %-6s  ↓ %s  ↑ %s" % (
+                name, state, human_rate(rx), human_rate(tx)))
+        per_vm = {}
+        for name, (rx, tx, _kind) in rates.items():
+            vm_name = tapmap.get(name)
+            if vm_name:
+                totals = per_vm.setdefault(vm_name, [0.0, 0.0])
+                totals[0] += rx
+                totals[1] += tx
+        for vm_name, (rx, tx) in sorted(
+                per_vm.items(), key=lambda item: sum(item[1]), reverse=True)[:5]:
+            network_lines.append("%-14s ↓ %s  ↑ %s" % (
+                vm_name[:14], human_rate(rx), human_rate(tx)))
+        if len(network_lines) == 1:
+            network_lines.append("No physical interface rates available")
+
+    storage_lines = []
+    for item in snap.get("storage", []):
+        storage_lines.append("%-10s %s %s / %.1f GB  %s" % (
+            item.get("kind", "disk"), _bar(item.get("pct"), 8),
+            "%.1f" % item.get("used_gb", 0), item.get("total_gb", 0),
+            _short(item.get("mount", ""), 20)))
+    if not storage_lines:
+        storage_lines.append("No storage data available")
+
+    if screen >= 100:
+        half = (screen - 1) // 2
+        lower = _hstack([_panel("NETWORK", network_lines, half, theme.accent),
+                         _panel("STORAGE", storage_lines,
+                                screen - half - 1, theme.warning)])
+        lines.extend(lower)
+    else:
+        lines.extend(_panel("NETWORK", network_lines, screen, theme.accent))
+        lines.extend(_panel("STORAGE", storage_lines, screen, theme.warning))
+    lines.append(theme.muted("Refresh interval is controlled by PLAIVID_REFRESH"))
+    return "\n".join(lines)
 
 
 # --- VM detail ---------------------------------------------------------------
