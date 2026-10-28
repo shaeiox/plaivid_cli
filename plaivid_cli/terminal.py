@@ -20,33 +20,26 @@ class TerminalRenderer(object):
 
     @staticmethod
     def _clip(line, width):
-        """Clip a colored line to terminal columns without counting escapes."""
+        """Clip a colored line to terminal columns without counting escapes.
+
+        Single-pass scan: ANSI escapes are appended without consuming visible
+        columns; printable characters are appended and counted. The iterator
+        and position counter always stay in sync, so right-side content is
+        never clipped too early or too late.
+        """
         out = []
         visible = 0
         pos = 0
-        for match in _ANSI.finditer(line):
-            text = line[pos:match.start()]
-            for char in text:
-                if visible >= width:
-                    break
-                out.append(char)
-                visible += 1
-            if visible >= width:
-                break
-            out.append(match.group(0))
-            pos = match.end()
-        if visible < width:
-            for char in line[pos:]:
-                if _ANSI.match(line, pos):
-                    match = _ANSI.match(line, pos)
-                    out.append(match.group(0))
-                    pos = match.end()
-                    continue
-                if visible >= width:
-                    break
-                out.append(char)
-                visible += 1
-                pos += 1
+        line_len = len(line)
+        while pos < line_len and visible < width:
+            match = _ANSI.match(line, pos)
+            if match:
+                out.append(match.group(0))
+                pos = match.end()
+                continue
+            out.append(line[pos])
+            visible += 1
+            pos += 1
         if visible >= width and "\033[" in line:
             out.append("\033[0m")
         return "".join(out)

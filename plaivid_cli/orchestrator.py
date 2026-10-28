@@ -53,6 +53,12 @@ class App(object):
         self._layout_ultra_compact = False
         self._history = []
         self.cmd_ctx = commands.CommandContext(self)
+        # --- VM management page state -------------------------------------
+        self.vm_mode = False        # VM management page active
+        self.vm_page = 0            # current page (0-based)
+        self.vm_cursor = 0          # cursor row within current page (0-based)
+        self.vm_search = ""         # live search filter
+        self.content_offset = 0     # scrollable content viewport offset
 
     # --- session ------------------------------------------------------------
     def _prompt_credentials(self):
@@ -107,6 +113,20 @@ class App(object):
             sys.stdout.flush()
             self._fullscreen = False
 
+    def _clear(self):
+        """Clear the terminal screen for a full-page display.
+
+        Used by page commands (health, show, log, overview) before printing
+        their body. Clears the alternate screen and invalidates the diffing
+        renderer so the next draw() fully repaints the dashboard instead of
+        skipping it because the frame appears unchanged.
+        """
+        if sys.stdout.isatty():
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
+        if self._screen is not None:
+            self._screen.invalidate()
+
     def draw(self):
         sort_label = None
         if self.sort_key:
@@ -120,7 +140,12 @@ class App(object):
 
         size = shutil.get_terminal_size((100, 24))
         rows, columns = size.lines, size.columns
-        self._terminal_size = (columns, rows)
+        if self._terminal_size != (columns, rows):
+            # Force a full repaint on resize so no ghost panels or borders
+            # linger from the previous frame.
+            if self._screen is not None:
+                self._screen.invalidate()
+            self._terminal_size = (columns, rows)
         sort_label = sort_label or ""
         vm_signature = tuple((vm.name, vm.uuid, vm.state, vm.vcpu, vm.mem_human,
                               vm.uptime, vm.pid, vm.port) for vm in self.vms)
@@ -175,6 +200,210 @@ class App(object):
         if self._screen is None:
             self._screen = TerminalRenderer(sys.stdout)
         self._screen.paint(lines, columns, rows)
+
+    # --- VM management page -------------------------------------------------
+
+    @staticmethod
+    def _calc_page_size(rows):
+        """Number of VM rows per page based on terminal height."""
+        if rows > 40:
+            return 20
+        if rows >= 25:
+            return 10
+        return max(1, rows - 4)
+
+    def _get_filtered_vms(self):
+        """Return VMs filtered by search and sorted by current sort key."""
+        vms = list(self.vms)
+        if self.vm_search:
+            low = self.vm_search.lower()
+            vms = [v for v in vms
+                   if low in (v.name or "").lower()
+                   or low in (v.uuid or "").lower()
+                   or low in (v.state or "").lower()]
+        if self.sort_key:
+            from . import vms as vms_mod
+            vms = vms_mod.sort_vms(vms, self.sort_key, self.sort_desc)
+        return vms
+
+    def run_vm_management(self):
+        """Full-screen VM management page: pagination, search, sort.
+
+        Entered via the ``vm`` command. Exits on ``q`` or ``Esc``.
+        """
+        self.vm_mode = True
+        self.vm_page = 0
+        self.vm_cursor = 0
+        self.vm_search = ""
+        try:
+            self.refresh()
+            while self.vm_mode:
+                self.draw_vm_management()
+                try:
+                    key = self._read_vm_key()
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if key is None:
+                    break
+                if not self._handle_vm_key(key):
+                    break
+            return 0
+        finally:
+            self.vm_mode = False
+
+    def draw_vm_management(self):
+        """Render the VM management page (paginated table + static zones)."""
+        size = shutil.get_terminal_size((100, 24))
+        rows, columns = size.lines, size.columns
+        self._terminal_size = (columns, rows)
+
+        page_size = self._calc_page_size(rows)
+        vms = self._get_filtered_vms()
+        total_pages = max(1, (len(vms) + page_size - 1) // page_size)
+        self.vm_page = min(self.vm_page, total_pages - 1)
+        self.vm_cursor = min(self.vm_cursor, max(0, min(page_size, len(vms)) - 1))
+
+        start = self.vm_page * page_size
+        end = start + page_size
+        page_vms = vms[start:end]
+
+        if self._screen is None:
+            self._screen = TerminalRenderer(sys.stdout)
+
+        lines = render.vm_management_page(
+            self.host, page_vms,
+            page=self.vm_page + 1, total_pages=total_pages,
+            page_size=page_size, total_count=len(vms),
+            search=self.vm_search,
+            sort_key=self.sort_key, sort_desc=self.sort_desc,
+            status=self.status,
+            width=columns, height=rows,
+            cursor=self.vm_cursor,
+        )
+        if len(lines) > rows - 1:
+            lines = lines[:rows - 1]
+        self._screen.paint(lines, columns, rows)
+
+    def _read_vm_key(self):
+        """Read a single key in VM management mode (raw terminal)."""
+        if not sys.stdin.isatty():
+            return None
+        try:
+            import select
+            import termios
+            import tty
+        except ImportError:
+            return None
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
+            while True:
+                ready, _, _ = select.select([fd], [], [], 0.25)
+                if not ready:
+                    size = shutil.get_terminal_size((100, 24))
+                    if self._terminal_size != (size.columns, size.lines):
+                        self.draw_vm_management()
+                    continue
+                raw = os.read(fd, 1)
+                if not raw:
+                    return None
+                if raw == b"\x1b":
+                    sequence = self._read_escape_sequence(select.select, fd)
+                    if sequence in ("[A", "OA"):
+                        return "UP"
+                    if sequence in ("[B", "OB"):
+                        return "DOWN"
+                    if sequence in ("[5~", "[5;2~"):
+                        return "PAGE_UP"
+                    if sequence in ("[6~", "[6;2~"):
+                        return "PAGE_DOWN"
+                    wheel = self._read_mouse_scroll(sequence, select.select, fd)
+                    if wheel < 0:
+                        return "PAGE_UP"
+                    if wheel > 0:
+                        return "PAGE_DOWN"
+                    if sequence == "":
+                        return "ESC"
+                    return None
+                if raw == b"\x7f" or raw == b"\x08":
+                    return "BACKSPACE"
+                if raw in (b"\r", b"\n"):
+                    return "ENTER"
+                if raw == b"\x03":
+                    raise KeyboardInterrupt
+                if raw == b"\x04":
+                    return "CTRL_D"
+                char = decoder.decode(raw)
+                if char and char.isprintable():
+                    return char
+                return None
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            except Exception:
+                pass
+
+    def _read_vm_search(self):
+        """Read a search term character-by-character with live filtering.
+
+        Returns the final search string, or None if cancelled with Esc.
+        """
+        buffer = self.vm_search
+        while True:
+            self.vm_search = buffer
+            self.draw_vm_management()
+            key = self._read_vm_key()
+            if key == "ENTER" or key is None:
+                return buffer
+            if key == "ESC":
+                return None
+            if key == "BACKSPACE":
+                buffer = buffer[:-1]
+            elif len(key) == 1 and key.isprintable():
+                buffer += key
+            # ignore all other keys while typing the search
+
+    def _handle_vm_key(self, key):
+        """Handle one key in VM management mode. Returns False to exit."""
+        if key in ("q", "ESC"):
+            return False
+
+        rows = self._terminal_size[1] if self._terminal_size else 24
+        page_size = self._calc_page_size(rows)
+        vms = self._get_filtered_vms()
+        total_pages = max(1, (len(vms) + page_size - 1) // page_size)
+
+        if key == "UP":
+            if self.vm_cursor > 0:
+                self.vm_cursor -= 1
+            elif self.vm_page > 0:
+                self.vm_page -= 1
+                self.vm_cursor = min(page_size - 1, max(0, len(vms) - (self.vm_page * page_size) - 1))
+        elif key == "DOWN":
+            if self.vm_cursor < page_size - 1 and self.vm_cursor < len(vms) - (self.vm_page * page_size) - 1:
+                self.vm_cursor += 1
+            elif self.vm_page < total_pages - 1:
+                self.vm_page += 1
+                self.vm_cursor = 0
+        elif key == "PAGE_UP":
+            if self.vm_page > 0:
+                self.vm_page -= 1
+                self.vm_cursor = 0
+        elif key == "PAGE_DOWN":
+            if self.vm_page < total_pages - 1:
+                self.vm_page += 1
+                self.vm_cursor = 0
+        elif key == "/":
+            result = self._read_vm_search()
+            if result is not None:
+                self.vm_search = result
+                self.vm_page = 0
+                self.vm_cursor = 0
+        # ENTER, BACKSPACE, and other printable keys are no-ops in browse mode.
+        return True
 
     # --- dispatch -----------------------------------------------------------
     def dispatch(self, line):
@@ -393,16 +622,114 @@ class App(object):
         return True
 
     def _page(self, body, note):
-        """Clear, print a page, wait for Enter on a TTY, set a status note."""
+        """Clear, print a page, wait for Enter on a TTY, set a status note.
+
+        If the body is longer than the terminal viewport, enters a scrollable
+        view: Page Up/Down and mouse wheel scroll the content; q or Enter
+        returns to the dashboard. The static header/footer zones are preserved.
+        """
         self._clear()
-        print(render.center(body))
-        if sys.stdin.isatty():
+        lines = body.split("\n")
+        if not sys.stdin.isatty():
+            print(render.center(body))
+            self.status = render.hint(note)
+            return
+        size = shutil.get_terminal_size((100, 24))
+        rows, columns = size.lines, size.columns
+        viewport = max(1, rows - 4)  # room for hint header + footer
+        if len(lines) <= viewport:
+            print(render.center(body))
             try:
                 input("\n" + " " * render.margin()
                       + theme.muted("press Enter to return "))
             except (EOFError, KeyboardInterrupt):
                 print()
+        else:
+            self._scrollable_page(lines, viewport, columns, rows, note)
         self.status = render.hint(note)
+
+    def _scrollable_page(self, lines, viewport, columns, rows, note):
+        """Scrollable viewer for long page content (help, log, show, health).
+
+        Displays a window of ``viewport`` lines from ``lines``, scrolling with
+        Page Up/Down, arrow keys, and mouse wheel. ``q`` or Enter exits.
+        """
+        import select
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        offset = 0
+        max_offset = max(0, len(lines) - viewport)
+        try:
+            tty.setraw(fd)
+            if self._screen is None:
+                self._screen = TerminalRenderer(sys.stdout)
+            while True:
+                size = shutil.get_terminal_size((100, 24))
+                rows, columns = size.lines, size.columns
+                viewport = max(1, rows - 4)
+                max_offset = max(0, len(lines) - viewport)
+                offset = min(offset, max_offset)
+
+                visible = lines[offset:offset + viewport]
+                out_lines = []
+                out_lines.append(render.center(
+                    theme.muted("Content  [PgUp/PgDn/↑/↓/wheel scroll]  [q/Enter exit]")))
+                out_lines.append("")
+                for line in visible:
+                    out_lines.append(render.center(line[:columns]))
+                out_lines.append("")
+                out_lines.append(render.center(
+                    theme.muted("Lines %d-%d of %d"
+                                % (offset + 1, min(offset + len(visible), len(lines)),
+                                   len(lines)))))
+                out_lines.append("")
+
+                self._screen.paint(out_lines, columns, rows)
+
+                ready, _, _ = select.select([fd], [], [], 0.25)
+                if not ready:
+                    # Check for terminal resize
+                    if self._terminal_size != (columns, rows):
+                        if self._screen is not None:
+                            self._screen.invalidate()
+                        self._terminal_size = (columns, rows)
+                    continue
+                raw = os.read(fd, 1)
+                if not raw:
+                    break
+                if raw == b"\x1b":
+                    sequence = self._read_escape_sequence(select.select, fd)
+                    if sequence in ("[A", "OA") or sequence == "[1;5A":
+                        offset = max(0, offset - 1)
+                    elif sequence in ("[B", "OB") or sequence == "[1;5B":
+                        offset = min(max_offset, offset + 1)
+                    elif sequence in ("[5~", "[5;2~"):
+                        offset = max(0, offset - viewport)
+                    elif sequence in ("[6~", "[6;2~"):
+                        offset = min(max_offset, offset + viewport)
+                    wheel = self._read_mouse_scroll(sequence, select.select, fd)
+                    if wheel < 0:
+                        offset = max(0, offset - viewport)
+                    elif wheel > 0:
+                        offset = min(max_offset, offset + viewport)
+                    elif sequence == "":
+                        break  # Esc
+                elif raw in (b"\r", b"\n"):
+                    break
+                elif raw == b"\x03":
+                    raise KeyboardInterrupt
+                elif raw in (b"\x7f", b"\x08"):
+                    pass  # ignore backspace in scroll view
+        except (EOFError, KeyboardInterrupt):
+            pass
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            except Exception:
+                pass
 
     def _complete_buffer(self, buffer):
         """Simple prefix completion for the built-in raw terminal editor."""

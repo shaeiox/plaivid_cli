@@ -14,10 +14,13 @@ from .theme import BOX
 from .version import __version__
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
+# Broader CSI pattern: matches any escape sequence (cursor moves, etc.) so
+# that _vis() measures true visible width on all terminals including Windows.
+_CSI = re.compile(r"\033\[[0-?]*[ -/]*[@-~]")
 
 
 def _vis(s):
-    return len(_ANSI.sub("", s))
+    return len(_CSI.sub("", s))
 
 
 def term_width():
@@ -27,9 +30,12 @@ def term_width():
         return 100
 
 
+_SCROLL_PAD = 2  # columns reserved per side for terminal scroll bars / breathing room
+
+
 def width():
-    """Content (block) width - frames fill the whole terminal width."""
-    return max(20, term_width())
+    """Content (block) width - frames fill the terminal width minus scroll padding."""
+    return max(20, term_width() - _SCROLL_PAD * 2)
 
 
 def margin():
@@ -52,7 +58,7 @@ def frame(title, lines, color_fn=theme.muted):
     w = width()
     inner = w - 2
     title_width = max(1, inner - 2)
-    title_plain = _ANSI.sub("", title or "")
+    title_plain = _CSI.sub("", title or "")
     title_parts = textwrap.wrap(title_plain, width=title_width,
                                 break_long_words=True,
                                 break_on_hyphens=False) or [""]
@@ -67,7 +73,7 @@ def frame(title, lines, color_fn=theme.muted):
     content_width = max(1, inner - 4)
     for line in lines:
         if _vis(line) > content_width:
-            body.extend(textwrap.wrap(_ANSI.sub("", line), width=content_width,
+            body.extend(textwrap.wrap(_CSI.sub("", line), width=content_width,
                                       break_long_words=True,
                                       break_on_hyphens=False) or [""])
         else:
@@ -210,7 +216,7 @@ def _panel(title, lines, panel_width, color_fn=theme.muted):
         # readable even when a panel is narrow. Wrapped lines retain content;
         # color is dropped only on those lines that need wrapping.
         if _vis(line) > content_width:
-            plain = _ANSI.sub("", line)
+            plain = _CSI.sub("", line)
             wrapped = textwrap.wrap(plain, width=content_width,
                                     break_long_words=True,
                                     break_on_hyphens=False) or [""]
@@ -299,7 +305,7 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
     """Responsive dashboard layout, composed only from already-loaded data."""
     import datetime
 
-    screen = max(20, term_width())
+    screen = width()
     gap = 1
     running = sum(1 for vm in vms if vm.running)
     stopped = sum(1 for vm in vms if vm.state == "stopped")
@@ -317,7 +323,7 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
     else:
         for header_line in (title, shortcuts):
             if _vis(header_line) > screen:
-                lines.extend(textwrap.wrap(_ANSI.sub("", header_line), width=screen,
+                lines.extend(textwrap.wrap(_CSI.sub("", header_line), width=screen,
                                            break_long_words=True))
             else:
                 lines.append(header_line)
@@ -542,6 +548,155 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
     return "\n".join(lines)
 
 
+# --- VM management page ------------------------------------------------------
+
+def vm_management_page(host, page_vms, page, total_pages, page_size,
+                       total_count, search, sort_key, sort_desc, status,
+                       width, height, cursor=0):
+    """Render the VM management page as a list of lines.
+
+    Layout:
+      Header:  title + pagination + sort + search
+      Body:    paginated VM table with a highlighted cursor row
+      Footer:  selected VM details + key hints + connection status
+
+    Returns a list of strings (one per screen row), already clipped to width.
+    """
+    screen = max(20, width)
+    gap = 1
+    lines = []
+
+    # ---- Header -----------------------------------------------------------
+    title = theme.bold(theme.primary("Virtual Machines"))
+    start_row = (page - 1) * page_size + 1 if page_vms else 0
+    end_row = min(start_row + len(page_vms) - 1, total_count) if page_vms else 0
+    sort_dir = "↓" if sort_desc else "↑"
+    sort_label = (sort_key or "default") + " " + sort_dir if sort_key else "default"
+    pag_info = ("Rows %d-%d/%d  |  Page %d/%d  |  Sort: %s"
+                % (start_row, end_row, total_count, page, total_pages, sort_label))
+    search_info = ("  |  Search: %s" % search) if search else ""
+    header_line = title + theme.muted("   " + pag_info + search_info)
+    lines.extend(textwrap.wrap(_CSI.sub("", header_line), width=screen,
+                               break_long_words=True) or [header_line])
+    lines.append("")  # separator
+
+    # ---- VM table ---------------------------------------------------------
+    if not page_vms:
+        lines.append(theme.muted("  No VMs match the current filter."))
+    else:
+        # Column widths: ID, NAME, STATE, CPU, MEM, UPTIME, PID, SPICE, UUID
+        id_w = 4
+        name_w = min(max([len(v.name) for v in page_vms] + [4]), 22)
+        state_w = 9
+        cpu_w = 5
+        mem_w = 6
+        up_w = 13
+        pid_w = 8
+        spice_w = 7
+        uuid_w = max(8, screen - (id_w + name_w + state_w + cpu_w + mem_w +
+                                  up_w + pid_w + spice_w + 10))
+        if uuid_w < 8:
+            # Too narrow: drop less important columns
+            uuid_w = max(8, screen - (id_w + name_w + state_w + 6))
+
+        header = ("  %s %s %s %s %s %s %s %s %s" % (
+            "ID".ljust(id_w),
+            "NAME".ljust(name_w),
+            "STATE".ljust(state_w),
+            "CPU".rjust(cpu_w),
+            "MEM".rjust(mem_w),
+            "UPTIME".ljust(up_w),
+            "PID".ljust(pid_w),
+            "SPICE".ljust(spice_w),
+            "UUID"[:uuid_w].ljust(uuid_w),
+        ))
+        lines.append(theme.muted(header))
+
+        for i, v in enumerate(page_vms):
+            fn, glyph = theme.state_style(v.state)
+            name = v.name if len(v.name) <= name_w else v.name[:name_w - 1] + "…"
+            port = str(v.port or "-").ljust(spice_w - 1)
+            marker = ">" if i == cursor else " "
+            row = ("  %s %s %s %s %s %s %s %s %s" % (
+                marker + str(v.index or "-").ljust(id_w - 1),
+                theme.bold(fn(name.ljust(name_w))) if i == cursor else fn(name.ljust(name_w)),
+                fn((glyph + " " + (v.state or "?")).ljust(state_w - 1)),
+                theme.fg(str(v.vcpu if v.vcpu is not None else "-").rjust(cpu_w - 1)),
+                theme.fg(v.mem_human.rjust(mem_w - 1)),
+                theme.muted((v.uptime or "-")[:up_w - 1].ljust(up_w - 1)),
+                theme.accent(str(v.pid or "-").ljust(pid_w - 1)),
+                theme.accent(port) if v.running else theme.muted(port.ljust(spice_w - 1)),
+                theme.muted((v.uuid or "-")[:uuid_w].ljust(uuid_w)),
+            ))
+            lines.append(row)
+
+    # ---- Footer -----------------------------------------------------------
+    lines.append("")
+    # Selected VM info
+    if page_vms:
+        sel = page_vms[min(cursor, len(page_vms) - 1)]
+        fn, glyph = theme.state_style(sel.state)
+        lines.append("Selected: %s%s  CPU: %s  MEM: %s  PID: %s  SPICE: %s"
+                     % (theme.bold(sel.name or "-"),
+                        fn(glyph + " " + (sel.state or "?")),
+                        theme.accent(str(sel.vcpu or "-")),
+                        theme.accent(sel.mem_human),
+                        theme.accent(str(sel.pid or "-")),
+                        theme.accent(str(sel.port or "-"))))
+    else:
+        lines.append("Selected: (none)")
+
+    lines.append("")
+    # Key hints
+    hints = theme.muted("[q] quit   [/] search   [PgUp/PgDn] page   [↑/↓] cursor")
+    lines.append(hints)
+    lines.append("")
+
+    # Connection status
+    host_name = host.get("name") or "PVM"
+    host_ip = host.get("ip") or ""
+    status_left = "Connected to: %s (%s)" % (host_name, host_ip)
+    status_right = "Plaivid CLI v" + __version__
+    status_center = "VM Management Page"
+    status_line = status_left
+    if screen >= 90:
+        remain = max(1, screen - _vis(status_left) - _vis(status_right) - 2)
+        status_line += " " * max(1, (remain - _vis(status_center)) // 2)
+        status_line += status_center
+        status_line += " " * max(1, screen - _vis(status_line) - _vis(status_right))
+        status_line += status_right
+    lines.append(theme.primary(status_line[:screen]))
+
+    # Clip every line to screen width (respecting ANSI escapes)
+    return [_clip(line, screen) for line in lines]
+
+
+def _clip(line, width):
+    """Clip a line to ``width`` visible characters (ANSI-aware).
+
+    Single-pass scan: ANSI escapes are appended without consuming visible
+    columns; printable characters are appended and counted. The position
+    counter and scan always stay in sync, so right-side content is never
+    clipped too early or too late.
+    """
+    out = []
+    visible = 0
+    pos = 0
+    line_len = len(line)
+    while pos < line_len and visible < width:
+        match = _CSI.match(line, pos)
+        if match:
+            out.append(match.group(0))
+            pos = match.end()
+            continue
+        out.append(line[pos])
+        visible += 1
+        pos += 1
+    if visible >= width and "\033[" in line:
+        out.append("\033[0m")
+    return "".join(out)
+
+
 def ok(msg):
     return theme.success(theme.glyph("ok") + " ") + msg
 
@@ -719,14 +874,14 @@ def overview(snap, prev, tapmap, agg, spin):
     if snap.get("error"):
         return frame("Live monitoring", [err(snap["error"])], theme.error)
 
-    screen = max(20, term_width())
+    screen = width()
     headline = (theme.bold(theme.primary("LIVE OVERVIEW"))
                 + theme.muted("   %s   %s   PVM %s" % (
                     snap.get("hostname") or "host",
                     "host " + format_uptime(snap.get("host_uptime_seconds")),
                     snap.get("pvm_version") or "?")))
     lines = ([headline] if _vis(headline) <= screen else
-             textwrap.wrap(_ANSI.sub("", headline), width=screen,
+             textwrap.wrap(_CSI.sub("", headline), width=screen,
                            break_long_words=True))
     cpu = snap.get("cpu_pct")
     ram = snap.get("mem_pct")
