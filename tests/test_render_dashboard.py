@@ -8,6 +8,16 @@ from plaivid_cli.vms import VM
 
 
 class DashboardTests(unittest.TestCase):
+    def test_uptime_format_and_long_box_content(self):
+        self.assertEqual(render.format_uptime(0), "0s")
+        self.assertEqual(render.format_uptime(604800 + 86400 + 3661),
+                         "1w 1d 1h 1m 1s")
+        text = "long-value-" * 12 + "tail-marker"
+        with mock.patch.object(render, "term_width", return_value=60):
+            output = render.frame("Long title " + text, [text])
+        self.assertIn("tail-marker", output)
+        self.assertNotIn("...", output)
+
     def test_empty_inventory_and_missing_metrics_render(self):
         output = render.dashboard({}, [])
         self.assertIn("VIRTUAL MACHINES", output)
@@ -32,6 +42,8 @@ class DashboardTests(unittest.TestCase):
     def test_overview_uses_dashboard_panels_responsively(self):
         snap = {"hostname": "pvm-host", "uptime_human": "2 days",
                 "cpu_pct": 3, "logical_cores": 8, "physical_cores": 4,
+                "host_uptime_seconds": 90061, "sballd_uptime_seconds": 3661,
+                "sball_state": "running",
                 "mem_pct": 45, "mem_used_gb": 14, "mem_total_gb": 31,
                 "swap_total_gb": 0, "load1": 0.1, "load5": 0.2,
                 "load15": 0.3, "storage": []}
@@ -49,6 +61,8 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("4 physical cores", output)
             self.assertIn("1m: 0.10  5m: 0.20", output)
             self.assertIn("15m: 0.30", output)
+            self.assertIn("Host 1d 1h 1m 1s", output)
+            self.assertIn("sballd 1h 1m 1s", output)
             self.assertLessEqual(max(render._vis(line)
                                      for line in output.splitlines()), width)
 

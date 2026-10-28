@@ -96,6 +96,21 @@ def _parse_envelope(raw):
     return Response(text, status, action_id, desc, errno, what, mid)
 
 
+def systemd_property(unit, prop, timeout=2):
+    """Read one systemd property without making service checks fatal.
+
+    Returns ``None`` on non-systemd hosts, missing units, or command failure.
+    Kept in this module so process execution remains isolated here.
+    """
+    try:
+        rc, out, _err = _run(["systemctl", "show", unit,
+                              "-p", prop, "--value"], timeout)
+    except TransportError:
+        return None
+    value = (out or "").strip()
+    return value if rc == 0 and value and value != "n/a" else None
+
+
 def sbell(module, command, params="<params/>", token=None, timeout=None):
     """Run ``sbell <module> <command> <params> [token]`` and parse the reply."""
     argv = list(config.SBELL_CMD) + [module, command, params]

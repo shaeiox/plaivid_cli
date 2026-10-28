@@ -18,6 +18,25 @@ def _pct(used, total):
         return None
 
 
+def _uptime_details():
+    """Return host/sballd uptime seconds when local Linux exposes them."""
+    try:
+        with open("/proc/uptime") as uptime_file:
+            host_seconds = int(float(uptime_file.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return {}
+    result = {"host_uptime_seconds": host_seconds}
+    active = transport.systemd_property(
+        "sballd", "ActiveEnterTimestampMonotonic", timeout=2)
+    try:
+        active_seconds = int(active) / 1000000.0
+        service_seconds = max(0, int(host_seconds - active_seconds))
+        result["sballd_uptime_seconds"] = service_seconds
+    except (TypeError, ValueError):
+        pass
+    return result
+
+
 def host_status(token):
     """Return a dict of host facts, or {'error': msg} on failure."""
     try:
@@ -67,6 +86,7 @@ def host_status(token):
             info["store_total_gb"] = _to_gb(tot)
             info["store_used_pct"] = _pct(
                 (float(tot) - float(avail)) if tot and avail else None, tot)
+    info.update(_uptime_details())
     return info
 
 
@@ -168,6 +188,8 @@ def metrics_snapshot(token):
         snap["load15"] = float(host.get("load15") or 0)
         snap["pvm_version"] = host.get("version") or ""
         snap["sball_state"] = host.get("sball_state") or ""
+        snap["host_uptime_seconds"] = host.get("host_uptime_seconds")
+        snap["sballd_uptime_seconds"] = host.get("sballd_uptime_seconds")
         if not snap.get("hostname"):
             snap["hostname"] = host.get("name") or ""
     except (transport.TransportError, ValueError):

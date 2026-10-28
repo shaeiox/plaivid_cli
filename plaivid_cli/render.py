@@ -7,6 +7,7 @@ output align identically.
 
 import re
 import shutil
+import textwrap
 
 from . import theme
 from .theme import BOX
@@ -47,16 +48,32 @@ def _pad(s, n):
 
 
 def frame(title, lines, color_fn=theme.muted):
-    """Draw a rounded box around ``lines`` with ``title`` in the top border."""
+    """Draw a terminal-width box, wrapping oversized titles and body lines."""
     w = width()
     inner = w - 2
-    cap = " %s " % title if title else ""
+    title_width = max(1, inner - 4)
+    title_plain = _ANSI.sub("", title or "")
+    title_parts = textwrap.wrap(title_plain, width=title_width,
+                                break_long_words=True,
+                                break_on_hyphens=False) or [""]
+    cap = " %s " % title_parts[0] if title else ""
     top = (color_fn(BOX["tl"]) + color_fn(cap)
            + color_fn(BOX["h"] * max(0, inner - _vis(cap)))
            + color_fn(BOX["tr"]))
     out = [top]
-    for ln in lines:
-        out.append(color_fn(BOX["v"]) + " " + _pad(ln, inner - 2)
+    body = []
+    for title_part in title_parts[1:]:
+        body.append(theme.muted(title_part))
+    content_width = max(1, inner - 4)
+    for line in lines:
+        if _vis(line) > content_width:
+            body.extend(textwrap.wrap(_ANSI.sub("", line), width=content_width,
+                                      break_long_words=True,
+                                      break_on_hyphens=False) or [""])
+        else:
+            body.append(line)
+    for line in body:
+        out.append(color_fn(BOX["v"]) + " " + _pad(line, inner - 2)
                    + " " + color_fn(BOX["v"]))
     out.append(color_fn(BOX["bl"]) + color_fn(BOX["h"] * inner)
                + color_fn(BOX["br"]))
@@ -159,6 +176,21 @@ def vm_table(vms, sort_label=None):
 
 
 # --- messages ----------------------------------------------------------------
+def format_uptime(seconds):
+    """Format elapsed seconds as compact weeks/days/hours/minutes/seconds."""
+    try:
+        remaining = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return "unavailable"
+    units = ((604800, "w"), (86400, "d"), (3600, "h"), (60, "m"), (1, "s"))
+    pieces = []
+    for size, suffix in units:
+        value, remaining = divmod(remaining, size)
+        if value:
+            pieces.append("%d%s" % (value, suffix))
+    return " ".join(pieces) or "0s"
+
+
 def _panel(title, lines, panel_width, color_fn=theme.muted):
     """Draw a fixed-width panel used by the responsive dashboard grid."""
     panel_width = max(8, panel_width)
@@ -168,12 +200,21 @@ def _panel(title, lines, panel_width, color_fn=theme.muted):
            + color_fn(BOX["h"] * max(0, inner - _vis(cap)))
            + color_fn(BOX["tr"]))
     out = [top]
+    content_width = max(1, inner - 2)
     for line in lines:
-        # Dashboard content uses short labels; clip plain width before padding.
-        if _vis(line) > inner - 2:
-            line = _ANSI.sub("", line)[:max(0, inner - 5)] + "..."
-        out.append(color_fn(BOX["v"]) + " " + _pad(line, inner - 2)
-                   + " " + color_fn(BOX["v"]))
+        # Wrap rather than truncate: long hostnames, UUIDs and values remain
+        # readable even when a panel is narrow. Wrapped lines retain content;
+        # color is dropped only on those lines that need wrapping.
+        if _vis(line) > content_width:
+            plain = _ANSI.sub("", line)
+            wrapped = textwrap.wrap(plain, width=content_width,
+                                    break_long_words=True,
+                                    break_on_hyphens=False) or [""]
+        else:
+            wrapped = [line]
+        for part in wrapped:
+            out.append(color_fn(BOX["v"]) + " " + _pad(part, inner - 2)
+                       + " " + color_fn(BOX["v"]))
     out.append(color_fn(BOX["bl"]) + color_fn(BOX["h"] * inner)
                + color_fn(BOX["br"]))
     return out
@@ -253,8 +294,9 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
         ("VMs", [theme.success("%d running" % running),
                   "/ %d total" % len(vms)], theme.primary),
         ("LOAD AVG", [load, _sparkline(load_history)], theme.primary),
-        ("UPTIME", [info.get("uptime_human") or "not reported",
-                    "host uptime"], theme.primary),
+        ("UPTIME", ["Host " + format_uptime(info.get("host_uptime_seconds")),
+                    "sballd " + format_uptime(info.get("sballd_uptime_seconds")),
+                    "sball " + (info.get("sball_state") or "unknown")], theme.primary),
     ]
     cards = [_panel(label, body, card_width, color)
              for label, body, color in card_specs]
@@ -563,7 +605,7 @@ def overview(snap, prev, tapmap, agg, spin):
     lines = [theme.bold(theme.primary("LIVE OVERVIEW"))
              + theme.muted("   %s   %s   PVM %s" % (
                  snap.get("hostname") or "host",
-                 snap.get("uptime_human") or "uptime unavailable",
+                 "host " + format_uptime(snap.get("host_uptime_seconds")),
                  snap.get("pvm_version") or "?"))]
     cpu = snap.get("cpu_pct")
     ram = snap.get("mem_pct")
@@ -586,6 +628,9 @@ def overview(snap, prev, tapmap, agg, spin):
                   else "%.0f%%" % (snap.get("swap_pct") or 0),
                   "%.1f / %.1f GB" % (snap.get("swap_used_gb") or 0,
                                       snap.get("swap_total_gb") or 0)], theme.warning),
+        ("UPTIME", ["Host " + format_uptime(snap.get("host_uptime_seconds")),
+                    "sballd " + format_uptime(snap.get("sballd_uptime_seconds")),
+                    "sball " + (snap.get("sball_state") or "unknown")], theme.primary),
     ]
     columns = 4 if screen >= 100 else 2
     cw = (screen - columns + 1) // columns
