@@ -281,9 +281,12 @@ class App(object):
             status=self.status,
             width=columns, height=rows,
             cursor=self.vm_cursor,
+            input_buffer=self.vm_action_buffer,
         )
-        if len(lines) > rows - 1:
-            lines = lines[:rows - 1]
+        if len(lines) > rows:
+            # Keep the top of the frame (header/body) and the trailing input
+            # box visible when content overflows the viewport.
+            lines = lines[:rows]
         self._screen.paint(lines, columns, rows)
 
     def _read_vm_key(self):
@@ -373,7 +376,7 @@ class App(object):
 
         Returns the final command string, or None if cancelled with Esc.
         """
-        buffer = self.vm_action_buffer
+        buffer = ""
         while True:
             self.vm_action_buffer = buffer
             self.draw_vm_management()
@@ -428,7 +431,8 @@ class App(object):
             result = self._read_vm_action_input()
             if result is not None and result.strip():
                 cmd_text = result.strip()
-                self.vm_action_buffer = ""
+                # Keep the submitted command visible in the input box.
+                self.vm_action_buffer = result
                 self.vm_action_mode = False
                 self.dispatch(cmd_text)
             elif result is not None:

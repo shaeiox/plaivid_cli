@@ -552,7 +552,7 @@ def dashboard(info, vms, sort_label=None, status="", selected=None,
 
 def vm_management_page(host, page_vms, page, total_pages, page_size,
                        total_count, search, sort_key, sort_desc, status,
-                       width, height, cursor=0):
+                       width, height, cursor=0, input_buffer=""):
     """Render the VM management page as a list of lines.
 
     Layout:
@@ -666,6 +666,10 @@ def vm_management_page(host, page_vms, page, total_pages, page_size,
         status_line += " " * max(1, screen - _vis(status_line) - _vis(status_right))
         status_line += status_right
     lines.append(theme.primary(status_line[:screen]))
+
+    # Input box line: the command being typed / last action in the VM page.
+    lines.append("")
+    lines.append(theme.accent("> ") + str(input_buffer or ""))
 
     # Clip every line to screen width (respecting ANSI escapes), then wrap
     # the whole VM management page in a terminal-width box for better UI.
