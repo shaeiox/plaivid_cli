@@ -112,20 +112,31 @@ def inventory(token):
     vms = list_all(token)
     by_uuid = dict((v.uuid.lower(), v) for v in vms)
 
-    # enrich with live info; add any running VM missing from the object store
+    # pvm-running-vms is the authority for which VMs actually have a live qemu
+    # process (and their uptime). The object store can mark a VM "started"
+    # before/without a running process, which would otherwise show a running
+    # VM with a blank uptime - so we reconcile against the live list.
     try:
-        for r in list_running():
+        running = list_running()
+    except transport.TransportError:
+        running = None            # can't enrich; keep stored state as-is
+
+    if running is not None:
+        live = set()
+        for r in running:
             vm = by_uuid.get(r["uuid"])
             if vm is None:
                 vm = VM(r["uuid"], r["name"])
                 vm.vcpu, vm.mem_mb = r["vcpu"], r["mem_mb"]
                 vms.append(vm)
                 by_uuid[r["uuid"]] = vm
-            if not vm.running:
-                vm.state = "started"
+            vm.state = "started"
             vm.pid, vm.uptime, vm.port = r["pid"], r["uptime"], r["port"]
-    except transport.TransportError:
-        pass  # inventory still usable without live enrichment
+            live.add(vm.uuid.lower())
+        # stored "started" but no live process = transitioning, not up
+        for vm in vms:
+            if vm.uuid.lower() not in live and vm.state in ("started", "running"):
+                vm.state = "starting"
 
     vms.sort(key=lambda v: (0 if v.running else 1, v.name.lower()))
     for i, vm in enumerate(vms, 1):
