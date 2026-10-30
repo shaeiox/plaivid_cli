@@ -2,46 +2,43 @@
 
 A Linux-local command-line and Textual terminal interface for inspecting and operating Plaivid PVM virtual machines. It invokes the repository-evidenced local `sbell` and `pvm-running-vms` commands; it does not use SSH, a remote collector, or a guessed PVM API.
 
-> **Real-host validation is pending.** No PVM host, production VM, Sball/PVM cluster, SSH endpoint, or production system was accessed for this implementation. Every owner-run host scenario is marked **PENDING MANUAL VALIDATION** in [`docs/REAL_PVM_VALIDATION.md`](docs/REAL_PVM_VALIDATION.md).
+> **Real-host validation is pending.** No PVM host, production VM, Sball/PVM cluster, SSH endpoint, or production system was accessed for this implementation. Every owner-run host scenario is marked **PENDING MANUAL PVM VALIDATION** in [`docs/REAL_PVM_VALIDATION.md`](docs/REAL_PVM_VALIDATION.md).
 
 ## Requirements and installation
 
-- Linux host with the locally configured PVM `sbell` command and `pvm-running-vms` helper.
-- Python **3.12 or newer**.
-- Textual, installed from the package dependency metadata.
-- The account must have the same local permissions needed by its configured `sbell` command; the default executable is `sudo sbell`.
+- Linux host; PVM commands are only needed for authorized host use.
+- Python **3.12 or newer**, with the `venv` and `ensurepip` modules.
+- The account must have the local permissions required by its configured `sbell` command; the default executable is `sudo sbell`.
 
-Install in a virtual environment (do not replace or modify system Python):
+#### First-time setup
+
+From the checkout root, run:
 
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install .
+./scripts/setup.sh
+```
+
+The script detects the Linux distribution/package manager, finds Python 3.12+, creates `.venv`, upgrades pip **inside that venv**, installs the project and `.[dev]` dependencies from `pyproject.toml`, and checks `plaivid --help`. It can also be invoked by absolute path from another working directory. It never uses `sudo pip` or changes system Python.
+
+On Rocky Linux 9, if the required interpreter is missing, install the side-by-side Python packages from an approved repository, then rerun setup:
+
+```bash
+sudo dnf install python3.12 python3.12-pip
+/path/to/plaivid_cli/scripts/setup.sh
+```
+
+The script does not install OS packages or alter repositories. If your approved Rocky repository uses different Python package names, install Python 3.12+ with venv/ensurepip support and rerun it.
+
+#### Subsequent development use
+
+```bash
+source .venv/bin/activate
+python -m pytest -q --ignore=tests/smoke.py
+python -m build --wheel
 plaivid --help
 ```
 
-For development, install `.[dev]`. The project console command and `python -m plaivid_cli` use the same Bootstrap composition root. `./plaivid` is also provided for a checkout-based launch. To roll back, install the previously approved wheel into the same virtual environment. To remove the package, run `python -m pip uninstall plaivid-cli` from that environment; this does not alter system Python or remove the user session cache. Clear the cached token deliberately with `plaivid logout` (or follow the operator's approved local-cache removal process) before deleting application state.
-
-### Rocky Linux user-local build and run
-
-Use an already-approved Python 3.12+ interpreter; these commands do not install OS packages or modify system Python. Run the PVM-dependent command only on an authorized host and only after the credential and manual-validation gates below are accepted.
-
-```bash
-cd /path/to/plaivid_cli
-python3.12 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip build
-.venv/bin/python -m pip install '.[dev]'
-.venv/bin/python -m pytest -q --ignore=tests/smoke.py
-.venv/bin/python -m ruff check .
-.venv/bin/python -m pyright
-.venv/bin/python -m build --wheel
-.venv/bin/python -m pip install --force-reinstall dist/plaivid_cli-0.4.0-py3-none-any.whl
-.venv/bin/plaivid --help
-# On an authorized PVM host only, after the documented gates:
-.venv/bin/plaivid inventory
-```
-
-The build/install command block is a deployment recipe, not a claim that Rocky Linux or Python 3.12 was available in the implementation workspace.
+The `dev` extra in `pyproject.toml` contains the test, lint, type-check, and wheel-build tools. The project console command and `python -m plaivid_cli` use the same Bootstrap composition root. `./plaivid` is also provided for a checkout-based launch. To roll back, reinstall the previously approved wheel into the same virtual environment. To remove the package, run `python -m pip uninstall plaivid-cli` from that environment; this does not alter system Python or remove the user session cache. Clear the cached token deliberately with `plaivid logout` before deleting application state.
 
 ## Commands
 
