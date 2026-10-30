@@ -188,20 +188,26 @@ Application use cases operate on provider-neutral Node/Cluster/VM snapshots and 
 
 Do not promise that local PVM interfaces can provide data for every remote node. Each provider may expose only verified capability/data coverage; the domain must represent partial or unsupported fields without pretending they are available.
 
-## 13. Proposed Architecture Decision Records
+## 13. Architecture Decision Records
 
-ADRs in `adr/` are **proposals only** and leave acceptance unmarked:
+The ADR index at [`adr/README.md`](adr/README.md) is authoritative for titles, decision ownership, statuses, change summary, unresolved evidence, and consistency review. ADR statuses are mixed: some record accepted product constraints; technology and implementation choices remain conditional, proposed, or deferred. None authorizes implementation by itself.
 
-- `0001-tui-framework.md` — Textual + Rich evaluation
-- `0002-python-runtime.md` — Python 3.12+ deployment strategy
-- `0003-dependency-management.md` — uv and reproducible dependency policy
-- `0004-data-collection.md` — local adapter, collection cadence and coalescing
-- `0005-snapshot-state-store.md` — immutable last-good snapshots and freshness
-- `0006-diff-rendering.md` — Textual diff renderer vs custom dirty tracking
-- `0007-async-execution.md` — UI event-loop isolation and controlled provider work
-- `0008-persistence.md` — no app-owned database until persistence use case is confirmed
-- `0009-pvm-adapter-boundary.md` — local PVM protocol boundary and later provider port
-- `0010-packaging.md` — PyInstaller one-directory compatibility prototype
+The set is:
+
+- `0001-tui-framework.md` — conditional Textual + Rich prototype
+- `0002-python-runtime.md` — accepted Python 3.12+ target; runtime delivery remains open
+- `0003-dependency-management.md` — accepted workflow/tool choices; dependency groups and pins
+- `0004-data-collection.md` — logical batching, UUID merge, no N+1 and read coalescing
+- `0005-snapshot-state-store.md` — independent section lifecycle and last-good snapshots
+- `0006-diff-rendering.md` — semantic change detection vs terminal-cell diff rendering
+- `0007-async-execution.md` — bounded workers, subprocess lifecycle and ambiguous outcomes
+- `0008-persistence.md` — separate session credential storage from app persistence
+- `0009-pvm-adapter-boundary.md` — local provider contract and bounded cluster claims
+- `0010-packaging.md` — conditional artifact, offline deployment, signing and rollback
+- `0011-application-layer-boundaries.md` — accepted modular-monolith dependency rules
+- `0012-security-and-mutation-safety.md` — proposed secret and mutation policy
+- `0013-error-taxonomy-and-operation-outcomes.md` — proposed typed failures/outcomes
+- `0014-collection-scheduling-and-freshness-policy.md` — proposed cadence/freshness ownership
 
 ## 14. Unresolved decisions and risks
 
@@ -212,7 +218,7 @@ ADRs in `adr/` are **proposals only** and leave acceptance unmarked:
 5. Exact CLI command grammar, scripted/destructive action policy, role/authorization model, audit retention and user model.
 6. PyInstaller vendor-policy acceptability, native library support, offline installation, artifact signing/update/rollback ownership.
 7. Whether psutil fills a confirmed monitoring gap; whether direct Rich, Hypothesis, pytest-asyncio, platformdirs, HTTPX, structlog, tenacity, SQLAlchemy/Alembic are justified.
-8. Whether the local PVM interface exposes enough verified cluster/member data for the promised cluster-aware views.
+8. Whether the local PVM interface exposes enough verified cluster/member data for the promised cluster-aware views. Preserve `sball_state=quorate` as the valid indication that Sball reports the cluster as Quorate; do not interpret it as proof that every node is healthy/reachable or that complete membership data is available.
 9. Whether Textual DataTable meets actual inventory scale and terminal constraints.
 
 ## Recommended next phase
