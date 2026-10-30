@@ -1,0 +1,2 @@
+# Keep executable shell scripts valid for /usr/bin/env shebangs on Linux hosts.
+*.sh text eol=lf
