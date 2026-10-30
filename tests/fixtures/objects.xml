@@ -1,0 +1,26 @@
+<description>
+  <sball-config>
+    <objects>
+      <pvm_vmm_obj>
+        <uuid>481e458c-c6ba-4fe7-88f6-26a59e416568</uuid>
+        <name>test-vm</name>
+        <description>synthetic parser fixture</description>
+        <virtual_machine>
+          <cluster><cluster_status><status>started</status></cluster_status><host>node-a</host></cluster>
+          <hardware>
+            <cpu><vcpu><socket>1</socket><core>4</core><thread>1</thread></vcpu></cpu>
+            <memory><size>8192</size></memory>
+            <console><port>5900</port></console>
+          </hardware>
+        </virtual_machine>
+      </pvm_vmm_obj>
+      <pvm_vmm_obj>
+        <uuid>2b8ec16f-c2db-43d9-b65c-12077dbdc5b8</uuid>
+        <name>offline-vm</name>
+        <virtual_machine>
+          <cluster><cluster_status><status>stopped</status></cluster_status></cluster>
+        </virtual_machine>
+      </pvm_vmm_obj>
+    </objects>
+  </sball-config>
+</description>

@@ -1,0 +1,3 @@
+ROW  PID      UPTIME     PORT  VCPU  MEMORY  UUID                                  NAME
+1    1234     01:23:45   5901  4     8192    481e458c-c6ba-4fe7-88f6-26a59e416568  test-vm
+2    9999     00:01:10   5902  2     4096    81f3fa0b-a154-435d-a969-8ce20f360123  process-only

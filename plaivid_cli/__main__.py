@@ -1,6 +1,6 @@
-import sys
+"""Module entry point for ``python -m plaivid_cli``."""
 
-from .orchestrator import main
+from plaivid_cli.bootstrap import main
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

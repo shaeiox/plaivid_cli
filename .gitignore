@@ -35,3 +35,11 @@ temp/
 # State (session tokens) - never commit
 plaivid_cli/.state/
 .plaivid/
+
+# Python packaging metadata, build artifacts, and coverage output
+*.egg-info/
+build/
+dist/
+.coverage
+coverage.xml
+htmlcov/

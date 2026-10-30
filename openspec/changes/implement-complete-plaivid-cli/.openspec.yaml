@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-30
+goal: Deliver a maintainable, testable application across all mission
+  capabilities without accessing real PVM hosts.

@@ -1,147 +1,133 @@
-# Plaivid CLI
+# Plaivid PVM CLI
 
-A modular terminal client for controlling PVM / Plaivid virtual machines from
-the command line, driven by `sbell` on the PVM host.
+A Linux-local command-line and Textual terminal interface for inspecting and operating Plaivid PVM virtual machines. It invokes the repository-evidenced local `sbell` and `pvm-running-vms` commands; it does not use SSH, a remote collector, or a guessed PVM API.
 
-Styled after the gemini-cli TUI design system (256-color, rounded borders),
-with graceful fallback to plain text when piped or when `NO_COLOR` is set.
+> **Real-host validation is pending.** No PVM host, production VM, Sball/PVM cluster, SSH endpoint, or production system was accessed for this implementation. Every owner-run host scenario is marked **PENDING MANUAL VALIDATION** in [`docs/REAL_PVM_VALIDATION.md`](docs/REAL_PVM_VALIDATION.md).
 
-## What it does
+## Requirements and installation
 
-- **Session**: logs in on first use (prompts for user/password), caches the
-  token so reopening the TUI does not re-prompt, and auto-recovers from the
-  "too many sessions" cap by evicting an old session (like the web UI).
-- **Host monitoring**: live CPU / RAM / disk / load for the PVM node.
-- **VM inventory**: every defined VM with state, vCPU and memory; running VMs
-  are enriched with PID / uptime / console port from `pvm-running-vms`, and
-  shown first.
-- **VM actions**: `start`, `stop`, `kill`, `reset`, `pause`, `resume` — each
-  targetable by **index number or name** (exact, UUID, or unique prefix).
+- Linux host with the locally configured PVM `sbell` command and `pvm-running-vms` helper.
+- Python **3.12 or newer**.
+- Textual, installed from the package dependency metadata.
+- The account must have the same local permissions needed by its configured `sbell` command; the default executable is `sudo sbell`.
 
-## Requirements
-
-- Runs **on the PVM host** (it shells out to `sbell` and `pvm-running-vms`).
-- **Python 3.6+**, standard library only — no pip installs.
-- `sbell` needs root, so the tool calls it via `sudo` by default (the invoking
-  user needs sudo rights to `sbell`).
-
-## Usage
+Install in a virtual environment (do not replace or modify system Python):
 
 ```bash
-./plaivid                 # interactive TUI
-./plaivid list            # one-shot: print the dashboard
-./plaivid status          # one-shot: refresh + dashboard
-./plaivid overview        # live monitoring (CPU, load, mem, network, storage)
-./plaivid show Hadi-New    # one-shot: detailed view of one VM
-./plaivid health          # one-shot: health & capacity summary
-./plaivid log 30          # one-shot: last 30 audit actions
-./plaivid stop Hadi-New    # one-shot: run an action by name
-./plaivid stop state:off   # one-shot: bulk action by state
-./plaivid start 12         # ... or by the index shown in the list
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+plaivid --help
 ```
 
-Inside the TUI:
+For development, install `.[dev]`. The project console command and `python -m plaivid_cli` use the same Bootstrap composition root. `./plaivid` is also provided for a checkout-based launch. To roll back, install the previously approved wheel into the same virtual environment. To remove the package, run `python -m pip uninstall plaivid-cli` from that environment; this does not alter system Python or remove the user session cache. Clear the cached token deliberately with `plaivid logout` (or follow the operator's approved local-cache removal process) before deleting application state.
 
-| Command | Does |
-| --- | --- |
-| `list` / `ls` / `refresh` | reload VMs + host status |
-| `overview` / `mon` | live monitoring page (auto-refresh; `q` / Ctrl-C to exit) |
-| `health` / `hc` | health & capacity summary (quorum, storage, overcommit, license) |
-| `show` / `detail` `<id\|name>` | detailed view of one VM (disks, NICs, console) |
-| `log` `[N]` | audit log viewer + analyzer (recent actions, who did what) |
-| `sort` `[field] [asc\|desc]` | sort the VM list by `name`, `state`, `cpu`, `mem`, `uptime`, `pid`, `port` (SPICE), `uuid`; `sort reset` restores the default |
-| `status` | refresh and show host monitoring |
-| `<action> <targets>` | run an action on one or many VMs (see below) |
-| `help` / `?` | list commands and actions |
-| `logout` | clear the saved session and exit |
-| `quit` / `q` | exit (keeps the session cached) |
+### Rocky Linux user-local build and run
 
-**Targets** for actions can be a single VM *or many at once*:
+Use an already-approved Python 3.12+ interpreter; these commands do not install OS packages or modify system Python. Run the PVM-dependent command only on an authorized host and only after the credential and manual-validation gates below are accepted.
 
-```
-stop 3                 # by index
-stop Hadi-New           # by name (or unique prefix)
-stop 3,5,Hadi-New       # a comma-separated list
-stop state:running      # every VM in a state (running/stopped/off/paused)
-start off               # shorthand: all VMs in that state
-kill all                # every VM
+```bash
+cd /path/to/plaivid_cli
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip build
+.venv/bin/python -m pip install '.[dev]'
+.venv/bin/python -m pytest -q --ignore=tests/smoke.py
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pyright
+.venv/bin/python -m build --wheel
+.venv/bin/python -m pip install --force-reinstall dist/plaivid_cli-0.4.0-py3-none-any.whl
+.venv/bin/plaivid --help
+# On an authorized PVM host only, after the documented gates:
+.venv/bin/plaivid inventory
 ```
 
-Destructive actions (`stop`, `kill`, `reset`) ask for one confirmation,
-showing the full list of affected VMs for a bulk action.
+The build/install command block is a deployment recipe, not a claim that Rocky Linux or Python 3.12 was available in the implementation workspace.
 
-## Configuration (environment variables)
+## Commands
 
-| Var | Default | Purpose |
+```text
+plaivid                         Open the Textual dashboard (TTY only)
+plaivid inventory [--json]      List defined objects and separate process evidence
+plaivid host|status|overview [--json]  Read host/Sball status and monitoring metrics
+plaivid detail UUID [--json]    Read one VM's detailed configuration
+plaivid audit [--limit N]       Read the local audit database in read-only mode
+plaivid config|diagnostics [--json]  Show validated redacted settings; no PVM calls
+plaivid logout                 Log out and clear the local token cache
+plaivid start TARGET [--json]  Submit a start command
+plaivid stop TARGET --approve 'STOP UUID'  Submit a confirmed stop
+```
+
+The remaining lifecycle commands are `kill`, `reset`, `pause`, and `resume`. Targets may be a canonical UUID, exact VM name, unique name prefix, displayed inventory index, `all`, `state:<state>`, or `process:present|missing`. Comma-separated selections are accepted, for example `plaivid stop UUID1,UUID2 --approve 'STOP UUID1,UUID2'`. `state:running` is derived from object-store state; process observations remain distinct evidence and are not silently substituted for object state.
+
+For actions requiring approval, the CLI prints the exact expected phrase and does not dispatch without it. The phrase binds the action and canonical UUID sequence; on execution, the application also binds the approval internally to the just-collected inventory generation and freshness. The TUI presents a scrollable target list, inventory status/age, and configured freshness bound, and requires typing the exact phrase. Start/Resume of one explicitly selected VM do not show an extra confirmation; bulk operations require one. Kill always has a distinct critical confirmation.
+
+Bulk operations are fail-closed until `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is set to an approved finite positive value. Bulk inventory must be complete and current. The repository does not establish whether a positive `sbell` reply proves acceptance or completion; every returned response after dispatch is therefore reported as `OUTCOME_UNKNOWN`, stops bulk processing, and must not be blindly retried. The CLI exit categories are `0` successful read or verified operation, `1` failure, `2` rejected, `3` partial, and `4` outcome unknown (including any future acceptance without verified completion).
+
+Use `--json` on supported inventory, host, detail, audit, and lifecycle commands for structured output. JSON preserves section status, source, generation, quality issues, and per-target results. Help and version do not launch PVM tools.
+
+## Security and sessions
+
+Passwords are never stored. A reusable session token may be cached in the configured state directory with user-only directory/file permissions and atomic replacement. Logout clears that local cache.
+
+**Important unresolved risk:** the existing `sbell` interface passes credentials and tokens in process arguments. This project has not verified a safer credential transport and does not invent one. Login and token-bearing calls are denied by default until the operator explicitly sets:
+
+```bash
+PLAIVID_ALLOW_CREDENTIAL_ARGV=1
+```
+
+Set this only after reviewing the local process-inspection risk and accepting it for the environment. The program warns when enabled; it does not claim argv secrets are protected. No automatic session eviction or session-cap recovery is performed.
+
+Audit access is optional and read-only. The adapter opens SQLite with `mode=ro`, limits row counts, and rejects unsupported schemas. Plaivid does not create an application-owned telemetry or operation-history database.
+
+## Configuration
+
+| Environment variable | Default | Meaning |
 | --- | --- | --- |
-| `PLAIVID_SBELL` | `sudo sbell` | how to invoke sbell (set to `sbell` if already root) |
-| `PLAIVID_RUNNING_VMS` | `pvm-running-vms` | the running-VM lister |
-| `PLAIVID_USER` | `manage` | default username at the login prompt |
-| `PLAIVID_STATE_DIR` | `~/.local/state/plaivid` | where the session token is cached |
-| `PLAIVID_CMD_TIMEOUT` | `30` | per-command timeout (seconds) |
-| `PLAIVID_ASCII` | unset | force ASCII glyphs/borders |
-| `NO_COLOR` | unset | disable color |
+| `PLAIVID_SBELL` | `sudo sbell` | Local `sbell` argv; parsed as arguments, never a shell command. |
+| `PLAIVID_RUNNING_VMS` | `pvm-running-vms` | Local process-evidence helper argv. |
+| `PLAIVID_USER` | `manage` | Default interactive username. |
+| `PLAIVID_STATE_DIR` | `$XDG_STATE_HOME/plaivid` or `~/.local/state/plaivid` | Private local token cache directory. |
+| `PLAIVID_CMD_TIMEOUT` | `30` | Positive per-child deadline in seconds. |
+| `PLAIVID_MAX_OUTPUT_BYTES` | `1048576` | Retained output cap per stream. |
+| `PLAIVID_REFRESH` | `3` | Positive TUI refresh cadence in seconds. |
+| `PLAIVID_MAX_INVENTORY_AGE_SECONDS` | unset | Required positive age bound for bulk mutation admission. |
+| `PLAIVID_ALLOW_CREDENTIAL_ARGV` | disabled | Explicit acknowledgement of unresolved password/token argv exposure. |
+| `PLAIVID_LOG_DB` | `/var/log/pvm/messages.db` | Optional existing audit database, opened read-only. |
+| `PLAIVID_LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
 ## Architecture
 
-One **orchestrator** wires together small, independent modules. A failure in
-any one of them is caught and reported — it never brings down the app.
-
-```
-plaivid                      entry point (interactive or one-shot)
-plaivid_cli/
-  orchestrator.py            the controller: session, refresh, screen, dispatch
-  transport.py               the ONLY module that shells out + parses XML
-  session.py                 login / logout / token cache / session recovery
-  vms.py                     inventory (merge object-store + pvm-running-vms), resolve
-  monitoring.py              host status
-  render.py                  all presentation (banner, panels, tables, boxes)
-  theme.py                   palette, glyphs, borders
-  config.py                  paths + env overrides
-  actions/                   ONE FILE PER ACTION (isolated + hot-swappable)
-    __init__.py              registry: imports each action independently
-    base.py                  shared helpers + the action contract
-    start.py stop.py kill.py reset.py pause.py resume.py
-tests/
-  smoke.py                   non-interactive data-layer check (run on the host)
+```text
+CLI / Textual UI
+       │
+       ▼
+Bootstrap ── SessionManager / OperationCoordinator
+       │                    │
+       └── PlaividApplication ── CollectionCoordinator (one serialized read lane)
+                                      │
+                                      ▼
+                         LocalPvmAdapter / ReadOnlyAuditAdapter
+                                      │
+                     bounded argv ProcessRunner + pure parsers
+                                      │
+                       local sbell / pvm-running-vms only
 ```
 
-### Adding a new action
+- `domain/` contains immutable records, source/result statuses, errors, and pure policy.
+- `application/` contains read use cases, session management, the serialized collection lane, and lifecycle orchestration.
+- `infrastructure/` contains bounded child execution, the PVM adapter/parsers, redaction, and read-only audit access.
+- `tui.py` uses Textual for rendering; blocking local work runs in workers and visible read requests go through the single collection coordinator.
+- Operations use generation/freshness gates, explicit approval, sequential target order, no blind retry, and post-operation reconciliation. Acceptance is never presented as completion.
 
-Drop a new file in `plaivid_cli/actions/`, e.g. `migrate.py`:
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current module boundaries and [`docs/REFERENCE.md`](docs/REFERENCE.md) for the command cheat sheet. PVM response contracts that remain uncertain are isolated and listed in the manual validation plan; no undocumented command or state transition is inferred.
 
-```python
-from .base import simple_vm_action, vm_key
+## Local verification
 
-NAME = "migrate"
-LABEL = "Migrate"
-DESCRIPTION = "Live-migrate to another host."
-APPLIES_TO = {"started", "running"}
-DESTRUCTIVE = True
-ORDER = 70
-
-def run(ctx, vm):
-    return simple_vm_action(ctx.token, "migrate", vm_key(vm))
-```
-
-It is discovered automatically. If it has a bug, the registry records the error
-and disables just that action — everything else keeps working.
-
-## Deploy
+Unit and fake-backed tests do not require PVM executables and do not contact any host. Use:
 
 ```bash
-scp -r plaivid-cli youruser@pvmhost:~/     # copy to the host
-ssh youruser@pvmhost
-cd plaivid-cli && ./plaivid
+python -m pytest tests/unit -q
+ruff check plaivid_cli tests/unit
 ```
 
-## Documentation
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - how the app is built: design
-  goals, every module's responsibility, runtime flow, the action plugin system,
-  and how to extend it.
-- [`docs/SBELL-SABAD.md`](docs/SBELL-SABAD.md) - the PVM control protocol in
-  depth: sbell/sabad requests, per-command params, authentication and session
-  handling, the object/query model, the HTTP API, and the raw wire framing.
-  Written so a future developer or AI can send any request correctly.
-- [`docs/REFERENCE.md`](docs/REFERENCE.md) - quick command cheat-sheet.
+A local test pass is not PVM contract verification. The owner must complete the separate manual checks before relying on the CLI against a real host.
