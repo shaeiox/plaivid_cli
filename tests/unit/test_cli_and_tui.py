@@ -6,7 +6,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-from textual.widgets import Button, TabbedContent
+from textual.widgets import Button, Select, TabbedContent
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
@@ -358,6 +358,32 @@ def test_tui_blocks_duplicate_operation_and_logout_while_operation_is_active(tmp
             assert provider.dispatched == []
             assert provider.logout_calls == 0
             assert "already in progress" in str(tui.query_one("#action-status").render())
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
+
+
+def test_tui_bulk_action_dropdown_routes_through_confirmation_and_resets(tmp_path):
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise() -> None:
+        async with tui.run_test() as pilot:
+            await pilot.pause(0.15)
+            assert not list(tui.query("#controls"))
+            assert not list(tui.query("#start"))
+            dropdown = tui.query_one("#bulk-actions", Select)
+            dropdown.value = Action.STOP.value
+            await pilot.pause(0.05)
+            assert isinstance(tui.screen, ConfirmScreen)
+            assert not isinstance(dropdown.value, str)
+            assert provider.dispatched == []
+            tui.screen.dismiss(None)
+            await pilot.pause(0.05)
+            assert provider.dispatched == []
+            assert not isinstance(dropdown.value, str)
 
     try:
         asyncio.run(exercise())

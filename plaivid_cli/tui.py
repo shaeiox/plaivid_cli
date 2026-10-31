@@ -18,6 +18,7 @@ from textual.widgets import (
     Header,
     Input,
     Label,
+    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -49,6 +50,19 @@ from plaivid_cli.domain.models import (
     VMRecord,
 )
 from plaivid_cli.domain.redaction import redact_text
+
+BULK_ACTIONS: tuple[Action, ...] = (
+    Action.START,
+    Action.RESUME,
+    Action.PAUSE,
+    Action.STOP,
+    Action.RESET,
+    Action.KILL,
+)
+
+
+def _action_label(action: Action) -> str:
+    return action.value.title()
 
 
 class ConfirmScreen(ModalScreen[str | None]):
@@ -158,14 +172,12 @@ class PlaividTui(App[None]):
                    border: round #254568; background: #111d31; }
     .metric-title { color: #91a6c4; }
     .metric-value { color: #8be9fd; text-style: bold; }
-    #fleet-table { height: 1fr; min-height: 10; border: round #1d3554; }
-    #fleet-lower { height: 10; margin-top: 1; }
-    #detail-box { width: 2fr; border: round #254568; background: #111d31; padding: 1; }
-    #controls { width: 1fr; border: round #254568; background: #111d31; padding: 1; }
-    #controls-title { color: #8be9fd; text-style: bold; padding-bottom: 1; }
-    .action-row { height: auto; }
-    .action-row Button { width: 1fr; margin-right: 1; }
-    #action-status { height: 3; color: #ffc766; padding-top: 1; }
+    #vm-list { height: 1fr; min-height: 13; border: round #254568; background: #111d31; }
+    #vm-toolbar { height: 3; }
+    #bulk-actions { width: 28; }
+    #fleet-table { height: 1fr; min-height: 8; border: round #1d3554; }
+    #detail-box { height: 10; margin-top: 1; border: round #254568; background: #111d31; padding: 1; }
+    #action-status { height: 2; color: #ffc766; }
     #host-grid { height: auto; }
     #host-status, #host-metrics, #audit-panel { height: 1fr; border: round #254568;
                                                 background: #111d31; padding: 1; }
@@ -175,7 +187,7 @@ class PlaividTui(App[None]):
     .section-title { color: #8be9fd; text-style: bold; padding-bottom: 1; }
     #notice { height: 2; color: #91a6c4; padding: 0 1; }
     #refresh-button { width: 12; }
-    #select-all { width: 1fr; color: #ffc766; }
+    #select-all { width: auto; margin-left: 2; color: #ffc766; }
     """
     BINDINGS = [
         ("r", "refresh", "Refresh"),
@@ -237,21 +249,18 @@ class PlaividTui(App[None]):
                             yield Static("INVENTORY EVIDENCE", classes="metric-title")
                             yield Static("Not collected", id="inventory-quality", classes="metric-value")
                         yield Button("Refresh", id="refresh-button", variant="primary")
-                    yield DataTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
-                    with Horizontal(id="fleet-lower"):
-                        yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
-                        with Vertical(id="controls"):
-                            yield Static("LIFECYCLE ACTIONS", id="controls-title")
+                    with Vertical(id="vm-list"):
+                        with Horizontal(id="vm-toolbar"):
+                            yield Select(
+                                [(_action_label(action), action.value) for action in BULK_ACTIONS],
+                                prompt="Bulk action",
+                                allow_blank=True,
+                                id="bulk-actions",
+                            )
                             yield Checkbox("Apply to all VMs", id="select-all")
-                            with Horizontal(classes="action-row"):
-                                yield Button("Start", id="start", variant="success")
-                                yield Button("Resume", id="resume", variant="success")
-                                yield Button("Pause", id="pause")
-                            with Horizontal(classes="action-row"):
-                                yield Button("Stop", id="stop", variant="warning")
-                                yield Button("Reset", id="reset", variant="warning")
-                                yield Button("Kill", id="kill", variant="error")
-                            yield Static("No operation submitted.", id="action-status", markup=False)
+                        yield DataTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
+                        yield Static("No operation submitted.", id="action-status", markup=False)
+                    yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
                 with TabPane("Host", id="host"):
                     with Horizontal(id="host-grid"):
                         yield Static("HOST STATUS\nWaiting for collection…", id="host-status", markup=False)
@@ -262,6 +271,7 @@ class PlaividTui(App[None]):
             Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
         table.add_columns("#", "VM name", "UUID", "Object state", "Process", "vCPU", "Memory")
         self.query_one("#tabs", TabbedContent).display = False
@@ -495,9 +505,14 @@ class PlaividTui(App[None]):
         if self._selected_uuid:
             self._load_detail(self._selected_uuid)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id in {action.value for action in Action}:
-            self._begin_action(Action(event.button.id))
+    @on(Select.Changed, "#bulk-actions")
+    def bulk_action_selected(self, event: Select.Changed) -> None:
+        if not isinstance(event.value, str):
+            return  # blank / no-selection sentinel
+        action = Action(event.value)
+        # Reset the dropdown so the same action can be chosen again later.
+        event.select.clear()
+        self._begin_action(action)
 
     def _begin_action(self, action: Action) -> None:
         if self._operation_active:
@@ -581,8 +596,7 @@ class PlaividTui(App[None]):
             self._show_error("An operation is already in progress.")
             return
         self._operation_active = True
-        for action_id in (action.value for action in Action):
-            self.query_one(f"#{action_id}", Button).disabled = True
+        self.query_one("#bulk-actions", Select).disabled = True
         self.query_one("#logout", Button).disabled = True
         self._execute_action(action, selection, section, approval, plan)
 
@@ -626,8 +640,7 @@ class PlaividTui(App[None]):
 
     def _operation_finished(self) -> None:
         self._operation_active = False
-        for action in Action:
-            self.query_one(f"#{action.value}", Button).disabled = False
+        self.query_one("#bulk-actions", Select).disabled = False
         self.query_one("#logout", Button).disabled = False
 
     def _show_operation(self, result: OperationResult) -> None:

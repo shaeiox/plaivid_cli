@@ -55,7 +55,7 @@ plaivid
 plaivid tui
 ```
 
-The Textual app requires an interactive TTY. Tabs: Fleet (inventory and action panel), Host (Sball status and host metrics), and Audit (read-only local audit). `R` refreshes, `Enter` requests details for the selected row, and `Q` exits. The UUID selection is preserved across inventory refreshes.
+The Textual app requires an interactive TTY. Tabs: Fleet (VM list with a Bulk action dropdown and "Apply to all VMs" toggle, plus the selected-VM details), Host (Sball status and host metrics), and Audit (read-only local audit). `R` refreshes, `Enter` requests details for the selected row, and `Q` exits. The UUID selection is preserved across inventory refreshes.
 
 ## Sensitive configuration
 
