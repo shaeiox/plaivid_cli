@@ -267,6 +267,9 @@ class SourceResult(Generic[T]):  # noqa: UP046 — local verifier is Python 3.11
     succeeded_at: datetime | None = None
     error: str | None = None
     quality_issues: tuple[str, ...] = ()
+    latency_seconds: float | None = None
+    attempted_monotonic: float | None = None
+    succeeded_monotonic: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +286,7 @@ class SectionSnapshot(Generic[T]):  # noqa: UP046 — keep local Python 3.11 ver
     quality_issues: tuple[str, ...] = field(default_factory=tuple)
     attempted_monotonic: float | None = None
     succeeded_monotonic: float | None = None
+    latency_seconds: float | None = None
 
     @property
     def has_value(self) -> bool:

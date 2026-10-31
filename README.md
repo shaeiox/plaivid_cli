@@ -86,7 +86,7 @@ Audit access is optional and read-only. The adapter opens SQLite with `mode=ro`,
 | `PLAIVID_STATE_DIR` | `$XDG_STATE_HOME/plaivid` or `~/.local/state/plaivid` | Private local token cache directory. |
 | `PLAIVID_CMD_TIMEOUT` | `30` | Positive per-child deadline in seconds. |
 | `PLAIVID_MAX_OUTPUT_BYTES` | `1048576` | Retained output cap per stream. |
-| `PLAIVID_REFRESH` | `3` | Positive TUI refresh cadence in seconds. |
+| `PLAIVID_REFRESH` | `3` | Default TUI refresh cadence in seconds (Overview control accepts whole seconds 1–60; its expensive PVM reads remain slower). |
 | `PLAIVID_MAX_INVENTORY_AGE_SECONDS` | unset | Required positive age bound for bulk mutation admission. |
 | `PLAIVID_ALLOW_CREDENTIAL_ARGV` | disabled | Explicit acknowledgement of unresolved password/token argv exposure. |
 | `PLAIVID_LOG_DB` | `/var/log/pvm/messages.db` | Optional existing audit database, opened read-only. |
@@ -116,7 +116,7 @@ Bootstrap ── SessionManager / OperationCoordinator
 - `tui.py` uses Textual for rendering; blocking local work runs in workers and visible read requests go through the single collection coordinator.
 - Operations use generation/freshness gates, explicit approval, sequential target order, no blind retry, and post-operation reconciliation. Acceptance is never presented as completion.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current module boundaries and [`docs/REFERENCE.md`](docs/REFERENCE.md) for the command cheat sheet. PVM response contracts that remain uncertain are isolated and listed in the manual validation plan; no undocumented command or state transition is inferred.
+See [`docs/MONITORING_DASHBOARD.md`](docs/MONITORING_DASHBOARD.md) for Overview controls, data sources, N/A fields, and pending PVM acceptance. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current module boundaries and [`docs/REFERENCE.md`](docs/REFERENCE.md) for the command cheat sheet. PVM response contracts that remain uncertain are isolated and listed in the manual validation plan; no undocumented command or state transition is inferred.
 
 ## Local verification
 

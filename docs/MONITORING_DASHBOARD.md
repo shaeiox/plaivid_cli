@@ -1,0 +1,23 @@
+# Overview monitoring dashboard: validation status
+
+This is the **active Textual** Overview, not the excluded legacy `commands/overview.py` / `render.py` renderer. It is a local Linux client, not an SSH client. No remote monitoring agent or production-host software is installed.
+
+## Operator controls
+
+- After login/resume: **Overview** first, **Virtual Machines** second. `1` / `2` switch pages (when a text field is focused, digits edit that field). `R` refreshes the active page; `Enter` inspects the selected VM; `Q` quits. VM lifecycle operations remain on Virtual Machines. Audit is opened with its secondary **Audit** button there.
+- Overview's top bar shows `Refresh: 3s` by default. Enter a whole number of seconds from **1–60** and select **Apply**. Invalid input leaves the prior interval in place. The setting changes local collection scheduling without restarting; it does **not** relax VM operation freshness policy or accelerate the expensive dashboard/inventory call below its 18-second minimum. A manual **Refresh** is explicit; **Rediscover** requests `network nic-list` again.
+- Host resource numbers come from local `/proc` (CPU uses consecutive samples; RAM uses MemAvailable); PVM-reported identity and raw RAM values are labeled separately. If Plaivid runs on a different Linux machine than the PVM host, **local** resource numbers describe that machine, not the PVM. Never treat this distinction as a verified host-ID match.
+- NIC tabs require a recognized `network nic-list` schema *and* a matching local physical sysfs device. Each discovered physical device is sampled even if not selected. RX/TX rates require two successful counters and elapsed time. Unsupported counters and CRC show `N/A`; an existing sysfs CRC counter is used if exposed by the driver. The installed NIC-list response schema is not available in this checkout, so the real adapter currently marks discovery unsupported instead of guessing XML fields. NIC tabs and all-interface sampling work with verified or fake gateway records but require a versioned NIC-list fixture before real-host activation.
+- The heartbeat reflects actual collector results and timestamps; a missing or failed PVM read is not proof of the host being powered off. An unsupported NIC source is a warning, not a false claim of healthy monitoring. VDI and VM top-list fields remain N/A until the installed API contract is verified. **Container monitoring is excluded.**
+
+## PVM acceptance required (NOT PERFORMED)
+
+No actual PVM environment or dashboard screenshot was available in this workspace. Existing synthetic tests establish only the client-side behavior, not installed PVM response shapes or the visual match to the referenced screenshot. Authorized operators should use a **non-production** PVM host and redact tokens, addresses and customer identifiers before providing evidence:
+
+1. Capture the exact successful `user objects` dashboard response for `/plaivid/overview/pvm_overview_dashboard` (including top VM lists, VDI-related records and units). Confirm whether `average` is load, and whether `storage_list` contains pools or VDIs. Do not infer per-disk capacity from pools.
+2. Capture `network nic-list` response/argv on the deployed sbell version; confirm its token/params requirements and the mapping to physical Linux device names. Review any CRC counter available from an already-installed `ethtool -S` command before enabling driver CRC collection; never install a tool on production for this feature.
+3. Verify dashboard PVM host identity against the local machine on which Plaivid runs, and confirm reliable running-state semantics of object inventory plus `pvm-running-vms` across started/paused/stopped cases. If a source is partial, running count is not authoritative.
+4. Measure command count, response latency, host load and dashboard data staleness at 3s/18s cadences on an authorized host. Agree warning/offline thresholds and PVM load budget with the owner.
+5. Compare 80/120-column renders, keyboard navigation, NIC switching, VM operations, logout/login and resize against an owner-provided screenshot. Verify no full-screen clears or duplicate polling. Do not submit real VM mutations except under the separate `docs/REAL_PVM_VALIDATION.md` authorization procedure.
+
+Local verification: fake PVM/OS fixtures, Textual Pilot, pytest, Ruff, Pyright. Target-PVM acceptance remains **PENDING MANUAL PVM VALIDATION**.

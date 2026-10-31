@@ -5,7 +5,7 @@ from __future__ import annotations
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     Checkbox,
@@ -21,6 +21,7 @@ from textual.widgets import (
 )
 
 from plaivid_cli.application.operations import OperationCoordinator
+from plaivid_cli.application.overview import OverviewHistory, OverviewSchedule
 from plaivid_cli.application.services import (
     PlaividApplication,
     TargetSelection,
@@ -46,6 +47,7 @@ from plaivid_cli.domain.models import (
     VMRecord,
 )
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.overview import cards, nic_details
 
 BULK_ACTIONS: tuple[Action, ...] = (
     Action.START,
@@ -102,12 +104,38 @@ class PlaividTui(App[None]):
     .section-title { color: #8be9fd; text-style: bold; padding-bottom: 1; }
     #notice { height: 2; color: #91a6c4; padding: 0 1; }
     #refresh-button { width: 12; }
+    #overview { height: 1fr; padding: 1; background: #0b1220; }
+    #overview-toolbar { height: 3; background: #111d31; border: round #254568; padding: 0 1; }
+    #overview-title { width: 1fr; color: #8be9fd; text-style: bold; }
+    #refresh-label { width: 14; color: #91a6c4; }
+    #interval-input { width: 5; height: 1; margin: 0 1; }
+    #interval-apply { width: 8; min-width: 8; height: 1; padding: 0; }
+    #overview-refresh, #rediscover { width: 11; min-width: 11; height: 1; padding: 0; }
+    #interval-error { height: 1; color: #ffc766; }
+    #host-identity { height: auto; color: #91a6c4; padding: 1; }
+    .dashboard-heading { height: 2; color: #8be9fd; text-style: bold; padding: 0 1; margin-top: 1; }
+    #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
+    #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
+    .wide #summary-grid { grid-size: 5; }
+    .wide #chart-grid { grid-size: 3; }
+    .dashboard-card { height: 6; padding: 0 1; border: round #254568; background: #111d31; color: #e5edf7; }
+    #heartbeat-card { border: round #7958ad; }
+    #heartbeat-details { height: auto; padding: 0 1; color: #91a6c4; }
+    .chart-card { height: 4; padding: 0 1; border: round #254568; background: #111d31; }
+    #nic-tabs { height: auto; }
+    .nic-tab { width: auto; min-width: 10; margin-right: 1; }
+    #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5; padding: 1; border: round #254568; background: #111d31; }
+    #audit-toggle { width: 9; min-width: 9; }
+    #audit-panel { display: none; min-height: 7; }
+    #fleet { height: 1fr; }
     #select-all { width: auto; margin-left: 2; color: #ffc766; }
     """
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("enter", "details", "Details"),
         ("q", "quit", "Quit"),
+        ("1", "overview_page", "Overview"),
+        ("2", "vms_page", "Virtual Machines"),
     ]
 
     def __init__(
@@ -128,6 +156,23 @@ class PlaividTui(App[None]):
         self._detail_base = "Select a VM to inspect its details."
         self._refresh_timer = None
         self._operation_active = False
+        self._refresh_busy = False
+        self._pending_manual_refresh = False
+        self._session_epoch = 0
+        self._inventory_generation: int | None = None
+        self._table_order: tuple[str, ...] = ()
+        self._table_content: dict[str, tuple[str, ...]] = {}
+        self._table_columns = ()
+        self._render_cache: dict[str, str] = {}
+        self._heartbeat_color: str | None = None
+        self._overview_schedule = OverviewSchedule(
+            min(60, max(1, application.settings.refresh_interval))
+        )
+        self._history = OverviewHistory()
+        self._nic_selected: str | None = None
+        self._nic_tab_names: tuple[str, ...] = ()
+        self._fleet_due = 0.0
+        self._visible_snapshot: ApplicationSnapshot | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
@@ -148,8 +193,39 @@ class PlaividTui(App[None]):
                 yield Static("", id="login-error", markup=False)
                 with Horizontal(id="login-buttons"):
                     yield Button("Sign in", id="login", variant="primary")
-            with TabbedContent(initial="fleet", id="tabs"):
-                with TabPane("Fleet", id="fleet"):
+            with TabbedContent(initial="overview", id="tabs"):
+                with TabPane("Overview", id="overview"):
+                    with VerticalScroll(id="overview-scroll"):
+                        with Horizontal(id="overview-toolbar"):
+                            yield Static("◈  PLAIVID  /  OVERVIEW", id="overview-title")
+                            yield Static(f"Refresh: {self._overview_schedule.interval:g}s", id="refresh-label")
+                            yield Input(value=f"{self._overview_schedule.interval:g}", id="interval-input", placeholder="sec")
+                            yield Button("Apply", id="interval-apply")
+                            yield Button("Refresh", id="overview-refresh")
+                        yield Static("", id="interval-error", markup=False)
+                        yield Static("LOCAL HOST  N/A · PVM HOST  N/A", id="host-identity", markup=False)
+                        yield Static("01   HOST OVERVIEW", classes="dashboard-heading")
+                        with Grid(id="summary-grid"):
+                            for card in ("running-card", "cpu-card", "memory-card", "load-card", "heartbeat-card"):
+                                yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
+                        yield Static("Awaiting collector responses", id="heartbeat-details", markup=False)
+                        yield Static("02   HOST RESOURCE HISTORY", classes="dashboard-heading")
+                        with Grid(id="chart-grid"):
+                            for chart in ("cpu-chart", "memory-chart", "load-chart"):
+                                yield Static("Waiting for samples", id=chart, classes="chart-card", markup=False)
+                        yield Static("03   PHYSICAL NETWORK INTERFACES", classes="dashboard-heading")
+                        with Horizontal(id="nic-tabs"):
+                            pass
+                        yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
+                        yield Button("Rediscover", id="rediscover")
+                        yield Static("04   VIRTUAL MACHINES", classes="dashboard-heading")
+                        yield Static("Waiting for VM monitoring…", id="vm-monitor", markup=False)
+                        yield Static("05   VIRTUAL DISK IMAGES", classes="dashboard-heading")
+                        yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
+                        with Horizontal(id="host-grid"):
+                            yield Static("HOST STATUS\nWaiting for collection…", id="host-status", markup=False)
+                            yield Static("HOST METRICS\nWaiting for collection…", id="host-metrics", markup=False)
+                with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
                             yield Static("DEFINED OBJECTS", classes="metric-title")
@@ -170,29 +246,38 @@ class PlaividTui(App[None]):
                                 id="bulk-actions",
                             )
                             yield Checkbox("Apply to all VMs", id="select-all")
+                            yield Button("Audit", id="audit-toggle")
                         yield DataTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
                         yield Static("No operation submitted.", id="action-status", markup=False)
                     yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
-                with TabPane("Host", id="host"):
-                    with Horizontal(id="host-grid"):
-                        yield Static("HOST STATUS\nWaiting for collection…", id="host-status", markup=False)
-                        yield Static("HOST METRICS\nWaiting for collection…", id="host-metrics", markup=False)
-                with TabPane("Audit", id="audit"):
                     yield Static("READ-ONLY AUDIT\nWaiting for session…", id="audit-panel", markup=False)
-            yield Static("Press R to refresh · Enter for VM details · Q to quit", id="notice")
+            yield Static("1 Overview · 2 Virtual Machines · R refresh · Enter details · Q quit", id="notice")
             Footer()
 
     def on_mount(self) -> None:
         self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
-        table.add_columns("#", "VM name", "UUID", "Object state", "Process", "vCPU", "Memory")
+        self._table_columns = table.add_columns("#", "VM name", "UUID", "Object state", "Process", "vCPU", "Memory")
         self.query_one("#tabs", TabbedContent).display = False
         self.query_one("#login-box", VerticalScroll).display = True
-        self._refresh_timer = self.set_interval(
-            self.application.settings.refresh_interval, self._request_refresh
-        )
+        self._refresh_timer = self.set_interval(0.5, self._tick)
+        self._set_width_class()
         self._resume_session()
+
+    def on_resize(self) -> None:
+        self._set_width_class()
+
+    def _set_width_class(self) -> None:
+        self.query_one("#shell", Vertical).set_class(self.size.width >= 110, "wide")
+
+    def action_overview_page(self) -> None:
+        if self.session is not None:
+            self.query_one("#tabs", TabbedContent).active = "overview"
+
+    def action_vms_page(self) -> None:
+        if self.session is not None:
+            self.query_one("#tabs", TabbedContent).active = "fleet"
 
     @work(thread=True, group="session", exclusive=True)
     def _resume_session(self) -> None:
@@ -235,8 +320,44 @@ class PlaividTui(App[None]):
             message = f"Local token cache cleared; PVM logout was not confirmed: {exc.code}"
         self.call_from_thread(self._session_ended, message)
 
+    def _clear_session_view(self) -> None:
+        self._inventory_section = None
+        self._inventory = None
+        self._inventory_generation = None
+        self._records.clear()
+        self._selected_uuid = None
+        self._table_order = ()
+        self._table_content.clear()
+        self.query_one("#fleet-table", DataTable).clear(columns=False)
+        self.query_one("#vm-count", Static).update("—")
+        self.query_one("#process-count", Static).update("—")
+        self.query_one("#inventory-quality", Static).update("Not collected")
+        self.query_one("#detail-box", Static).update("Select a VM to inspect its details.")
+        self.query_one("#action-status", Static).update("No operation submitted.")
+        self.query_one("#audit-panel", Static).update("READ-ONLY AUDIT\nWaiting for session…")
+        self.query_one("#audit-panel", Static).display = False
+        self.query_one("#host-status", Static).update("HOST STATUS\nWaiting for collection…")
+        self.query_one("#host-metrics", Static).update("HOST METRICS\nWaiting for collection…")
+        self._visible_snapshot = None
+        self._history = OverviewHistory()
+        self._render_cache.clear()
+        self._heartbeat_color = None
+        self.query_one("#nic-tabs", Horizontal).remove_children()
+        self._nic_tab_names = ()
+        self._nic_selected = None
+        for widget_id in (
+            "running-card", "cpu-card", "memory-card", "load-card", "heartbeat-card",
+            "cpu-chart", "memory-chart", "load-chart", "heartbeat-details", "nic-detail",
+            "vm-monitor", "vdi-monitor", "host-identity",
+        ):
+            self.query_one(f"#{widget_id}", Static).update("Waiting for authenticated monitoring data…")
+
     def _session_ended(self, message: str) -> None:
         self.session = None
+        self._session_epoch += 1
+        self._overview_schedule.reset()
+        self._pending_manual_refresh = False
+        self._clear_session_view()
         self.query_one("#session-label", Static).update("● Offline")
         self.query_one("#tabs", TabbedContent).display = False
         self.query_one("#login-box", VerticalScroll).display = True
@@ -248,55 +369,197 @@ class PlaividTui(App[None]):
 
     def _session_ready(self, session: PvmSession) -> None:
         self.session = session
+        self._session_epoch += 1
+        self._pending_manual_refresh = False
+        self._clear_session_view()
+        self.query_one("#tabs", TabbedContent).active = "overview"
+        self._overview_schedule.reset()
+        self._overview_schedule.enter()
         self.query_one("#session-label", Static).update(
             redact_text(f"● {session.username}  /  session active")
         )
         self.query_one("#login-box", VerticalScroll).display = False
         self.query_one("#tabs", TabbedContent).display = True
-        self._request_refresh()
+        self._tick()
 
     @on(TabbedContent.TabActivated, "#tabs")
     def tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if self.session is None:
             return
-        if event.pane.id == "audit":
-            self._request_audit()
+        if event.pane.id == "overview":
+            self._overview_schedule.enter()
+            self._tick()
         else:
-            self._request_refresh()
+            self._overview_schedule.leave()
+            self._fleet_due = 0
+            self._tick()
 
     def action_refresh(self) -> None:
-        if self.query_one("#tabs", TabbedContent).active == "audit":
-            self._request_audit()
-        else:
-            self._request_refresh()
+        self._request_refresh()
 
     @on(Button.Pressed, "#refresh-button")
+    @on(Button.Pressed, "#overview-refresh")
     def refresh_button(self) -> None:
         self._request_refresh()
+
+    @on(Button.Pressed, "#audit-toggle")
+    def show_audit(self) -> None:
+        panel = self.query_one("#audit-panel", Static)
+        panel.display = not panel.display
+        if panel.display:
+            self._request_audit()
+
+    @on(Button.Pressed, "#rediscover")
+    def rediscover(self) -> None:
+        self._overview_schedule.rediscover()
+        self._tick()
+
+    @on(Button.Pressed, "#interval-apply")
+    def apply_interval(self) -> None:
+        raw = self.query_one("#interval-input", Input).value.strip()
+        try:
+            if not raw.isdecimal():
+                raise ValueError("Refresh must be a whole number of seconds from 1 to 60")
+            self._overview_schedule.set_interval(int(raw))
+        except ValueError as exc:
+            self.query_one("#interval-error", Static).update(str(exc))
+            return
+        self.query_one("#interval-error", Static).update("")
+        self.query_one("#refresh-label", Static).update(
+            f"Refresh: {self._overview_schedule.interval:g}s"
+        )
+
+    def _tick(self) -> None:
+        self._set_width_class()
+        if self.session is None:
+            return
+        if self._refresh_busy:
+            if self.query_one("#tabs", TabbedContent).active == "overview":
+                self._render_heartbeat_age()
+            return
+        if self.query_one("#tabs", TabbedContent).active == "overview":
+            sections = self._overview_schedule.due()
+            if sections:
+                self._start_refresh(sections)
+            else:
+                self._render_heartbeat_age()
+        else:
+            import time
+
+            now = time.monotonic()
+            if now >= self._fleet_due:
+                self._fleet_due = now + self.application.settings.refresh_interval
+                self._start_refresh(("inventory",))
 
     def _request_refresh(self) -> None:
         if self.session is None:
             return
-        active = self.query_one("#tabs", TabbedContent).active
-        if active == "audit":
+        if self._refresh_busy:
+            self._pending_manual_refresh = True
             return
-        sections = ("inventory",) if active == "fleet" else ("host_status", "host_metrics")
-        self._collect_visible(sections)
+        if self.query_one("#tabs", TabbedContent).active == "overview":
+            sections = ("physical_nics", "local_host", "nic_samples", "inventory", "dashboard", "host_status", "host_metrics")
+            self._overview_schedule.busy = True
+        else:
+            sections = ("inventory",)
+        self._start_refresh(sections)
 
-    @work(thread=True, group="refresh", exclusive=True)
-    def _collect_visible(self, sections: tuple[str, ...]) -> None:
+    def _start_refresh(self, sections: tuple[str, ...]) -> None:
         session = self.session
-        if session is None:
+        if session is None or self._refresh_busy:
+            self._overview_schedule.finished()
             return
+        self._refresh_busy = True
+        self._collect_visible(sections, session.token, self._session_epoch)
+
+    @work(thread=True, group="refresh", exclusive=False)
+    def _collect_visible(self, sections: tuple[str, ...], token: str, epoch: int) -> None:
         try:
-            snapshot = self.application.refresh(session.token, sections=sections)
+            snapshot = self.application.refresh(token, sections=sections)
         except Exception as exc:
-            self.call_from_thread(self._show_error, f"Refresh failed: {type(exc).__name__}")
+            self.call_from_thread(self._show_refresh_error, epoch, type(exc).__name__)
+        else:
+            self.call_from_thread(self._publish_if_current, snapshot, epoch)
+        finally:
+            self.call_from_thread(self._refresh_finished)
+
+    def _refresh_finished(self) -> None:
+        self._refresh_busy = False
+        self._overview_schedule.finished()
+        if self._pending_manual_refresh and self.session is not None:
+            self._pending_manual_refresh = False
+            self._request_refresh()
+
+    def _show_refresh_error(self, epoch: int, kind: str) -> None:
+        if self.session is not None and epoch == self._session_epoch:
+            self._show_error(f"Refresh failed: {kind}")
+
+    def _publish_if_current(self, snapshot: ApplicationSnapshot, epoch: int) -> None:
+        if self.session is not None and epoch == self._session_epoch:
+            self._publish_snapshot(snapshot)
+
+    def _render_heartbeat_age(self) -> None:
+        # Low-cost UI clock: no PVM calls; render only if the text changed.
+        snapshot = self._visible_snapshot
+        if snapshot is None:
             return
-        self.call_from_thread(self._publish_snapshot, snapshot)
+        values = cards(snapshot, self._history, self._overview_schedule.interval)
+        self._put("heartbeat-card", values["heartbeat-card"])
+        self._color_heartbeat(values["heartbeat-card"])
+        details = values["heartbeat-details"]
+        self._put("heartbeat-details", details)
+
+    def _color_heartbeat(self, text: str) -> None:
+        color = "#ff7788" if "OFFLINE" in text else "#ffc766" if "WARNING" in text else "#79e2a7" if "ONLINE" in text else "#7958ad"
+        if color != self._heartbeat_color:
+            self.query_one("#heartbeat-card", Static).styles.border = ("round", color)
+            self._heartbeat_color = color
+
+    def _put(self, widget_id: str, text: str) -> None:
+        if self._render_cache.get(widget_id) != text:
+            self.query_one(f"#{widget_id}", Static).update(text)
+            self._render_cache[widget_id] = text
+
+    def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
+        self._visible_snapshot = snapshot
+        self._history.add(snapshot)
+        values = cards(snapshot, self._history, self._overview_schedule.interval)
+        for widget_id, text in values.items():
+            self._put(widget_id, text)
+        self._color_heartbeat(values["heartbeat-card"])
+        devices, detail = nic_details(snapshot, self._nic_selected)
+        names = tuple(item.name for item in devices)
+        if names != self._nic_tab_names:
+            tabs = self.query_one("#nic-tabs", Horizontal)
+            tabs.remove_children()
+            for index, item in enumerate(devices):
+                tabs.mount(Button(redact_text(item.name), id=f"nic-tab-{index}", classes="nic-tab"))
+            self._nic_tab_names = names
+        if self._nic_selected not in names:
+            self._nic_selected = names[0] if names else None
+        self._put("nic-detail", detail)
+        for index, name in enumerate(names):
+            button = self.query_one(f"#nic-tab-{index}", Button)
+            button.variant = "primary" if name == self._nic_selected else "default"
+
+    @on(Button.Pressed, ".nic-tab")
+    def select_nic(self, event: Button.Pressed) -> None:
+        index = int((event.button.id or "-0").rsplit("-", 1)[1])
+        if index < len(self._nic_tab_names):
+            self._nic_selected = self._nic_tab_names[index]
+            _, detail = nic_details(self._visible_snapshot, self._nic_selected) if self._visible_snapshot else ((), "No sample")
+            self._put("nic-detail", detail)
+            for button_index, name in enumerate(self._nic_tab_names):
+                button = self.query_one(f"#nic-tab-{button_index}", Button)
+                button.variant = "primary" if name == self._nic_selected else "default"
 
     def _publish_snapshot(self, snapshot: ApplicationSnapshot) -> None:
+        self._render_overview(snapshot)
         inventory_section = snapshot.section("inventory")
+        if inventory_section is None or inventory_section.generation == self._inventory_generation:
+            self._render_host(snapshot)
+            return
+        self._inventory_generation = inventory_section.generation
         self._inventory_section = inventory_section
         inventory = None
         if inventory_section is not None:
@@ -307,29 +570,40 @@ class PlaividTui(App[None]):
         self._records = {record.uuid: record for record in inventory.records} if inventory else {}
         selected_uuid = self._selected_uuid
         table = self.query_one("#fleet-table", DataTable)
-        table.clear(columns=False)
         records: list[VMRecord] = []
         if inventory is not None:
             records = sorted(
                 inventory.records,
                 key=lambda item: (0 if item.process_seen else 1, item.name.casefold(), item.uuid),
             )
-            for index, record in enumerate(records, start=1):
-                table.add_row(
-                    Text(str(index)),
-                    Text(redact_text(record.name)),
-                    Text(record.uuid),
-                    Text(redact_text(record.state)),
-                    Text("Observed" if record.process_seen else "Not observed"),
-                    Text(_display(record.vcpu)),
-                    Text(_display(record.mem_mb, suffix=" MB")),
-                    key=record.uuid,
+            rows = {
+                record.uuid: (
+                    str(index), redact_text(record.name), record.uuid,
+                    redact_text(record.state), "Observed" if record.process_seen else "Not observed",
+                    _display(record.vcpu), _display(record.mem_mb, suffix=" MB"),
                 )
+                for index, record in enumerate(records, start=1)
+            }
+            order = tuple(rows)
+            if order != self._table_order:
+                table.clear(columns=False)
+                for uuid, cells in rows.items():
+                    table.add_row(*(Text(value) for value in cells), key=uuid)
+            else:
+                for uuid, cells in rows.items():
+                    old = self._table_content.get(uuid, ())
+                    for column, cell in enumerate(cells):
+                        if column >= len(old) or cell != old[column]:
+                            table.update_cell(uuid, self._table_columns[column], Text(cell), update_width=True)
+            self._table_order, self._table_content = order, rows
             self.query_one("#vm-count", Static).update(str(len(inventory.records)))
             self.query_one("#process-count", Static).update(
                 str(sum(record.process_seen for record in inventory.records))
             )
         else:
+            if self._table_order:
+                table.clear(columns=False)
+                self._table_order, self._table_content = (), {}
             self.query_one("#vm-count", Static).update("—")
             self.query_one("#process-count", Static).update("—")
         if records:

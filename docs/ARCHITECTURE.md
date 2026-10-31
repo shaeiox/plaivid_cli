@@ -41,7 +41,8 @@ This describes the current implementation, not the earlier dynamic command/actio
 - `infrastructure/pvm/adapter.py` adapts only repository-evidenced local PVM commands. `parsers.py` are pure and report missing, malformed, conflicting, and unavailable values without manufacturing healthy defaults.
 - `infrastructure/audit.py` uses SQLite read-only URI mode, bounded queries, and schema checks.
 - `cli.py` provides one-shot reads, six lifecycle commands, stable exit categories, and JSON representations. Help/version do not create a runtime or invoke a provider.
-- `tui.py` uses Textual for rendering and widgets. Blocking application operations use Textual workers. Fleet/Host live views request periodic collection; Audit reads on tab entry or explicit refresh only. VM selection is retained by UUID.
+- `tui.py` presents Overview (default) and Virtual Machines as two primary Textual pages, with secondary on-demand read-only Audit access. Blocking application operations use Textual workers. One active-view timer controls demand; Overview local samples default to 3s and the batched PVM dashboard/inventory cadence is >=18s. VM selection is retained by UUID; unchanged table rows and cards are updated without clearing the screen. `application/overview.py` owns due/health/history state; `presentation/overview.py` formats snapshots but never calls a provider. The 1–60s UI control adjusts Overview local cadence only and does not change operation freshness policy.
+- `infrastructure/local_monitor.py` reads the local machine's `/proc` and physical NIC sysfs counters; `infrastructure/pvm/overview.py` parses only specified dashboard identity/raw RAM paths and intentionally rejects an unverified NIC-list schema. These are *not* verified deployed schemas. Top-VM metric units and individual VDI inventory are not captured in the repository and remain N/A until owner validation. No Container dashboard collection exists. `docs/MONITORING_DASHBOARD.md` lists the acceptance gates.
 
 ## Read model and source truth
 
@@ -49,7 +50,7 @@ Object records originate from the batched object query; process evidence origina
 
 Sball status retains the literal `sball_state` field. In particular, `quorate` means the Sball-reported value is Quorate; the application does not promote it into a claim that every member or service is healthy.
 
-Inventory, host status, host metrics, detail, and tap mapping are separate collection sections. Errors in one section retain its own last-good value/status and do not erase another section. Displaying last-good data never changes its stale/unavailable label.
+Inventory, host status, host metrics, local-host metrics, PVM dashboard, physical NIC discovery/counters, detail, and tap mapping are separate collection sections. Errors in one section retain its own last-good value/status and do not erase another section. Displaying last-good data never changes its stale/unavailable label.
 
 ## Operation admission and uncertainty
 

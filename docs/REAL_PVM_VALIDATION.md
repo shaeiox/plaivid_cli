@@ -66,3 +66,7 @@ Bulk behavior is intentionally deferred until individual action contracts and in
 ## Current implementation-only verification
 
 The local suite uses fake providers, fake child runners, synthetic XML/text fixtures, temporary SQLite databases, and Textual Pilot. It tests deterministic parsing, security gates, policy, collection barriers, result states, CLI serialization, and UI mounting. It does not contact any real PVM host. Real-PVM validation remains **PENDING MANUAL PVM VALIDATION**.
+
+## New Overview acceptance (PENDING MANUAL PVM VALIDATION)
+
+Follow the read-only, credential-redacted, non-production evidence and measurement checklist in [`MONITORING_DASHBOARD.md`](MONITORING_DASHBOARD.md). Its PVM dashboard XML paths, physical NIC-list response, running-count semantics, VDI record types/units, screenshot comparison, and 3s/18s load budget have **not** been validated against an installed PVM. Do not treat synthetic tests or successful local builds as proof of those contracts.

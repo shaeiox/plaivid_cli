@@ -8,8 +8,9 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
+from typing import cast
 
-from plaivid_cli.application.ports import PvmGateway
+from plaivid_cli.application.ports import MonitoringGateway, PvmGateway
 from plaivid_cli.domain.errors import AppError
 from plaivid_cli.domain.inventory import merge_inventory
 from plaivid_cli.domain.models import (
@@ -18,9 +19,11 @@ from plaivid_cli.domain.models import (
     SectionSnapshot,
     SourceResult,
 )
+from plaivid_cli.domain.overview import PhysicalNic
 
 _SECTIONS = {
-    "inventory", "objects", "processes", "host_status", "host_metrics", "tap_mapping"
+    "inventory", "objects", "processes", "host_status", "host_metrics", "tap_mapping",
+    "dashboard", "local_host", "physical_nics", "nic_samples"
 }
 
 
@@ -35,6 +38,7 @@ class CollectionCoordinator:
         if refresh_interval <= 0:
             raise ValueError("refresh_interval must be positive")
         self._provider = provider
+        self._monitor = cast(MonitoringGateway, provider)
         self.refresh_interval = refresh_interval
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="plaivid-read")
         self._lock = threading.RLock()
@@ -292,6 +296,11 @@ class CollectionCoordinator:
                     source="user/objects+pvm-running-vms",
                     quality_issues=merged.quality_issues,
                     error=process_result.error,
+                    attempted_at=object_result.attempted_at,
+                    succeeded_at=process_result.succeeded_at or object_result.succeeded_at,
+                    latency_seconds=(object_result.latency_seconds or 0) + (process_result.latency_seconds or 0),
+                    attempted_monotonic=object_result.attempted_monotonic,
+                    succeeded_monotonic=process_result.succeeded_monotonic or object_result.succeeded_monotonic,
                 )
             else:
                 results["inventory"] = SourceResult(
@@ -300,6 +309,9 @@ class CollectionCoordinator:
                     source="user/objects+pvm-running-vms",
                     error=object_result.error or "object inventory unavailable",
                     quality_issues=object_result.quality_issues + process_result.quality_issues,
+                    attempted_at=object_result.attempted_at,
+                    latency_seconds=(object_result.latency_seconds or 0) + (process_result.latency_seconds or 0),
+                    attempted_monotonic=object_result.attempted_monotonic,
                 )
         if "host_status" in requested:
             results["host_status"] = self._read(
@@ -309,6 +321,38 @@ class CollectionCoordinator:
             results["host_metrics"] = self._read(
                 "host_metrics", lambda: self._provider.host_metrics(token), "monitoring/metrics"
             )
+        if "dashboard" in requested:
+            results["dashboard"] = self._read(
+                "dashboard", lambda: self._monitor.dashboard(token), "user/objects/dashboard"
+            )
+        if "local_host" in requested:
+            results["local_host"] = self._read(
+                "local_host", lambda: self._monitor.local_host(), "local /proc"
+            )
+        if "physical_nics" in requested:
+            results["physical_nics"] = self._read(
+                "physical_nics", lambda: self._monitor.physical_nics(token), "network/nic-list"
+            )
+        if "nic_samples" in requested:
+            discovered = results.get("physical_nics")
+            if discovered is None:
+                with self._lock:
+                    prior_nics = self._sections.get("physical_nics")
+                if prior_nics is not None:
+                    discovered = SourceResult(
+                        prior_nics.value or prior_nics.last_good_value,
+                        prior_nics.status, prior_nics.source or "network/nic-list",
+                    )
+            if discovered is not None and isinstance(discovered.value, tuple):
+                devices = tuple(nic for nic in discovered.value if isinstance(nic, PhysicalNic))
+                results["nic_samples"] = self._read(
+                    "nic_samples", lambda: self._monitor.nic_samples(devices), "local sysfs"
+                )
+            else:
+                results["nic_samples"] = SourceResult(
+                    None, CollectionStatus.UNSUPPORTED, "local sysfs",
+                    error="physical NIC inventory unavailable",
+                )
         if "tap_mapping" in requested:
             results["tap_mapping"] = self._read(
                 "tap_mapping", lambda: self._provider.tap_mapping(token), "user/objects/tap-map"
@@ -340,29 +384,32 @@ class CollectionCoordinator:
                 value = result.value if success else None
                 last_good = result.value if success else previous_value
                 status = result.status
-                if not success and previous_value is not None and status not in {
-                    CollectionStatus.UNSUPPORTED, CollectionStatus.NEVER
-                }:
+                if not success and previous_value is not None and status is not CollectionStatus.NEVER:
                     status = CollectionStatus.STALE
-                succeeded_at = attempted_at if success else (prior.succeeded_at if prior else None)
-                succeeded_mono = attempted_mono if success else (prior.succeeded_monotonic if prior else None)
+                result_time = result.succeeded_at or datetime.now(UTC)
+                result_mono = result.succeeded_monotonic or time.monotonic()
+                succeeded_at = result_time if success else (prior.succeeded_at if prior else None)
+                succeeded_mono = result_mono if success else (prior.succeeded_monotonic if prior else None)
                 self._sections[name] = SectionSnapshot(
                     name=name,
                     value=value,
                     last_good_value=last_good,
                     status=status,
-                    attempted_at=attempted_at,
+                    attempted_at=result.attempted_at or attempted_at,
                     succeeded_at=succeeded_at,
                     generation=generation,
                     source=result.source or (prior.source if prior else None),
                     error=result.error,
                     quality_issues=result.quality_issues,
-                    attempted_monotonic=attempted_mono,
+                    attempted_monotonic=result.attempted_monotonic or attempted_mono,
                     succeeded_monotonic=succeeded_mono,
+                    latency_seconds=result.latency_seconds if success else (prior.latency_seconds if prior else None),
                 )
             return self._snapshot_locked()
 
     def _read(self, name: str, call, source: str) -> SourceResult[object]:
+        started = time.monotonic()
+        attempted = datetime.now(UTC)
         try:
             result = call()
             return SourceResult(
@@ -371,6 +418,11 @@ class CollectionCoordinator:
                 source=result.source or source,
                 error=result.error,
                 quality_issues=result.quality_issues,
+                attempted_at=attempted,
+                succeeded_at=datetime.now(UTC),
+                latency_seconds=time.monotonic() - started,
+                attempted_monotonic=started,
+                succeeded_monotonic=time.monotonic(),
             )
         except Exception as exc:
             message = str(exc) if isinstance(exc, AppError) else f"{type(exc).__name__} during {name} collection"
@@ -379,6 +431,9 @@ class CollectionCoordinator:
                 status=CollectionStatus.UNAVAILABLE,
                 source=source,
                 error=message,
+                attempted_at=attempted,
+                latency_seconds=time.monotonic() - started,
+                attempted_monotonic=started,
             )
 
     def _snapshot_locked(self) -> ApplicationSnapshot:

@@ -16,6 +16,7 @@ from plaivid_cli.domain.models import (
     SourceResult,
     VMDetail,
 )
+from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 
 
 class PvmGateway(Protocol):
@@ -39,6 +40,17 @@ class PvmGateway(Protocol):
 
     def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply: ...
 
+
+class MonitoringGateway(Protocol):
+    """Optional read-only extension; existing PvmGateway implementations still work."""
+
+    def dashboard(self, token: str) -> SourceResult[DashboardSample]: ...
+
+    def local_host(self) -> SourceResult[LocalHostSample]: ...
+
+    def physical_nics(self, token: str) -> SourceResult[tuple[PhysicalNic, ...]]: ...
+
+    def nic_samples(self, devices: tuple[PhysicalNic, ...]) -> SourceResult[tuple[NicSample, ...]]: ...
 
 class AuditGateway(Protocol):
     def recent(self, limit: int) -> tuple[AuditEntry, ...]: ...

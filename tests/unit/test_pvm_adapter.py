@@ -175,3 +175,35 @@ def test_failed_vm_envelope_is_parsed_into_reply_with_errno_and_message() -> Non
     assert reply.errno == "146"
     assert reply.message == "VM 'test-vm' is already off"
     assert runner.calls[-1] == ("sudo", "sbell", "vm", "stop", f"<vm_key>{UUID_A}</vm_key>", "fake-token")
+
+
+def test_dashboard_uses_existing_token_gate_and_preserves_requested_xml() -> None:
+    class DashboardRunner(FakeRunner):
+        def run(self, argv, *, timeout=None):
+            self.calls.append(tuple(argv))
+            return ProcessResult(
+                0,
+                "<response><status>success</status><description><host_list><host_dashboard>"
+                "<name>node-a</name><id>3</id><cpus><cpu>Xeon</cpu></cpus>"
+                "<ram><free>8</free><used>2</used><total>10</total></ram>"
+                "</host_dashboard></host_list></description></response>",
+                "", False, False, 0.001,
+            )
+
+    runner = DashboardRunner()
+    adapter = LocalPvmAdapter(SbellClient(("sudo", "sbell"), runner), runner, ("pvm-running-vms",), allow_credential_argv=True)
+    sample = adapter.dashboard("fake-token").value
+    assert sample.host_name == "node-a" and sample.cpu_info == ("Xeon",)
+    assert sample.ram_total_raw == "10" and sample.vdis == ()
+    args = runner.calls[0]
+    assert args[:4] == ("sudo", "sbell", "user", "objects")
+    assert "<query_path>/plaivid/overview/pvm_overview_dashboard</query_path>" in args[4]
+    assert args[-1] == "fake-token"
+    gated = LocalPvmAdapter(SbellClient(("sudo", "sbell"), runner), runner, ("pvm-running-vms",))
+    try:
+        gated.dashboard("secret")
+    except AppError as error:
+        assert error.code == "CREDENTIAL_ARGV_ACK_REQUIRED"
+    else:
+        raise AssertionError("dashboard must retain the existing token gate")
+    assert len(runner.calls) == 1
