@@ -54,6 +54,33 @@ def test_complete_process_source_can_still_report_negative_evidence() -> None:
     assert inventory.records[0].state_disagreed is True
 
 
+def test_paused_vm_with_observed_process_is_not_a_state_conflict() -> None:
+    object_vm = ObjectVM(uuid=UUID_A, name="vm-a", state="paused")
+    process = ProcessObservation(uuid=UUID_A, pid=1234, name="vm-a")
+    inventory = merge_inventory(
+        (object_vm,), (process,), process_available=True, process_complete=True
+    )
+    assert inventory.records[0].state_disagreed is False
+
+
+def test_paused_vm_without_process_is_a_state_conflict() -> None:
+    object_vm = ObjectVM(uuid=UUID_A, name="vm-a", state="paused")
+    inventory = merge_inventory(
+        (object_vm,), (), process_available=True, process_complete=True
+    )
+    assert inventory.records[0].state_disagreed is True
+
+
+def test_stopped_or_off_vm_with_observed_process_is_still_a_conflict() -> None:
+    process = ProcessObservation(uuid=UUID_A, pid=1234, name="vm-a")
+    for state in ("stopped", "off"):
+        object_vm = ObjectVM(uuid=UUID_A, name="vm-a", state=state)
+        inventory = merge_inventory(
+            (object_vm,), (process,), process_available=True, process_complete=True
+        )
+        assert inventory.records[0].state_disagreed is True, state
+
+
 def test_section_status_distinguishes_empty_partial_stale_and_unavailable() -> None:
     now = datetime.now(UTC)
     empty = SectionSnapshot(

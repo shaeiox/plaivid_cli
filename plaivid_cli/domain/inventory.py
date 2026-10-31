@@ -54,9 +54,15 @@ def merge_inventory(
         process = usable_process.get(uuid)
         disagreed = False
         if process_available:
-            if obj.state in {"stopped", "off", "paused"} and process is not None:
+            # A paused VM keeps its hypervisor process alive, so "paused" is
+            # consistent with a process being observed and conflicts with its absence.
+            if obj.state in {"stopped", "off"} and process is not None:
                 disagreed = True
-            elif process_complete and obj.state in {"started", "running"} and process is None:
+            elif (
+                process_complete
+                and obj.state in {"started", "running", "paused"}
+                and process is None
+            ):
                 disagreed = True
         records.append(VMRecord(object=obj, process=process, state_disagreed=disagreed))
 
