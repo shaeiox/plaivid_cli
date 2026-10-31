@@ -57,10 +57,11 @@ TRUECOLOR = Palette(
 )
 
 # xterm's 256-color cube cannot express a subtle blue-black: the original
-# #2a2a3e rounds to bright navy (#00005f). Use exact grayscale-ramp entries
-# for layered surfaces, keeping color for values and status instead.
+# #2a2a3e rounds to bright navy (#00005f). Separate grayscale surfaces also
+# become obvious gray blocks. Keep panels and cards on the *same* canvas;
+# borders and semantic text provide hierarchy without filled rectangles.
 ANSI256 = Palette(
-    "#121212", "#262626", "#1c1c1c", "#e4e4e4", "#b2b2b2", "#585858",
+    "#121212", "#121212", "#121212", "#e4e4e4", "#b2b2b2", "#444444",
     PRIMARY, SECONDARY, ACCENT, SUCCESS, WARNING, ERROR,
 )
 

@@ -112,9 +112,9 @@ def test_terminal_palettes_do_not_quantize_dark_surfaces_to_navy():
     assert palette_for(None) is ANSI16
     assert palette_for("truecolor", no_color=True) is ANSI16
     assert Color.parse(TRUECOLOR.surface).downgrade(ColorSystem.EIGHT_BIT).number == 17
-    assert Color.parse(ANSI256.surface).downgrade(ColorSystem.EIGHT_BIT).number == 235
-    assert Color.parse(ANSI256.panel).downgrade(ColorSystem.EIGHT_BIT).number == 234
-    assert Color.parse(ANSI256.background).downgrade(ColorSystem.EIGHT_BIT).number == 233
+    for layer in (ANSI256.background, ANSI256.panel, ANSI256.surface):
+        assert Color.parse(layer).downgrade(ColorSystem.EIGHT_BIT).number == 233
+    assert ANSI256.background == ANSI256.panel == ANSI256.surface
 
 
 def test_256_and_standard_terminal_render_with_matching_widget_and_control_theme(tmp_path, monkeypatch):
@@ -131,6 +131,11 @@ def test_256_and_standard_terminal_render_with_matching_widget_and_control_theme
                 assert tui.query_one("#cpu-card", Static).styles.background.hex.lower() == palette.surface
                 assert tui.query_one("#topbar").styles.background.hex.lower() == palette.panel
                 assert tui.query_one("#overview-toolbar").styles.background.hex.lower() == palette.panel
+                if system == "256":
+                    for selector in ("#host-identity", "#heartbeat-card", "#cpu-chart", "#nic-detail"):
+                        assert tui.query_one(selector).styles.background.hex.lower() == palette.background
+                    assert tui.query_one("#fleet-table").styles.background.hex.lower() == palette.background
+                    assert tui.query_one(".metric-card").styles.background.hex.lower() == palette.background
                 assert tui.query_one("#tabs", TabbedContent).active == "overview"
                 assert "HOST CPU" in str(tui.query_one("#cpu-card", Static).render())
         finally:
