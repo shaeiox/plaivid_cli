@@ -85,17 +85,38 @@ class PlaividTui(App[None]):
         #session-label { width: auto; color: $p-green; content-align: right middle; padding: 0 1; }
         #logout { width: 5; min-width: 5; height: 1; margin: 0; padding: 0;
                   background: $p-surface; color: $p-rose; border: none; }
-        #logout:focus { background: $p-purple; color: $p-bg; text-style: bold; }
+        #logout:focus { background: $p-surface; color: $p-rose; text-style: bold underline; }
 
-        #login-box { width: 64; max-width: 92%; height: auto; border: round $p-purple;
+        #login-box { width: 64; max-width: 92%; height: auto; border: round $p-border;
                      background: $p-panel; padding: 1 2; margin: 2 0; }
         #login-title { color: $p-blue; text-style: bold; padding-bottom: 1; }
         #login-warning { color: $p-yellow; padding: 1 0; }
         #login-error { color: $p-rose; padding: 1 0; }
-        #login-buttons { height: auto; align-horizontal: right; margin-top: 1; }
-        Input, Select { background: $p-surface; border: round $p-border; color: $p-text; }
-        Input:focus, Select:focus { border: round $p-cyan; }
-        Button:focus { text-style: bold; }
+        #login-buttons { height: 1; align-horizontal: right; margin-top: 1; }
+        Input { background: $p-surface; border: round $p-border; color: $p-text; }
+        Input:focus { border: round $p-cyan; }
+
+        /* One-line actions in every page; reserve filled color for keyboard focus. */
+        Button, Button.-primary, Button.-style-default, Button.-style-flat {
+            height: 1; min-width: 0; width: auto; padding: 0 1;
+            border: none; background: $p-panel; color: $p-text;
+        }
+        Button.-primary { color: $p-blue; text-style: bold; }
+        Button:hover, Button.-primary:hover { border: none; background: $p-surface; color: $p-blue; }
+        Button:focus, Button.-primary:focus {
+            border: none; background: $p-surface; color: $p-blue; text-style: bold underline;
+        }
+        Button:disabled { border: none; background: $p-panel; color: $p-muted; }
+        Select { height: 1; color: $p-text; }
+        Select > SelectCurrent {
+            height: 1; padding: 0 1; border: none; background: $p-surface; color: $p-text;
+        }
+        Select:focus > SelectCurrent {
+            border: none; background: $p-surface; color: $p-blue; text-style: bold;
+        }
+        Checkbox { height: 1; padding: 0; border: none; background: $p-panel; color: $p-muted; }
+        Checkbox:focus { border: none; background: $p-surface; color: $p-blue; }
+        Checkbox.-on { color: $p-text; }
 
         TabbedContent { height: 1fr; background: $p-bg; }
         TabbedContent > ContentTabs { background: $p-panel; }
@@ -114,12 +135,12 @@ class PlaividTui(App[None]):
         #refresh-label { width: 14; color: $p-cyan; }
         #interval-input { width: 5; height: 1; margin: 0 1; padding: 0 1;
                           border: none; background: $p-surface; color: $p-cyan; }
-        #interval-input:focus { border: none; background: $p-purple; color: $p-bg; }
+        #interval-input:focus { border: none; background: $p-surface; color: $p-cyan; text-style: underline; }
         #interval-apply { width: 8; min-width: 8; height: 1; padding: 0; }
         #overview-refresh, #rediscover { width: 11; min-width: 11; height: 1; padding: 0; }
         #overview-toolbar Button { border: none; background: $p-surface;
                                    color: $p-cyan; text-style: bold; }
-        #overview-toolbar Button:focus { background: $p-purple; color: $p-bg; }
+        #overview-toolbar Button:focus { background: $p-surface; color: $p-blue; text-style: bold underline; }
         #interval-error { height: 1; color: $p-rose; }
         #host-identity { height: auto; color: $p-muted; background: $p-panel;
                          border-left: solid $p-cyan; padding: 1; margin-top: 1; }
@@ -152,26 +173,26 @@ class PlaividTui(App[None]):
                                       padding: 1; }
         #host-status { margin-right: 1; }
 
-        #fleet-summary { height: 6; margin-top: 1; }
+        #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
         .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
                        border: round $p-border; background: $p-surface; }
         .metric-card:focus-within { border: round $p-green; }
         .metric-title { color: $p-muted; text-style: bold; }
         .metric-value { color: $p-cyan; text-style: bold; }
-        #refresh-button { width: 12; }
+        #refresh-button { width: 11; min-width: 11; margin: 0 0 0 1; }
         #vm-list { height: 1fr; min-height: 13; border: round $p-border;
                    background: $p-panel; }
-        #vm-toolbar { height: 3; }
-        #bulk-actions { width: 28; }
-        #select-all { width: auto; margin-left: 2; color: $p-yellow; }
-        #audit-toggle { width: 9; min-width: 9; }
+        #vm-toolbar { height: 3; padding: 0 1; align-vertical: middle; background: $p-panel; }
+        #bulk-actions { width: 20; }
+        #select-all { width: auto; margin-left: 2; }
+        #audit-toggle { width: 11; min-width: 11; margin-left: 2; }
         #fleet-table { height: 1fr; min-height: 8; background: $p-surface;
                        border: round $p-border; }
         DataTable > .datatable--header { background: $p-panel; color: $p-purple; }
         DataTable:focus > .datatable--cursor { background: $p-purple; color: $p-bg; }
         #detail-box { height: 10; margin-top: 1; border: round $p-border;
                       background: $p-panel; padding: 1; }
-        #action-status { height: 2; color: $p-yellow; }
+        #action-status { height: 1; color: $p-yellow; }
         #audit-panel { display: none; height: auto; min-height: 7;
                        border: round $p-border; background: $p-panel; padding: 1; }
         """
@@ -308,7 +329,7 @@ class PlaividTui(App[None]):
         self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
-        self._table_columns = table.add_columns("#", "VM name", "UUID", "Object state", "Process", "vCPU", "Memory")
+        self._table_columns = table.add_columns("#", "VM name", "Object state", "Process", "vCPU", "Memory")
         self.query_one("#tabs", TabbedContent).display = False
         self.query_one("#login-box", VerticalScroll).display = True
         self._refresh_timer = self.set_interval(0.5, self._tick)
@@ -628,7 +649,7 @@ class PlaividTui(App[None]):
             )
             rows = {
                 record.uuid: (
-                    str(index), redact_text(record.name), record.uuid,
+                    str(index), redact_text(record.name),
                     redact_text(record.state), "Observed" if record.process_seen else "Not observed",
                     _display(record.vcpu), _display(record.mem_mb, suffix=" MB"),
                 )
@@ -697,6 +718,9 @@ class PlaividTui(App[None]):
 
     @on(DataTable.RowHighlighted, "#fleet-table")
     def row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        # A queued highlight may arrive while the screen is being torn down.
+        if not self._running or not self.is_mounted(event.data_table):
+            return
         key = getattr(event.row_key, "value", str(event.row_key))
         self._selected_uuid = str(key)
         record = self._records.get(self._selected_uuid)

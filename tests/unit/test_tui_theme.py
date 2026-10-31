@@ -5,8 +5,18 @@ from __future__ import annotations
 import asyncio
 
 from test_cli_and_tui import runtime
-from textual.widgets import Button, Footer, Input, Static, TabbedContent
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Footer,
+    Input,
+    Select,
+    Static,
+    TabbedContent,
+)
 
+from plaivid_cli.domain.models import ObjectVM
 from plaivid_cli.presentation.theme import (
     ACCENT,
     ANSI16,
@@ -59,6 +69,9 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 assert "Apply" in str(tui.query_one("#interval-apply", Button).render())
                 assert "Refresh" in str(tui.query_one("#overview-refresh", Button).render())
                 assert "Refresh: 3s" in str(tui.query_one("#refresh-label", Static).render())
+                assert tui.query_one("#overview-toolbar").region.height == 3
+                assert tui.query_one("#interval-apply", Button).region.height == 1
+                assert tui.query_one("#overview-refresh", Button).region.height == 1
                 assert tui.query_one(Footer).region.height == 1
                 # The live panel shows real collection status, not an animated fake heartbeat.
                 assert "HOST HEARTBEAT" in str(tui.query_one("#heartbeat-card", Static).render())
@@ -66,9 +79,23 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 field.focus()
                 await pilot.press("2")
                 assert tui.query_one("#tabs", TabbedContent).active == "overview"
+                tui.set_focus(None)
                 tui.action_vms_page()
+                await pilot.pause(.1)
                 assert tui.query_one("#tabs", TabbedContent).active == "fleet"
                 assert "VM LIST" in str(tui.query_one("#vm-list").border_title)
+                assert tui.query_one("#fleet-summary").region.height == 5
+                assert tui.query_one("#vm-toolbar").region.height == 3
+                for selector, widget in (
+                    ("#refresh-button", Button), ("#audit-toggle", Button),
+                    ("#bulk-actions", Select), ("#select-all", Checkbox),
+                ):
+                    assert tui.query_one(selector, widget).region.height == 1
+                assert tui.query_one("#refresh-button", Button).styles.background.hex.lower() == tui._palette.panel
+                table = tui.query_one("#fleet-table", DataTable)
+                assert "UUID" not in [column.label.plain for column in table.columns.values()]
+                assert table.virtual_size.width <= table.region.width
+                assert "UUID" in str(tui.query_one("#detail-box", Static).render())
         finally:
             collection.close()
 
@@ -128,3 +155,29 @@ def test_no_color_takes_precedence_even_when_truecolor_is_advertised(tmp_path, m
         assert "#000000" in tui.CSS
     finally:
         collection.close()
+
+
+def test_long_vm_name_keeps_table_readable_at_80_columns(tmp_path, monkeypatch):
+    monkeypatch.setenv("COLORTERM", "truecolor")
+
+    async def exercise() -> None:
+        provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+        original = provider.objects[0]
+        provider.objects = (
+            ObjectVM(original.uuid, "Eleven-Cluster-ReverseProxy", state="started", vcpu=4, mem_mb=8192),
+        )
+        tui = PlaividTui(application, operations, sessions)
+        try:
+            async with tui.run_test(size=(80, 40)) as pilot:
+                await pilot.pause(.3)
+                tui.action_vms_page()
+                await pilot.pause(.1)
+                table = tui.query_one("#fleet-table", DataTable)
+                assert table.virtual_size.width <= table.region.width
+                detail = str(tui.query_one("#detail-box", Static).render())
+                assert "Eleven-Cluster-ReverseProxy" in detail
+                assert original.uuid in detail
+        finally:
+            collection.close()
+
+    asyncio.run(exercise())
