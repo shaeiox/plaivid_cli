@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -48,20 +50,9 @@ from plaivid_cli.domain.models import (
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
-    ACCENT,
-    BACKGROUND,
-    BORDER,
-    ERROR,
-    FOREGROUND,
-    MUTED,
-    PANEL,
-    PRIMARY,
-    SECONDARY,
-    SUCCESS,
-    SURFACE,
-    WARNING,
     apply_theme,
     brand,
+    palette_for,
     styled_metric,
 )
 
@@ -85,16 +76,11 @@ class PlaividTui(App[None]):
     TITLE = "Plaivid PVM Console"
     SUB_TITLE = "Local management · Linux"
     # Semantic tokens mirror the Plaivid Textual theme, including native controls.
-    CSS = (
-        f"$p-bg: {BACKGROUND};\n$p-panel: {PANEL};\n$p-surface: {SURFACE};\n"
-        f"$p-text: {FOREGROUND};\n$p-muted: {MUTED};\n$p-border: {BORDER};\n"
-        f"$p-blue: {PRIMARY};\n$p-purple: {SECONDARY};\n$p-cyan: {ACCENT};\n"
-        f"$p-green: {SUCCESS};\n$p-yellow: {WARNING};\n$p-rose: {ERROR};\n"
-        """
+    CSS = """
         Screen { background: $p-bg; color: $p-text; }
         #shell { height: 1fr; padding: 0 1; background: $p-bg; }
         #topbar { height: 3; padding: 0 1; margin: 0 0 1 0;
-                  background: $p-panel; border: round $p-purple; }
+                  background: $p-panel; border: round $p-border; }
         #brand { width: 1fr; content-align: left middle; }
         #session-label { width: auto; color: $p-green; content-align: right middle; padding: 0 1; }
         #logout { width: 5; min-width: 5; height: 1; margin: 0; padding: 0;
@@ -114,14 +100,14 @@ class PlaividTui(App[None]):
         TabbedContent { height: 1fr; background: $p-bg; }
         TabbedContent > ContentTabs { background: $p-panel; }
         TabbedContent Tab { color: $p-muted; background: $p-panel; }
-        TabbedContent Tab.-active { color: $p-bg; background: $p-purple; text-style: bold; }
+        TabbedContent Tab.-active { color: $p-bg; background: $p-blue; text-style: bold; }
         TabbedContent Tab:focus { text-style: bold; }
         TabPane { padding: 0 1; background: $p-bg; }
         Footer { background: $p-panel; color: $p-text; }
         #notice { height: 1; color: $p-muted; padding: 0 1; }
 
         #overview { height: 1fr; }
-        #overview-scroll { height: 1fr; scrollbar-color: $p-purple; }
+        #overview-scroll { height: 1fr; scrollbar-color: $p-border; }
         #overview-toolbar { height: 3; background: $p-panel; border: round $p-border;
                             padding: 0 1; margin-top: 1; }
         #overview-title { width: 1fr; color: $p-blue; text-style: bold; }
@@ -145,14 +131,10 @@ class PlaividTui(App[None]):
         .wide #chart-grid { grid-size: 3; }
         .dashboard-card { height: 6; padding: 0 1; border: round $p-border;
                           background: $p-surface; color: $p-text; }
-        #running-card { border: round $p-blue; }
-        #cpu-card { border: round $p-cyan; }
-        #memory-card { border: round $p-purple; }
-        #load-card { border: round $p-border; }
-        #heartbeat-card { height: 5; border: round $p-purple;
+        #heartbeat-card { height: 5; border: round $p-border;
                           background: $p-panel; margin-top: 1; }
         #heartbeat-details { height: auto; padding: 0 1; color: $p-muted;
-                             background: $p-panel; border-left: solid $p-purple; }
+                             background: $p-panel; border-left: solid $p-border; }
         .chart-card { height: 4; padding: 0 1; border: round $p-border;
                       background: $p-panel; }
         #cpu-chart { border-top: solid $p-cyan; }
@@ -163,9 +145,6 @@ class PlaividTui(App[None]):
         #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5;
                                                  padding: 1; border: round $p-border;
                                                  background: $p-panel; }
-        #nic-detail { border: round $p-cyan; }
-        #vm-monitor { border: round $p-blue; }
-        #vdi-monitor { border: round $p-purple; }
         #rediscover { margin: 1 0; }
         #host-grid { height: auto; }
         #host-status, #host-metrics { width: 1fr; height: auto; min-height: 6;
@@ -180,7 +159,7 @@ class PlaividTui(App[None]):
         .metric-title { color: $p-muted; text-style: bold; }
         .metric-value { color: $p-cyan; text-style: bold; }
         #refresh-button { width: 12; }
-        #vm-list { height: 1fr; min-height: 13; border: round $p-purple;
+        #vm-list { height: 1fr; min-height: 13; border: round $p-border;
                    background: $p-panel; }
         #vm-toolbar { height: 3; }
         #bulk-actions { width: 28; }
@@ -190,13 +169,12 @@ class PlaividTui(App[None]):
                        border: round $p-border; }
         DataTable > .datatable--header { background: $p-panel; color: $p-purple; }
         DataTable:focus > .datatable--cursor { background: $p-purple; color: $p-bg; }
-        #detail-box { height: 10; margin-top: 1; border: round $p-cyan;
+        #detail-box { height: 10; margin-top: 1; border: round $p-border;
                       background: $p-panel; padding: 1; }
         #action-status { height: 2; color: $p-yellow; }
         #audit-panel { display: none; height: auto; min-height: 7;
-                       border: round $p-purple; background: $p-panel; padding: 1; }
+                       border: round $p-border; background: $p-panel; padding: 1; }
         """
-    )
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("enter", "details", "Details"),
@@ -212,6 +190,10 @@ class PlaividTui(App[None]):
         sessions: SessionManager,
     ) -> None:
         super().__init__()
+        self._palette = palette_for(self.console.color_system, no_color="NO_COLOR" in os.environ)
+        # Textual parses App.CSS at run time; Textual declares CSS as a ClassVar,
+        # but its loader reads the instance attribute (also on Textual 0.47).
+        object.__setattr__(self, "CSS", self._palette.css_tokens() + type(self).CSS)
         self.application = application
         self.operations = operations
         self.sessions = sessions
@@ -244,7 +226,7 @@ class PlaividTui(App[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
             with Horizontal(id="topbar"):
-                yield Static(brand(), id="brand", markup=False)
+                yield Static(brand(self._palette), id="brand", markup=False)
                 yield Static("● Offline", id="session-label", markup=False)
                 yield Button("⏻", id="logout", variant="default")
             with VerticalScroll(id="login-box"):
@@ -322,7 +304,7 @@ class PlaividTui(App[None]):
             yield Footer()
 
     def on_mount(self) -> None:
-        apply_theme(self)
+        apply_theme(self, self._palette)
         self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
@@ -578,14 +560,14 @@ class PlaividTui(App[None]):
         self._put("heartbeat-details", details)
 
     def _color_heartbeat(self, text: str) -> None:
-        color = ERROR if "OFFLINE" in text else WARNING if "WARNING" in text else SUCCESS if "ONLINE" in text else SECONDARY
+        color = (self._palette.error if "OFFLINE" in text else self._palette.warning if "WARNING" in text else self._palette.border)
         if color != self._heartbeat_color:
             self.query_one("#heartbeat-card", Static).styles.border = ("round", color)
             self._heartbeat_color = color
 
     def _put(self, widget_id: str, text: str) -> None:
         if self._render_cache.get(widget_id) != text:
-            self.query_one(f"#{widget_id}", Static).update(styled_metric(text))
+            self.query_one(f"#{widget_id}", Static).update(styled_metric(text, palette=self._palette))
             self._render_cache[widget_id] = text
 
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
@@ -697,7 +679,7 @@ class PlaividTui(App[None]):
         self.query_one("#inventory-quality", Static).update(quality)
         status = _section_status(inventory_section)
         self.query_one("#inventory-quality", Static).styles.color = (
-            SUCCESS if inventory_section and inventory_section.status is CollectionStatus.CURRENT else WARNING
+            self._palette.success if inventory_section and inventory_section.status is CollectionStatus.CURRENT else self._palette.warning
         )
         self.query_one("#notice", Static).update(
             f"Inventory {status} · generation {inventory_section.generation if inventory_section else '—'} · "
