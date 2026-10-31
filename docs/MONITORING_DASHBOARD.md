@@ -2,6 +2,10 @@
 
 This is the **active Textual** Overview, not the excluded legacy `commands/overview.py` / `render.py` renderer. It is a local Linux client, not an SSH client. No remote monitoring agent or production-host software is installed.
 
+## Visual system
+
+Plaivid uses a restrained adaptation of the [Gemini CLI TUI design guide](https://github.com/cola-runner/awesome-tui-design/blob/master/designs/gemini-cli/DESIGN.md): dark blue-black canvas, layered surfaces, a static blue→purple→rose Plaivid wordmark, cyan measurements, and rounded status-colored frames. Textual's built-in controls use the same palette when its theme API is available; explicit widget styles provide a fallback on older releases. Both 80- and 120-column layouts have been checked with local Textual Pilot renders. There is no high-frequency spinner: monitoring status and heartbeat colors change only with real collection state.
+
 ## Operator controls
 
 - After login/resume: **Overview** first, **Virtual Machines** second. `1` / `2` switch pages (when a text field is focused, digits edit that field). `R` refreshes the active page; `Enter` inspects the selected VM; `Q` quits. VM lifecycle operations remain on Virtual Machines. Audit is opened with its secondary **Audit** button there.

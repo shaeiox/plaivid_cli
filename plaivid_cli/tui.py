@@ -11,7 +11,6 @@ from textual.widgets import (
     Checkbox,
     DataTable,
     Footer,
-    Header,
     Input,
     Label,
     Select,
@@ -48,6 +47,23 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.overview import cards, nic_details
+from plaivid_cli.presentation.theme import (
+    ACCENT,
+    BACKGROUND,
+    BORDER,
+    ERROR,
+    FOREGROUND,
+    MUTED,
+    PANEL,
+    PRIMARY,
+    SECONDARY,
+    SUCCESS,
+    SURFACE,
+    WARNING,
+    apply_theme,
+    brand,
+    styled_metric,
+)
 
 BULK_ACTIONS: tuple[Action, ...] = (
     Action.START,
@@ -68,68 +84,119 @@ class PlaividTui(App[None]):
 
     TITLE = "Plaivid PVM Console"
     SUB_TITLE = "Local management · Linux"
-    CSS = """
-    Screen { background: #0b1220; color: #e5edf7; }
-    #shell { height: 1fr; padding: 0 1; }
-    #topbar { height: 3; padding: 0 1; background: #111d31; border: round #1d3554; }
-    #logout { width: 5; min-width: 0; height: 1; margin: 0; padding: 0; border: none; }
-    #brand { width: 1fr; color: #8be9fd; text-style: bold; content-align: left middle; }
-    #session-label { width: auto; color: #91a6c4; content-align: right middle; }
-    #login-box { width: 64; max-width: 92%; height: auto; border: round #36c2d1;
-                 background: #111d31; padding: 1 2; margin: 2 0; }
-    #login-title { color: #8be9fd; text-style: bold; padding-bottom: 1; }
-    #login-warning { color: #ffc766; padding: 1 0; }
-    #login-error { color: #ff7788; padding: 1 0; }
-    #login-buttons { height: auto; align-horizontal: right; margin-top: 1; }
-    #workspace { height: 1fr; }
-    TabbedContent { height: 1fr; border: round #1d3554; background: #0f1929; }
-    TabPane { padding: 1; }
-    #fleet-summary { height: 5; }
-    .metric-card { width: 1fr; height: 4; margin-right: 1; padding: 0 1;
-                   border: round #254568; background: #111d31; }
-    .metric-title { color: #91a6c4; }
-    .metric-value { color: #8be9fd; text-style: bold; }
-    #vm-list { height: 1fr; min-height: 13; border: round #254568; background: #111d31; }
-    #vm-toolbar { height: 3; }
-    #bulk-actions { width: 28; }
-    #fleet-table { height: 1fr; min-height: 8; border: round #1d3554; }
-    #detail-box { height: 10; margin-top: 1; border: round #254568; background: #111d31; padding: 1; }
-    #action-status { height: 2; color: #ffc766; }
-    #host-grid { height: auto; }
-    #host-status, #host-metrics, #audit-panel { height: 1fr; border: round #254568;
-                                                background: #111d31; padding: 1; }
-    #host-status { width: 1fr; margin-right: 1; }
-    #host-metrics { width: 1fr; }
-    #audit-panel { height: 1fr; }
-    .section-title { color: #8be9fd; text-style: bold; padding-bottom: 1; }
-    #notice { height: 2; color: #91a6c4; padding: 0 1; }
-    #refresh-button { width: 12; }
-    #overview { height: 1fr; padding: 1; background: #0b1220; }
-    #overview-toolbar { height: 3; background: #111d31; border: round #254568; padding: 0 1; }
-    #overview-title { width: 1fr; color: #8be9fd; text-style: bold; }
-    #refresh-label { width: 14; color: #91a6c4; }
-    #interval-input { width: 5; height: 1; margin: 0 1; }
-    #interval-apply { width: 8; min-width: 8; height: 1; padding: 0; }
-    #overview-refresh, #rediscover { width: 11; min-width: 11; height: 1; padding: 0; }
-    #interval-error { height: 1; color: #ffc766; }
-    #host-identity { height: auto; color: #91a6c4; padding: 1; }
-    .dashboard-heading { height: 2; color: #8be9fd; text-style: bold; padding: 0 1; margin-top: 1; }
-    #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
-    #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
-    .wide #summary-grid { grid-size: 5; }
-    .wide #chart-grid { grid-size: 3; }
-    .dashboard-card { height: 6; padding: 0 1; border: round #254568; background: #111d31; color: #e5edf7; }
-    #heartbeat-card { border: round #7958ad; }
-    #heartbeat-details { height: auto; padding: 0 1; color: #91a6c4; }
-    .chart-card { height: 4; padding: 0 1; border: round #254568; background: #111d31; }
-    #nic-tabs { height: auto; }
-    .nic-tab { width: auto; min-width: 10; margin-right: 1; }
-    #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5; padding: 1; border: round #254568; background: #111d31; }
-    #audit-toggle { width: 9; min-width: 9; }
-    #audit-panel { display: none; min-height: 7; }
-    #fleet { height: 1fr; }
-    #select-all { width: auto; margin-left: 2; color: #ffc766; }
-    """
+    # Semantic tokens mirror the Plaivid Textual theme, including native controls.
+    CSS = (
+        f"$p-bg: {BACKGROUND};\n$p-panel: {PANEL};\n$p-surface: {SURFACE};\n"
+        f"$p-text: {FOREGROUND};\n$p-muted: {MUTED};\n$p-border: {BORDER};\n"
+        f"$p-blue: {PRIMARY};\n$p-purple: {SECONDARY};\n$p-cyan: {ACCENT};\n"
+        f"$p-green: {SUCCESS};\n$p-yellow: {WARNING};\n$p-rose: {ERROR};\n"
+        """
+        Screen { background: $p-bg; color: $p-text; }
+        #shell { height: 1fr; padding: 0 1; background: $p-bg; }
+        #topbar { height: 3; padding: 0 1; margin: 0 0 1 0;
+                  background: $p-panel; border: round $p-purple; }
+        #brand { width: 1fr; content-align: left middle; }
+        #session-label { width: auto; color: $p-green; content-align: right middle; padding: 0 1; }
+        #logout { width: 5; min-width: 5; height: 1; margin: 0; padding: 0;
+                  background: $p-surface; color: $p-rose; border: none; }
+        #logout:focus { background: $p-purple; color: $p-bg; text-style: bold; }
+
+        #login-box { width: 64; max-width: 92%; height: auto; border: round $p-purple;
+                     background: $p-panel; padding: 1 2; margin: 2 0; }
+        #login-title { color: $p-blue; text-style: bold; padding-bottom: 1; }
+        #login-warning { color: $p-yellow; padding: 1 0; }
+        #login-error { color: $p-rose; padding: 1 0; }
+        #login-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+        Input, Select { background: $p-surface; border: round $p-border; color: $p-text; }
+        Input:focus, Select:focus { border: round $p-cyan; }
+        Button:focus { text-style: bold; }
+
+        TabbedContent { height: 1fr; background: $p-bg; }
+        TabbedContent > ContentTabs { background: $p-panel; }
+        TabbedContent Tab { color: $p-muted; background: $p-panel; }
+        TabbedContent Tab.-active { color: $p-bg; background: $p-purple; text-style: bold; }
+        TabbedContent Tab:focus { text-style: bold; }
+        TabPane { padding: 0 1; background: $p-bg; }
+        Footer { background: $p-panel; color: $p-text; }
+        #notice { height: 1; color: $p-muted; padding: 0 1; }
+
+        #overview { height: 1fr; }
+        #overview-scroll { height: 1fr; scrollbar-color: $p-purple; }
+        #overview-toolbar { height: 3; background: $p-panel; border: round $p-border;
+                            padding: 0 1; margin-top: 1; }
+        #overview-title { width: 1fr; color: $p-blue; text-style: bold; }
+        #refresh-label { width: 14; color: $p-cyan; }
+        #interval-input { width: 5; height: 1; margin: 0 1; padding: 0 1;
+                          border: none; background: $p-surface; color: $p-cyan; }
+        #interval-input:focus { border: none; background: $p-purple; color: $p-bg; }
+        #interval-apply { width: 8; min-width: 8; height: 1; padding: 0; }
+        #overview-refresh, #rediscover { width: 11; min-width: 11; height: 1; padding: 0; }
+        #overview-toolbar Button { border: none; background: $p-surface;
+                                   color: $p-cyan; text-style: bold; }
+        #overview-toolbar Button:focus { background: $p-purple; color: $p-bg; }
+        #interval-error { height: 1; color: $p-rose; }
+        #host-identity { height: auto; color: $p-muted; background: $p-panel;
+                         border-left: solid $p-cyan; padding: 1; margin-top: 1; }
+        .dashboard-heading { height: 2; color: $p-blue; text-style: bold;
+                             padding: 0 1; margin-top: 1; }
+        #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
+        #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
+        .wide #summary-grid { grid-size: 4; }
+        .wide #chart-grid { grid-size: 3; }
+        .dashboard-card { height: 6; padding: 0 1; border: round $p-border;
+                          background: $p-surface; color: $p-text; }
+        #running-card { border: round $p-blue; }
+        #cpu-card { border: round $p-cyan; }
+        #memory-card { border: round $p-purple; }
+        #load-card { border: round $p-border; }
+        #heartbeat-card { height: 5; border: round $p-purple;
+                          background: $p-panel; margin-top: 1; }
+        #heartbeat-details { height: auto; padding: 0 1; color: $p-muted;
+                             background: $p-panel; border-left: solid $p-purple; }
+        .chart-card { height: 4; padding: 0 1; border: round $p-border;
+                      background: $p-panel; }
+        #cpu-chart { border-top: solid $p-cyan; }
+        #memory-chart { border-top: solid $p-purple; }
+        #load-chart { border-top: solid $p-blue; }
+        #nic-tabs { height: auto; }
+        .nic-tab { width: auto; min-width: 10; margin-right: 1; }
+        #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5;
+                                                 padding: 1; border: round $p-border;
+                                                 background: $p-panel; }
+        #nic-detail { border: round $p-cyan; }
+        #vm-monitor { border: round $p-blue; }
+        #vdi-monitor { border: round $p-purple; }
+        #rediscover { margin: 1 0; }
+        #host-grid { height: auto; }
+        #host-status, #host-metrics { width: 1fr; height: auto; min-height: 6;
+                                      border: round $p-border; background: $p-panel;
+                                      padding: 1; }
+        #host-status { margin-right: 1; }
+
+        #fleet-summary { height: 6; margin-top: 1; }
+        .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
+                       border: round $p-border; background: $p-surface; }
+        .metric-card:focus-within { border: round $p-green; }
+        .metric-title { color: $p-muted; text-style: bold; }
+        .metric-value { color: $p-cyan; text-style: bold; }
+        #refresh-button { width: 12; }
+        #vm-list { height: 1fr; min-height: 13; border: round $p-purple;
+                   background: $p-panel; }
+        #vm-toolbar { height: 3; }
+        #bulk-actions { width: 28; }
+        #select-all { width: auto; margin-left: 2; color: $p-yellow; }
+        #audit-toggle { width: 9; min-width: 9; }
+        #fleet-table { height: 1fr; min-height: 8; background: $p-surface;
+                       border: round $p-border; }
+        DataTable > .datatable--header { background: $p-panel; color: $p-purple; }
+        DataTable:focus > .datatable--cursor { background: $p-purple; color: $p-bg; }
+        #detail-box { height: 10; margin-top: 1; border: round $p-cyan;
+                      background: $p-panel; padding: 1; }
+        #action-status { height: 2; color: $p-yellow; }
+        #audit-panel { display: none; height: auto; min-height: 7;
+                       border: round $p-purple; background: $p-panel; padding: 1; }
+        """
+    )
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("enter", "details", "Details"),
@@ -176,9 +243,8 @@ class PlaividTui(App[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="shell"):
-            Header(show_clock=True)
             with Horizontal(id="topbar"):
-                yield Static("PLAIVID  /  PVM MANAGEMENT", id="brand")
+                yield Static(brand(), id="brand", markup=False)
                 yield Static("● Offline", id="session-label", markup=False)
                 yield Button("⏻", id="logout", variant="default")
             with VerticalScroll(id="login-box"):
@@ -197,30 +263,31 @@ class PlaividTui(App[None]):
                 with TabPane("Overview", id="overview"):
                     with VerticalScroll(id="overview-scroll"):
                         with Horizontal(id="overview-toolbar"):
-                            yield Static("◈  PLAIVID  /  OVERVIEW", id="overview-title")
+                            yield Static("⊷  LIVE  /  HOST TELEMETRY", id="overview-title")
                             yield Static(f"Refresh: {self._overview_schedule.interval:g}s", id="refresh-label")
                             yield Input(value=f"{self._overview_schedule.interval:g}", id="interval-input", placeholder="sec")
                             yield Button("Apply", id="interval-apply")
                             yield Button("Refresh", id="overview-refresh")
                         yield Static("", id="interval-error", markup=False)
                         yield Static("LOCAL HOST  N/A · PVM HOST  N/A", id="host-identity", markup=False)
-                        yield Static("01   HOST OVERVIEW", classes="dashboard-heading")
+                        yield Static("01  /  HOST OVERVIEW", classes="dashboard-heading")
                         with Grid(id="summary-grid"):
-                            for card in ("running-card", "cpu-card", "memory-card", "load-card", "heartbeat-card"):
+                            for card in ("running-card", "cpu-card", "memory-card", "load-card"):
                                 yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
+                        yield Static("♥  HOST HEARTBEAT\nLOADING", id="heartbeat-card", classes="dashboard-card", markup=False)
                         yield Static("Awaiting collector responses", id="heartbeat-details", markup=False)
-                        yield Static("02   HOST RESOURCE HISTORY", classes="dashboard-heading")
+                        yield Static("02  /  RESOURCE HISTORY", classes="dashboard-heading")
                         with Grid(id="chart-grid"):
                             for chart in ("cpu-chart", "memory-chart", "load-chart"):
                                 yield Static("Waiting for samples", id=chart, classes="chart-card", markup=False)
-                        yield Static("03   PHYSICAL NETWORK INTERFACES", classes="dashboard-heading")
+                        yield Static("03  /  PHYSICAL NETWORK INTERFACES", classes="dashboard-heading")
                         with Horizontal(id="nic-tabs"):
                             pass
                         yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
                         yield Button("Rediscover", id="rediscover")
-                        yield Static("04   VIRTUAL MACHINES", classes="dashboard-heading")
+                        yield Static("04  /  VIRTUAL MACHINES", classes="dashboard-heading")
                         yield Static("Waiting for VM monitoring…", id="vm-monitor", markup=False)
-                        yield Static("05   VIRTUAL DISK IMAGES", classes="dashboard-heading")
+                        yield Static("05  /  VIRTUAL DISK IMAGES", classes="dashboard-heading")
                         yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
                         with Horizontal(id="host-grid"):
                             yield Static("HOST STATUS\nWaiting for collection…", id="host-status", markup=False)
@@ -228,13 +295,13 @@ class PlaividTui(App[None]):
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
-                            yield Static("DEFINED OBJECTS", classes="metric-title")
+                            yield Static("DEFINED VMS", classes="metric-title")
                             yield Static("—", id="vm-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("PROCESS OBSERVED", classes="metric-title")
+                            yield Static("PROCESS SEEN", classes="metric-title")
                             yield Static("—", id="process-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("INVENTORY EVIDENCE", classes="metric-title")
+                            yield Static("INVENTORY", classes="metric-title")
                             yield Static("Not collected", id="inventory-quality", classes="metric-value")
                         yield Button("Refresh", id="refresh-button", variant="primary")
                     with Vertical(id="vm-list"):
@@ -252,9 +319,10 @@ class PlaividTui(App[None]):
                     yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
                     yield Static("READ-ONLY AUDIT\nWaiting for session…", id="audit-panel", markup=False)
             yield Static("1 Overview · 2 Virtual Machines · R refresh · Enter details · Q quit", id="notice")
-            Footer()
+            yield Footer()
 
     def on_mount(self) -> None:
+        apply_theme(self)
         self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
@@ -510,14 +578,14 @@ class PlaividTui(App[None]):
         self._put("heartbeat-details", details)
 
     def _color_heartbeat(self, text: str) -> None:
-        color = "#ff7788" if "OFFLINE" in text else "#ffc766" if "WARNING" in text else "#79e2a7" if "ONLINE" in text else "#7958ad"
+        color = ERROR if "OFFLINE" in text else WARNING if "WARNING" in text else SUCCESS if "ONLINE" in text else SECONDARY
         if color != self._heartbeat_color:
             self.query_one("#heartbeat-card", Static).styles.border = ("round", color)
             self._heartbeat_color = color
 
     def _put(self, widget_id: str, text: str) -> None:
         if self._render_cache.get(widget_id) != text:
-            self.query_one(f"#{widget_id}", Static).update(text)
+            self.query_one(f"#{widget_id}", Static).update(styled_metric(text))
             self._render_cache[widget_id] = text
 
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
@@ -629,7 +697,7 @@ class PlaividTui(App[None]):
         self.query_one("#inventory-quality", Static).update(quality)
         status = _section_status(inventory_section)
         self.query_one("#inventory-quality", Static).styles.color = (
-            "#79e2a7" if inventory_section and inventory_section.status is CollectionStatus.CURRENT else "#ffc766"
+            SUCCESS if inventory_section and inventory_section.status is CollectionStatus.CURRENT else WARNING
         )
         self.query_one("#notice", Static).update(
             f"Inventory {status} · generation {inventory_section.generation if inventory_section else '—'} · "

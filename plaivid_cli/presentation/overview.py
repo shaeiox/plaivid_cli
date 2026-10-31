@@ -95,13 +95,18 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         f"Dashboard API {_label(dashboard_section, max(18, interval))}"
     )
     groups["vdi-monitor"] = "VIRTUAL DISK IMAGES\nN/A · no verified per-VDI inventory or capacity/usage contract"
+    pvm_resources = (
+        f"CPU entries {len(dashboard.cpu_info)} · RAM used/free/total (API raw units) "
+        f"{dashboard.ram_used_raw or 'N/A'} / {dashboard.ram_free_raw or 'N/A'} / "
+        f"{dashboard.ram_total_raw or 'N/A'}"
+        if dashboard.cpu_info or any((dashboard.ram_used_raw, dashboard.ram_free_raw, dashboard.ram_total_raw))
+        else "CPU/RAM details N/A"
+    )
     groups["host-identity"] = (
-        f"LOCAL HOST  {host.hostname or 'N/A'}   ·   PVM HOST  {dashboard.host_name or 'N/A'}"
-        f"  /  ID {dashboard.host_id or 'N/A'} · {_label(dashboard_section, max(18, interval))}\n"
-        f"PVM reported CPU entries: {len(dashboard.cpu_info) if dashboard.cpu_info else 'N/A'} · "
-        f"RAM used / free / total (API raw units): {dashboard.ram_used_raw or 'N/A'} / "
-        f"{dashboard.ram_free_raw or 'N/A'} / {dashboard.ram_total_raw or 'N/A'}\n"
-        "Local /proc values are identified separately from PVM Dashboard data."
+        f"LOCAL  {host.hostname or 'N/A'}   /   PVM  {dashboard.host_name or 'N/A'}"
+        f" · ID {dashboard.host_id or 'N/A'}\n"
+        f"API {_label(dashboard_section, max(18, interval))} · PVM {pvm_resources}\n"
+        "Local /proc values are not verified as PVM-host values."
     )
     return {key: redact_text(value) for key, value in groups.items()}
 
