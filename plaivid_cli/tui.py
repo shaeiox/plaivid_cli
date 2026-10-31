@@ -70,6 +70,7 @@ class PlaividTui(App[None]):
     Screen { background: #0b1220; color: #e5edf7; }
     #shell { height: 1fr; padding: 0 1; }
     #topbar { height: 3; padding: 0 1; background: #111d31; border: round #1d3554; }
+    #logout { width: 5; min-width: 0; height: 1; margin: 0; padding: 0; border: none; }
     #brand { width: 1fr; color: #8be9fd; text-style: bold; content-align: left middle; }
     #session-label { width: auto; color: #91a6c4; content-align: right middle; }
     #login-box { width: 64; max-width: 92%; height: auto; border: round #36c2d1;
@@ -134,7 +135,7 @@ class PlaividTui(App[None]):
             with Horizontal(id="topbar"):
                 yield Static("PLAIVID  /  PVM MANAGEMENT", id="brand")
                 yield Static("● Offline", id="session-label", markup=False)
-                yield Button("Logout", id="logout", variant="default")
+                yield Button("⏻", id="logout", variant="default")
             with VerticalScroll(id="login-box"):
                 yield Label("Operator sign-in", id="login-title")
                 yield Static(
@@ -182,6 +183,7 @@ class PlaividTui(App[None]):
             Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
         table = self.query_one("#fleet-table", DataTable)
         table.add_columns("#", "VM name", "UUID", "Object state", "Process", "vCPU", "Memory")
