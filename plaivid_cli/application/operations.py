@@ -24,6 +24,7 @@ from plaivid_cli.domain.models import (
     VMRecord,
 )
 from plaivid_cli.domain.policies import action_policy, bulk_may_dispatch
+from plaivid_cli.domain.redaction import redact_text
 
 
 class OperationCoordinator:
@@ -309,7 +310,7 @@ class OperationCoordinator:
 
     def _dispatch_one(self, token: str, action: Action, record: VMRecord) -> TargetOutcome:
         try:
-            self._provider.dispatch_action(token, action, record.uuid)
+            reply = self._provider.dispatch_action(token, action, record.uuid)
         except AppError as exc:
             if exc.kind is ErrorKind.POLICY:
                 return TargetOutcome(record.uuid, OperationState.REJECTED, str(exc), dispatched=False)
@@ -323,13 +324,29 @@ class OperationCoordinator:
                 f"{type(exc).__name__} after dispatch; outcome is unknown",
                 dispatched=True,
             )
-        # The repository has no verified contract establishing that a positive
-        # status/exit pair proves acceptance. Until owner validation, every
-        # post-dispatch reply is uncertain and bulk dispatch must stop.
+        # Documented sbell/sabad envelope (docs/SBELL-SABAD.md section 3):
+        # <status>success|failed</status>, and on failure <errno> and <what>.
+        if reply.status == "success":
+            return TargetOutcome(
+                record.uuid,
+                OperationState.SUCCEEDED,
+                f"PVM accepted vm/{action.value}",
+                dispatched=True,
+            )
+        if reply.status == "failed":
+            code = f" (errno {reply.errno})" if reply.errno else ""
+            detail = reply.message or "PVM rejected the command"
+            return TargetOutcome(
+                record.uuid,
+                OperationState.FAILED,
+                redact_text(f"PVM reported failure{code}: {detail}"),
+                dispatched=True,
+            )
+        # Any other status is not part of the documented contract: stay uncertain.
         return TargetOutcome(
             record.uuid,
             OperationState.OUTCOME_UNKNOWN,
-            "PVM response semantics are unverified; reconcile independently and do not retry blindly",
+            "unexpected PVM status; reconcile independently and do not retry blindly",
             dispatched=True,
         )
 
@@ -364,6 +381,12 @@ def _aggregate_message(state: OperationState, outcomes: list[TargetOutcome]) -> 
     for outcome in outcomes:
         counts[outcome.state] = counts.get(outcome.state, 0) + 1
     summary = ", ".join(f"{count} {key.value}" for key, count in counts.items())
+    failure = next(
+        (outcome.message for outcome in outcomes if outcome.state is OperationState.FAILED),
+        None,
+    )
+    if failure:
+        summary = f"{summary}; {failure}"
     if state is OperationState.OUTCOME_UNKNOWN:
         return f"{summary}; do not retry until reconciled"
     if state is OperationState.COMMAND_ACCEPTED_UNCONFIRMED:

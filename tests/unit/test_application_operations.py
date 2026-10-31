@@ -138,16 +138,15 @@ def test_operation_plan_rejects_targets_not_in_the_current_inventory():
     collection.close()
 
 
-def test_unverified_positive_reply_is_unknown_and_not_completion():
+def test_documented_success_envelope_is_reported_as_success():
     provider, collection, application, operations, _, section = make_application()
     target = application.resolve_targets(as_inventory(section), (UUID_B,))
     result = operations.execute(
         "token", Action.START, target.records, section, is_bulk=False
     )
-    assert result.state is OperationState.OUTCOME_UNKNOWN
-    assert result.targets[0].state is OperationState.OUTCOME_UNKNOWN
+    assert result.state is OperationState.SUCCEEDED
+    assert result.targets[0].state is OperationState.SUCCEEDED
     assert result.targets[0].dispatched
-    assert "semantics are unverified" in result.targets[0].message
     assert provider.dispatched == [(Action.START, UUID_B)]
     assert collection.snapshot.section("inventory").status is CollectionStatus.CURRENT
     collection.close()
@@ -160,7 +159,7 @@ def test_single_operation_can_use_current_object_source_when_process_enrichment_
     result = operations.execute(
         "token", Action.START, target.records, section, is_bulk=False
     )
-    assert result.state is OperationState.OUTCOME_UNKNOWN
+    assert result.state is OperationState.SUCCEEDED
     assert provider.dispatched == [(Action.START, UUID_B)]
     collection.close()
 
@@ -189,7 +188,7 @@ def test_stop_requires_exact_uuid_confirmation_bound_to_inventory_generation():
     result = operations.execute(
         "token", Action.STOP, selection.records, section, is_bulk=False, approval=approval
     )
-    assert result.state is OperationState.OUTCOME_UNKNOWN
+    assert result.state is OperationState.SUCCEEDED
     assert provider.dispatched == [(Action.STOP, UUID_B)]
     collection.close()
 
@@ -248,7 +247,37 @@ def test_stop_refuses_missing_or_wrong_confirmation_before_dispatch():
     collection.close()
 
 
-def test_bulk_stops_on_unverified_positive_reply_and_marks_remainder_not_started():
+def test_bulk_stops_on_pvm_failure_and_marks_remainder_not_started():
+    provider, collection, application, operations, _, section = make_application()
+    selection = application.resolve_targets(as_inventory(section), ("all",))
+    approval = operations.approve(
+        Action.START,
+        selection.records,
+        section,
+        confirmation=operations.confirmation_phrase(Action.START, selection.uuids),
+    )
+    provider.replies = [
+        PvmReply("failed", None, "146", "VM 'alpha' is already started"),
+        PvmReply("success"),
+        PvmReply("success"),
+    ]
+    result = operations.execute(
+        "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+    )
+    assert [item.state for item in result.targets] == [
+        OperationState.FAILED,
+        OperationState.NOT_STARTED,
+        OperationState.NOT_STARTED,
+    ]
+    assert result.state is OperationState.FAILED
+    assert "errno 146" in result.targets[0].message
+    assert "already started" in result.targets[0].message
+    assert "errno 146" in result.message
+    assert len(provider.dispatched) == 1
+    collection.close()
+
+
+def test_bulk_all_successful_replies_dispatch_every_target():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
     approval = operations.approve(
@@ -261,13 +290,39 @@ def test_bulk_stops_on_unverified_positive_reply_and_marks_remainder_not_started
     result = operations.execute(
         "token", Action.START, selection.records, section, is_bulk=True, approval=approval
     )
-    assert [item.state for item in result.targets] == [
-        OperationState.OUTCOME_UNKNOWN,
-        OperationState.NOT_STARTED,
-        OperationState.NOT_STARTED,
-    ]
+    assert result.state is OperationState.SUCCEEDED
+    assert len(provider.dispatched) == len(selection.records)
+    collection.close()
+
+
+def test_transport_exception_after_dispatch_stays_unknown_and_stops_bulk():
+    provider, collection, application, operations, _, section = make_application()
+    selection = application.resolve_targets(as_inventory(section), ("all",))
+    approval = operations.approve(
+        Action.START,
+        selection.records,
+        section,
+        confirmation=operations.confirmation_phrase(Action.START, selection.uuids),
+    )
+    provider.replies = [RuntimeError("socket closed")]
+    result = operations.execute(
+        "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+    )
+    assert result.targets[0].state is OperationState.OUTCOME_UNKNOWN
+    assert result.targets[0].dispatched
+    assert all(item.state is OperationState.NOT_STARTED for item in result.targets[1:])
     assert result.state is OperationState.OUTCOME_UNKNOWN
     assert len(provider.dispatched) == 1
+    collection.close()
+
+
+def test_unexpected_pvm_status_is_not_treated_as_success():
+    provider, collection, application, operations, _, section = make_application()
+    target = application.resolve_targets(as_inventory(section), (UUID_B,))
+    provider.replies = [PvmReply("maybe")]
+    result = operations.execute("token", Action.START, target.records, section, is_bulk=False)
+    assert result.state is OperationState.OUTCOME_UNKNOWN
+    assert result.targets[0].dispatched
     collection.close()
 
 
@@ -299,7 +354,7 @@ def test_multi_target_plan_cannot_be_mislabeled_single_before_dispatch():
     collection.close()
 
 
-def test_all_six_lifecycle_actions_are_supported_but_unverified_replies_remain_unknown():
+def test_all_six_lifecycle_actions_dispatch_and_report_documented_success():
     for action in Action:
         provider, collection, application, operations, _, section = make_application()
         selection = application.resolve_targets(as_inventory(section), (UUID_B,))
@@ -315,7 +370,7 @@ def test_all_six_lifecycle_actions_are_supported_but_unverified_replies_remain_u
             "token", action, selection.records, section, is_bulk=False, approval=approval
         )
         assert result.action is action
-        assert result.state is OperationState.OUTCOME_UNKNOWN
+        assert result.state is OperationState.SUCCEEDED
         assert provider.dispatched == [(action, UUID_B)]
         collection.close()
 

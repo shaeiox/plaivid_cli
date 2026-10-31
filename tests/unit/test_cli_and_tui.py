@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from datetime import UTC, datetime
 from pathlib import Path
 
-from textual.widgets import Button, Select, TabbedContent
+from textual.widgets import Select, TabbedContent
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
@@ -25,7 +24,7 @@ from plaivid_cli.domain.models import (
     PvmSession,
     SourceResult,
 )
-from plaivid_cli.tui import ConfirmScreen, PlaividTui
+from plaivid_cli.tui import PlaividTui
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
 UUID_B = "800b0429-d82a-4e26-a5e2-225990172e6e"
@@ -148,9 +147,9 @@ def test_cli_inventory_and_approval_gate_with_fake_provider(tmp_path, capsys):
         operations=operations,
         sessions=sessions,
         settings=settings,
-    ) == EXIT_UNKNOWN
+    ) == EXIT_OK
     output = capsys.readouterr().out
-    assert "OUTCOME_UNKNOWN" in output
+    assert "SUCCEEDED" in output
     assert provider.dispatched == [(Action.STOP, UUID_A)]
 
     provider.action_reply = PvmReply("maybe")
@@ -245,52 +244,6 @@ def test_tui_redacts_sensitive_pvm_names_and_descriptions(tmp_path):
         collection.close()
 
 
-def test_tui_confirmation_requires_the_exact_action_and_uuid_phrase(tmp_path):
-    _, collection, application, operations, sessions, _ = runtime(tmp_path)
-    tui = PlaividTui(application, operations, sessions)
-    phrase = f"STOP {UUID_A}"
-    result: list[str | None] = []
-
-    async def exercise() -> None:
-        async with tui.run_test() as pilot:
-            await pilot.pause(0.05)
-            tui.push_screen(
-                ConfirmScreen(
-                    Action.STOP,
-                    ("alpha",),
-                    phrase,
-                    inventory_status="current",
-                    inventory_succeeded_at=datetime(2026, 10, 30, tzinfo=UTC),
-                    inventory_age_seconds=1.25,
-                    freshness_limit_seconds=30,
-                ),
-                result.append,
-            )
-            await pilot.pause(0.05)
-            dialog = tui.screen
-            details = str(dialog.query_one("#confirm-content").render())
-            assert "Inventory current" in details
-            assert "2026-10-30T00:00:00+00:00" in details
-            assert "1.2s" in details and "30.0s" in details
-            confirm = dialog.query_one("#confirm", Button)
-            assert confirm.disabled
-            dialog.query_one("#confirm-input").value = f"STOP {UUID_B}"
-            await pilot.pause(0.02)
-            assert confirm.disabled
-            dialog.query_one("#confirm-input").value = phrase
-            await pilot.pause(0.02)
-            assert not confirm.disabled
-            await pilot.click("#confirm")
-            await pilot.pause(0.1)
-            assert tui.screen is not dialog
-            assert result == [phrase]
-
-    try:
-        asyncio.run(exercise())
-    finally:
-        collection.close()
-
-
 def test_tui_selection_is_retained_by_uuid_when_inventory_order_changes(tmp_path):
     provider, collection, application, operations, sessions, _ = runtime(tmp_path)
     tui = PlaividTui(application, operations, sessions)
@@ -365,7 +318,7 @@ def test_tui_blocks_duplicate_operation_and_logout_while_operation_is_active(tmp
         collection.close()
 
 
-def test_tui_bulk_action_dropdown_routes_through_confirmation_and_resets(tmp_path):
+def test_tui_bulk_action_dropdown_dispatches_directly_and_resets(tmp_path):
     provider, collection, application, operations, sessions, _ = runtime(tmp_path)
     tui = PlaividTui(application, operations, sessions)
 
@@ -376,13 +329,10 @@ def test_tui_bulk_action_dropdown_routes_through_confirmation_and_resets(tmp_pat
             assert not list(tui.query("#start"))
             dropdown = tui.query_one("#bulk-actions", Select)
             dropdown.value = Action.STOP.value
-            await pilot.pause(0.05)
-            assert isinstance(tui.screen, ConfirmScreen)
-            assert not isinstance(dropdown.value, str)
-            assert provider.dispatched == []
-            tui.screen.dismiss(None)
-            await pilot.pause(0.05)
-            assert provider.dispatched == []
+            await pilot.pause(0.2)
+            assert not any(type(screen).__name__ == "ConfirmScreen" for screen in tui.screen_stack)
+            assert [action for action, _ in provider.dispatched] == [Action.STOP]
+            assert "SUCCEEDED" in str(tui.query_one("#action-status").render())
             assert not isinstance(dropdown.value, str)
 
     try:

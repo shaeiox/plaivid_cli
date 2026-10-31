@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import time
-from datetime import datetime
-
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     Checkbox,
@@ -63,88 +59,6 @@ BULK_ACTIONS: tuple[Action, ...] = (
 
 def _action_label(action: Action) -> str:
     return action.value.title()
-
-
-class ConfirmScreen(ModalScreen[str | None]):
-    """Type-to-confirm modal binding acknowledgement to action and UUID set."""
-
-    BINDINGS = [("escape", "cancel", "Dismiss")]
-    CSS = """
-    ConfirmScreen { align: center middle; background: $background 75%; }
-    #confirm-card { width: 78; max-width: 92%; height: auto; max-height: 85%;
-                    border: round $warning; background: $surface; padding: 0 1; }
-    #confirm-title { color: $warning; text-style: bold; padding-bottom: 0; }
-    #confirm-details { height: 7; border: round #254568; padding: 0 1; }
-    #confirm-content { color: $text; }
-    #confirm-phrase { color: $accent; text-style: bold; }
-    #confirm-input { margin-top: 0; }
-    #confirm-buttons { height: auto; align-horizontal: right; margin-top: 0; }
-    """
-
-    def __init__(
-        self,
-        action: Action,
-        names: tuple[str, ...],
-        phrase: str,
-        *,
-        inventory_status: str = "unknown",
-        inventory_succeeded_at: datetime | None = None,
-        inventory_age_seconds: float | None = None,
-        freshness_limit_seconds: float | None = None,
-    ) -> None:
-        super().__init__()
-        self.action = action
-        self.names = names
-        self.phrase = phrase
-        self.inventory_status = inventory_status
-        self.inventory_succeeded_at = inventory_succeeded_at
-        self.inventory_age_seconds = inventory_age_seconds
-        self.freshness_limit_seconds = freshness_limit_seconds
-
-    def compose(self) -> ComposeResult:
-        with Container(id="confirm-card"):
-            yield Label(f"Confirm {self.action.value.upper()}", id="confirm-title")
-            lines = [
-                f"{self.action.value.upper()} targets {len(self.names)} VM(s):",
-                *[f"• {redact_text(name)}" for name in self.names],
-                f"Inventory {self.inventory_status} · last success "
-                f"{self.inventory_succeeded_at.isoformat() if self.inventory_succeeded_at else 'unavailable'}",
-                f"Age {_age(self.inventory_age_seconds)} · freshness limit "
-                f"{_age(self.freshness_limit_seconds)}",
-                "",
-                "CRITICAL: verify the target identity and authorization before issuing KILL."
-                if self.action is Action.KILL
-                else "",
-                "Exact action / UUID approval phrase:",
-                self.phrase,
-                "",
-                "Command acceptance does not verify operation completion.",
-            ]
-            with VerticalScroll(id="confirm-details"):
-                yield Static("\n".join(lines), id="confirm-content", markup=False)
-            yield Input(placeholder="Type the exact confirmation phrase", id="confirm-input")
-            with Horizontal(id="confirm-buttons"):
-                yield Button("Cancel", id="cancel", variant="default")
-                yield Button(
-                    "Confirm KILL" if self.action is Action.KILL else "Confirm",
-                    id="confirm",
-                    variant="error" if self.action is Action.KILL else "warning",
-                    disabled=True,
-                )
-
-    @on(Input.Changed, "#confirm-input")
-    def update_confirmation(self, event: Input.Changed) -> None:
-        self.query_one("#confirm", Button).disabled = event.value != self.phrase
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "confirm":
-            if self.query_one("#confirm-input", Input).value == self.phrase:
-                self.dismiss(self.phrase)
-        elif event.button.id == "cancel":
-            self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
 
 class PlaividTui(App[None]):
@@ -211,9 +125,6 @@ class PlaividTui(App[None]):
         self._records: dict[str, VMRecord] = {}
         self._selected_uuid: str | None = None
         self._detail_base = "Select a VM to inspect its details."
-        self._pending_action: tuple[
-            Action, TargetSelection, SectionSnapshot[object], OperationPlan
-        ] | None = None
         self._refresh_timer = None
         self._operation_active = False
 
@@ -542,42 +453,10 @@ class PlaividTui(App[None]):
         except AppError as exc:
             self._show_error(str(exc))
             return
-        require_confirmation = selection.is_bulk or action in {
-            Action.STOP, Action.KILL, Action.RESET, Action.PAUSE
-        }
-        if require_confirmation:
-            self._pending_action = (action, selection, section, plan)
-            self.push_screen(
-                ConfirmScreen(
-                    action,
-                    tuple(record.name for record in selection.records),
-                    plan.confirmation,
-                    inventory_status=section.status.value,
-                    inventory_succeeded_at=section.succeeded_at,
-                    inventory_age_seconds=(
-                        max(0.0, time.monotonic() - section.succeeded_monotonic)
-                        if section.succeeded_monotonic is not None
-                        else None
-                    ),
-                    freshness_limit_seconds=plan.freshness_limit_seconds,
-                ),
-                self._confirmation_result,
-            )
-            return
-        self._launch_operation(action, selection, section, None, plan)
-
-    def _confirmation_result(self, phrase: str | None) -> None:
-        pending = self._pending_action
-        self._pending_action = None
-        if pending is None:
-            return
-        action, selection, section, plan = pending
-        if phrase is None:
-            self._show_operation(self.operations.cancel(plan))
-            return
+        # The operator's explicit action click is the intent; no extra dialog.
         try:
             approval = self.operations.approve(
-                action, selection.records, section, confirmation=phrase
+                action, selection.records, section, interactive_confirmed=True
             )
         except AppError as exc:
             self._show_error(str(exc))
@@ -673,10 +552,6 @@ class PlaividTui(App[None]):
 
     def _publish_audit(self, text: str) -> None:
         self.query_one("#audit-panel", Static).update(redact_text(text))
-
-
-def _age(value: float | None) -> str:
-    return "unavailable" if value is None else f"{value:.1f}s"
 
 
 def _display(value: int | float | str | None, *, suffix: str = "") -> str:

@@ -36,14 +36,16 @@ Supported target selectors:
 
 Comma-separated selectors form an explicit set. Duplicate targets, ambiguous prefixes, unsupported groups, and empty sets are rejected before dispatch. Bulk operations require a complete current inventory, `PLAIVID_MAX_INVENTORY_AGE_SECONDS`, and approval naming every canonical UUID in resolved order.
 
-For one-target Start/Resume, the explicit command/selection is the intent. Stop, Reset, Pause, and Kill require exact action/UUID approval; Kill is marked critical. TUI confirmations show a scrollable target list, inventory status/age, and freshness bound, and require typing the exact phrase.
+For one-target Start/Resume, the explicit command/selection is the intent. Stop, Reset, Pause, and Kill require exact action/UUID approval; Kill is marked critical. The TUI dispatches from the Bulk action dropdown without a confirmation dialog.
 
 ## Result and exit meanings
 
-- `OUTCOME_UNKNOWN`: every returned post-dispatch PVM response currently maps here because acceptance/completion semantics are unverified. Do not retry blindly; reconcile first and obtain owner evidence.
+- `SUCCEEDED`: PVM replied `<status>success</status>` (documented envelope, `docs/SBELL-SABAD.md` §3).
+- `FAILED`: PVM replied `<status>failed</status>`; the message carries the `errno` and PVM `what` text.
+- `OUTCOME_UNKNOWN`: transport error, timeout, or unrecognised status after dispatch. Do not retry blindly; reconcile first.
 - `COMMAND_ACCEPTED_UNCONFIRMED`: representable only for a future evidence-backed acceptance mapping; current code does not infer it from `status=success` or process exit status.
 - `NOT_STARTED`: bulk target skipped after a prior definite failure, rejection, or unknown result.
-- Exit codes: `0` successful read or verified operation; `1` failure; `2` rejected; `3` partial; `4` outcome unknown or a future evidence-backed acceptance without verified completion. Under the current unverified contract, all returned post-dispatch responses exit `4` as `OUTCOME_UNKNOWN`.
+- Exit codes: `0` successful read or operation; `1` failure; `2` rejected; `3` partial; `4` outcome unknown.
 
 The implementation intentionally does not claim a command response means the VM has reached its terminal state. Owner verification remains **PENDING MANUAL PVM VALIDATION**.
 

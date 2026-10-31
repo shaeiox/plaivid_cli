@@ -153,3 +153,25 @@ def test_session_limit_is_reported_without_retry_or_session_eviction() -> None:
         raise AssertionError("session limit response unexpectedly logged in")
     assert len(runner.calls) == 1
     assert "session_delete_uuid" not in " ".join(runner.calls[0])
+
+
+class FailedRunner(FakeRunner):
+    def run(self, argv, *, timeout=None):
+        self.calls.append(tuple(argv))
+        output = (
+            "<response><status>failed</status><action_id>fake-2</action_id>"
+            "<description><mid>vm</mid><aid/><errno>146</errno>"
+            "<what>VM 'test-vm' is already off</what></description></response>"
+        )
+        return ProcessResult(0, output, "", False, False, 0.001)
+
+
+def test_failed_vm_envelope_is_parsed_into_reply_with_errno_and_message() -> None:
+    runner = FailedRunner()
+    sbell = SbellClient(("sudo", "sbell"), runner)
+    adapter = LocalPvmAdapter(sbell, runner, ("pvm-running-vms",), allow_credential_argv=True)
+    reply = adapter.dispatch_action("fake-token", Action.STOP, UUID_A)
+    assert reply.status == "failed"
+    assert reply.errno == "146"
+    assert reply.message == "VM 'test-vm' is already off"
+    assert runner.calls[-1] == ("sudo", "sbell", "vm", "stop", f"<vm_key>{UUID_A}</vm_key>", "fake-token")
