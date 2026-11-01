@@ -78,6 +78,8 @@ Audit access is optional and read-only. The adapter opens SQLite with `mode=ro`,
 
 ## Configuration
 
+The table below is a quick reference for the **active runtime**. For every supported environment variable—including validation rules, `XDG_STATE_HOME`, setup-only `PLAIVID_PYTHON`, terminal color controls, and checkout-only legacy/smoke-test variables—see the [complete environment configuration guide](docs/ENVIRONMENT.md). No `.env` file is loaded automatically.
+
 | Environment variable | Default | Meaning |
 | --- | --- | --- |
 | `PLAIVID_SBELL` | `sudo sbell` | Local `sbell` argv; parsed as arguments, never a shell command. |
