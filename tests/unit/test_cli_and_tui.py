@@ -24,6 +24,7 @@ from plaivid_cli.domain.models import (
     PvmSession,
     SourceResult,
 )
+from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.tui import PlaividTui
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
@@ -38,6 +39,9 @@ class FakeProvider:
             ObjectVM(UUID_B, "beta", state="started"),
         )
         self.host_calls = 0
+        self.local_calls = 0
+        self.nic_calls = 0
+        self.dashboard_calls = 0
         self.host_gate: threading.Event | None = None
         self.action_reply = PvmReply("success")
         self.logout_calls = 0
@@ -60,6 +64,21 @@ class FakeProvider:
 
     def host_metrics(self, token):
         return SourceResult(HostMetrics(cpu_pct=19.5), CollectionStatus.CURRENT, "metrics")
+
+    def dashboard(self, token):
+        self.dashboard_calls += 1
+        return SourceResult(DashboardSample(host_name="node-a", host_id="host-1"), CollectionStatus.CURRENT, "dashboard")
+
+    def local_host(self):
+        self.local_calls += 1
+        return SourceResult(LocalHostSample(hostname="node-a", cpu_percent=19.5, memory_used=512, memory_total=1024, load1=0.5), CollectionStatus.CURRENT, "local")
+
+    def physical_nics(self, token):
+        return SourceResult((PhysicalNic("eno1"), PhysicalNic("eno2")), CollectionStatus.CURRENT, "nics")
+
+    def nic_samples(self, devices):
+        self.nic_calls += 1
+        return SourceResult(tuple(NicSample(name=nic.name, rx_bytes=12, tx_bytes=0) for nic in devices), CollectionStatus.CURRENT, "counters")
 
     def vm_detail(self, token, uuid):
         return SourceResult(None, CollectionStatus.UNAVAILABLE, "detail")
@@ -280,7 +299,7 @@ def test_tui_navigation_remains_responsive_during_slow_collection(tmp_path):
         async with tui.run_test() as pilot:
             await pilot.pause(0.1)
             tabs = tui.query_one("#tabs", TabbedContent)
-            tabs.active = "host"
+            assert tabs.active == "overview"
             await pilot.pause(0.05)
             assert provider.host_calls == 1
             tabs.active = "fleet"
@@ -349,10 +368,10 @@ def test_tui_mounts_dashboard_using_only_fake_local_provider(tmp_path):
         async with tui.run_test() as pilot:
             await pilot.pause(0.2)
             assert tui.query_one("#vm-count").render() == "2"
-            tui.query_one("#tabs", TabbedContent).active = "host"
-            await pilot.pause(0.1)
-            assert "node-a" in str(tui.query_one("#host-status").render())
-            tui.query_one("#tabs", TabbedContent).active = "audit"
+            assert tui.query_one("#tabs", TabbedContent).active == "overview"
+            assert "node-a" in str(tui.query_one("#host-identity").render())
+            tui.query_one("#tabs", TabbedContent).active = "fleet"
+            tui.show_audit()
             await pilot.pause(0.1)
             assert "No audit rows" in str(tui.query_one("#audit-panel").render())
             first_audit_reads = provider.audit.calls

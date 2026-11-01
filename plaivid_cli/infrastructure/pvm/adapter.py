@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from plaivid_cli.domain.desktops import VirtualDesktop
 from plaivid_cli.domain.errors import AppError
 from plaivid_cli.domain.models import (
     Action,
@@ -21,8 +22,11 @@ from plaivid_cli.domain.models import (
     VMDetail,
     canonical_uuid,
 )
+from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.infrastructure.diagnostics import redact_text
+from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
 from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
+from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
 from plaivid_cli.infrastructure.pvm.parsers import (
     parse_metrics,
     parse_object_inventory,
@@ -33,6 +37,17 @@ from plaivid_cli.infrastructure.pvm.parsers import (
 )
 from plaivid_cli.infrastructure.pvm.sbell import SbellClient, SbellResponse
 
+DASHBOARD_QUERY = (
+    "<params><query_path>/plaivid/overview/pvm_overview_dashboard</query_path>"
+    "<page_size>0</page_size><requested_page>1</requested_page>"
+    "<variable_list/><order_by_list/><order_by/><filter_by_list/><filter_by/>"
+    "</params>"
+)
+
+DESKTOP_QUERY = (
+    '<params><query>/objects/object/*[type[text()="pvm_desktop_lite_virtual_desktop"]]'
+    '</query></params>'
+)
 VM_QUERY = (
     "<params><query>/objects/object/pvm_vmm_obj"
     "[type[text()='pvm_vmm_virtual_machine']]</query></params>"
@@ -90,6 +105,7 @@ class LocalPvmAdapter:
         self._runner = process_runner
         self._running_argv = tuple(running_vms_argv)
         self._allow_credential_argv = allow_credential_argv
+        self._local_monitor = LinuxMonitor()
 
     def _call(self, module: str, command: str, params: str = "<params/>", token: str | None = None) -> SbellResponse:
         if token and not self._allow_credential_argv:
@@ -167,6 +183,14 @@ class LocalPvmAdapter:
         )
         return parse_object_inventory(description)
 
+    def list_desktops(self, token: str) -> SourceResult[tuple[VirtualDesktop, ...]]:
+        from plaivid_cli.infrastructure.pvm.desktops import parse_virtual_desktops
+
+        description = self._require_read(
+            self._call("user", "objects", DESKTOP_QUERY, token), "user/objects/desktops"
+        )
+        return parse_virtual_desktops(description)
+
     def list_processes(self) -> SourceResult[tuple[ProcessObservation, ...]]:
         try:
             result = self._runner.run(self._running_argv)
@@ -221,6 +245,37 @@ class LocalPvmAdapter:
         response = self._call("user", "objects", VM_QUERY, token)
         description = self._require_read(response, "user/objects/tap-map")
         return parse_tap_mapping(description)
+
+    def dashboard(self, token: str) -> SourceResult[DashboardSample]:
+        description = self._require_read(
+            self._call("user", "objects", DASHBOARD_QUERY, token), "user/objects/dashboard"
+        )
+        return parse_dashboard(description)
+
+    def local_host(self) -> SourceResult[LocalHostSample]:
+        sample = self._local_monitor.host()
+        status = CollectionStatus.CURRENT if sample.memory_total is not None and sample.load1 is not None else CollectionStatus.PARTIAL
+        return SourceResult(sample, status, "local /proc")
+
+    def physical_nics(self, token: str) -> SourceResult[tuple[PhysicalNic, ...]]:
+        # Same configured local command, privilege and token-argv gate as all reads.
+        description = self._require_read(
+            self._call("network", "nic-list", token=token), "network/nic-list"
+        )
+        result = parse_nic_list(description)
+        if result.value is None:
+            return result
+        physical = tuple(item for item in result.value if self._local_monitor.physical(item.name))
+        return SourceResult(physical, result.status, result.source, quality_issues=result.quality_issues)
+
+    def nic_samples(self, devices: tuple[PhysicalNic, ...]) -> SourceResult[tuple[NicSample, ...]]:
+        # A NIC-list record is not itself proof of a physical Linux device.
+        physical = tuple(item for item in devices if self._local_monitor.physical(item.name))
+        samples = self._local_monitor.nics(physical)
+        status = CollectionStatus.PARTIAL if any(
+            sample.rx_bytes is None or sample.tx_bytes is None for sample in samples
+        ) else CollectionStatus.CURRENT
+        return SourceResult(samples, status, "local sysfs")
 
     def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply:
         response = self._call("vm", action.value, _action_params(action, uuid), token)

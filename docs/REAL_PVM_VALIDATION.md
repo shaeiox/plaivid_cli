@@ -66,3 +66,28 @@ Bulk behavior is intentionally deferred until individual action contracts and in
 ## Current implementation-only verification
 
 The local suite uses fake providers, fake child runners, synthetic XML/text fixtures, temporary SQLite databases, and Textual Pilot. It tests deterministic parsing, security gates, policy, collection barriers, result states, CLI serialization, and UI mounting. It does not contact any real PVM host. Real-PVM validation remains **PENDING MANUAL PVM VALIDATION**.
+
+## New Overview acceptance (PENDING MANUAL PVM VALIDATION)
+
+Follow the read-only, credential-redacted, non-production evidence and measurement checklist in [`MONITORING_DASHBOARD.md`](MONITORING_DASHBOARD.md). Its PVM dashboard XML paths, physical NIC-list response, running-count semantics, VDI record types/units, screenshot comparison, and 3s/18s load budget have **not** been validated against an installed PVM. Do not treat synthetic tests or successful local builds as proof of those contracts.
+
+## Virtual Desktops (read-only implementation; action gate closed)
+
+The Virtual Desktops tab makes one local `sbell user objects` request per due refresh
+using the operator-verified Lite Desktop XPath. While the tab is visible,
+the provisional cadence is no faster than 15 seconds (or the configured
+`PLAIVID_REFRESH` interval if longer); this budget still needs operator review.
+Its search is local; Refresh is
+explicit. It preserves distinct enablement, local runtime and cluster runtime
+states and shows Owner/Zone and RAM units as unverified. Synthetic parser and
+Pilot tests are **not** PVM 7.1.26 acceptance evidence.
+
+All six Desktop action choices (Start, Resume, Pause, Stop, Reset, Kill) are
+**blocked for both selected and all scopes** and send no calls. A VM request
+capture does not establish successful Lite Desktop UUID applicability. Before
+any action can be enabled, obtain the redacted version-matched Desktop request,
+response, permissions and transition evidence listed in
+`openspec/changes/add-virtual-desktop-management/proposal.md`, then review each
+action independently. Do not send credentials or run production mutations to
+obtain evidence. The unfiltered all-target count and full UUIDs are inspectable
+in the scrollable Desktop detail region even when search is active.
