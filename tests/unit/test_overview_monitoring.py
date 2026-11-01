@@ -280,3 +280,38 @@ def test_unchanged_vm_rows_are_updated_without_clearing_table(tmp_path):
         asyncio.run(exercise())
     finally:
         collection.close()
+
+
+def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -> None:
+    from pathlib import Path
+
+    from plaivid_cli.application.overview import OverviewHistory
+    from plaivid_cli.domain.models import ApplicationSnapshot
+    from plaivid_cli.infrastructure.pvm.parsers import parse_process_rows
+    from plaivid_cli.presentation.overview import cards
+
+    result = parse_process_rows((Path(__file__).parents[1] / "fixtures" / "running-vms-six.txt").read_text())
+    assert result.status is CollectionStatus.CURRENT
+    now = datetime.now(UTC)
+    def snapshot(status, rows, generation):
+        processes = SectionSnapshot(
+            "processes", rows, None, status, now, now, generation,
+            source="pvm-running-vms", succeeded_monotonic=time.monotonic(),
+        )
+        # Partial/mismatched object inventory must not suppress the helper's count.
+        inventory = SectionSnapshot("inventory", None, None, CollectionStatus.PARTIAL, now, now, generation)
+        return ApplicationSnapshot(generation, now, (processes, inventory))
+
+    history = OverviewHistory()
+    complete = cards(snapshot(CollectionStatus.CURRENT, result.value, 1), history, 3)
+    assert "RUNNING VMS\n6\n" in complete["running-card"]
+    assert "VIRTUAL MACHINES · 6 running" in complete["vm-monitor"]
+
+    # Neither a partial result nor header-only output proves zero or six.
+    for rows in (result.value, ()):
+        partial = cards(snapshot(CollectionStatus.PARTIAL, rows, 2), history, 3)
+        assert "RUNNING VMS\nN/A\n" in partial["running-card"]
+    empty = cards(snapshot(CollectionStatus.CURRENT, (), 3), history, 3)
+    assert "RUNNING VMS\nN/A\n" in empty["running-card"]
+    stale = cards(snapshot(CollectionStatus.STALE, None, 4), history, 3)
+    assert "RUNNING VMS\n6\n" in stale["running-card"]

@@ -112,3 +112,35 @@ def test_tap_mapping_is_parsed_only_when_requested_separately() -> None:
     )
     result = parse_tap_mapping(root)
     assert result.value == {"tap-test": "test-vm"}
+
+
+def test_running_process_listing_uses_contiguous_last_row_despite_summary_lines() -> None:
+    result = parse_process_rows((FIXTURES / "running-vms-six.txt").read_text())
+    assert result.status is CollectionStatus.CURRENT
+    assert [row.row_number for row in result.value] == [1, 2, 3, 4, 5, 6]
+    assert result.value[-1].name == "vm-six"
+    assert result.quality_issues == ()
+
+
+def test_running_process_count_cannot_use_gapped_or_duplicate_row_numbers() -> None:
+    original = (FIXTURES / "running-vms-six.txt").read_text()
+    for damaged in (
+        original.replace("5       1005", "7       1005"),
+        original.replace("6       1006", "5       1006"),
+        original.replace("1       1001", "2       1001"),
+        original.replace("4       1004", "not-a-row 1004"),
+        original.replace(next(line for line in original.splitlines(keepends=True) if line.startswith("6       1006")), ""),
+        original.replace("ROW     PID     UPTIME          PORT    VCPU    MEMORY  UUID                                    NAME\n", ""),
+    ):
+        result = parse_process_rows(damaged)
+        assert result.status is CollectionStatus.PARTIAL
+        assert result.quality_issues
+
+
+def test_running_process_unrecognized_lines_do_not_license_a_total() -> None:
+    original = (FIXTURES / "running-vms-six.txt").read_text()
+    result = parse_process_rows(original + "Unrecognized helper warning\n")
+    assert result.status is CollectionStatus.PARTIAL
+    mismatch = parse_process_rows(original.replace("Total VCPU   : 22 (24)", "Total VCPU   : 23 (24)"))
+    assert mismatch.status is CollectionStatus.PARTIAL
+    assert "running-process VCPU total does not match rows" in mismatch.quality_issues

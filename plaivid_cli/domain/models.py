@@ -96,6 +96,7 @@ class ProcessObservation:
     vcpu: int | None = None
     mem_mb: int | None = None
     name: str = ""
+    row_number: int | None = None  # Number printed by pvm-running-vms, not VM inventory index.
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "uuid", canonical_uuid(self.uuid))

@@ -25,8 +25,12 @@ from plaivid_cli.domain.models import (
 ParseResult = SourceResult
 
 
-_OBJECT_RE = re.compile(r"^\s*\d+\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9a-fA-F-]{36})\s+(.+?)\s*$")
+_OBJECT_RE = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9a-fA-F-]{36})\s+(.+?)\s*$")
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_PROCESS_TITLE_RE = re.compile(r"^List of running virtual machines:\s*$", re.IGNORECASE)
+_PROCESS_HEADER_RE = re.compile(r"^ROW\s+PID\s+UPTIME\s+PORT\s+VCPU\s+MEMORY\s+UUID\s+NAME\s*$", re.IGNORECASE)
+_PROCESS_VCPU_TOTAL_RE = re.compile(r"^Total\s+VCPU\s*:\s*(\d+)(?:\s*\(\d+\))?\s*$", re.IGNORECASE)
+_PROCESS_MEMORY_TOTAL_RE = re.compile(r"^Total\s+Memory\s*:\s*\d+(?:\s*\(\d+\))?(?:\s*(?:GB|MB))?\s*$", re.IGNORECASE)
 _REAL_FILESYSTEMS = frozenset({"ext2", "ext3", "ext4", "xfs", "btrfs", "vfat", "zfs", "nfs", "nfs4"})
 
 
@@ -120,18 +124,30 @@ def _parse_vcpu(cpu: ET.Element | None) -> int | None:
 def parse_process_rows(raw: str) -> ParseResult[tuple[ProcessObservation, ...]]:
     """Parse recognized pvm-running-vms rows; malformed data is partial."""
     candidates: list[ProcessObservation] = []
+    row_numbers: list[int] = []
     issues: list[str] = []
+    saw_header = False
+    vcpu_total: int | None = None
     for line in _ANSI_RE.sub("", raw).splitlines():
-        if not line.strip() or line.lstrip().upper().startswith("ROW "):
+        stripped = line.strip()
+        if not stripped or _PROCESS_TITLE_RE.fullmatch(stripped) or _PROCESS_MEMORY_TOTAL_RE.fullmatch(stripped):
+            continue
+        if _PROCESS_HEADER_RE.fullmatch(stripped):
+            saw_header = True
+            continue
+        if total := _PROCESS_VCPU_TOTAL_RE.fullmatch(stripped):
+            vcpu_total = int(total.group(1))
             continue
         match = _OBJECT_RE.match(line)
         if match is None:
             issues.append("unrecognized running-process row excluded")
             continue
-        pid_text, uptime, port_text, vcpu_text, mem_text, uuid_text, name = match.groups()
+        row_text, pid_text, uptime, port_text, vcpu_text, mem_text, uuid_text, name = match.groups()
         try:
             uuid = canonical_uuid(uuid_text)
-            pid, port, vcpu, mem = map(int, (pid_text, port_text, vcpu_text, mem_text))
+            row_number, pid, port, vcpu, mem = map(
+                int, (row_text, pid_text, port_text, vcpu_text, mem_text)
+            )
             observation = ProcessObservation(
                 uuid=uuid,
                 pid=pid,
@@ -140,11 +156,22 @@ def parse_process_rows(raw: str) -> ParseResult[tuple[ProcessObservation, ...]]:
                 vcpu=vcpu,
                 mem_mb=mem,
                 name=name.strip(),
+                row_number=row_number,
             )
         except (ValueError, TypeError):
             issues.append("invalid running-process row excluded")
             continue
         candidates.append(observation)
+        row_numbers.append(row_number)
+
+    # Only a complete 1..N listing licenses the last ROW as a total. If the
+    # helper reports a VCPU sum, it also detects a missing final row.
+    if row_numbers and not saw_header:
+        issues.append("running-process header missing")
+    if row_numbers and row_numbers != list(range(1, len(row_numbers) + 1)):
+        issues.append("running-process ROW numbers are not contiguous from 1")
+    if vcpu_total is not None and sum(row.vcpu or 0 for row in candidates) != vcpu_total:
+        issues.append("running-process VCPU total does not match rows")
 
     groups: dict[str, list[ProcessObservation]] = defaultdict(list)
     for item in candidates:

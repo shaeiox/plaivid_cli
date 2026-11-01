@@ -27,12 +27,17 @@ The application SHALL calculate local-host CPU utilization from consecutive `/pr
 - **THEN** the affected utilization is unavailable, not zero
 
 ### Requirement: Verified running VM count
-Overview SHALL calculate running VM count from verified running-state evidence, not from the number of dashboard `host_run_name` elements.
+Overview SHALL display the last `ROW` number of a complete `pvm-running-vms` listing as the number of observed running VMs, independently of object inventory correlation; it SHALL NOT derive this number from dashboard `host_run_name` elements or object states. Numbering MUST start at 1 and be contiguous; malformed rows, duplicate process UUIDs, truncated/nonzero-exit output, or a mismatching reported VCPU total render the current count unavailable.
+
+#### Scenario: Complete numbered listing
+- **GIVEN** a current helper listing with rows numbered 1 through 6, a header, and matching reported VCPU sum
+- **WHEN** Overview renders the running VM card
+- **THEN** the displayed count is 6 even if object inventory is partial or an observed UUID is unmatched
 
 #### Scenario: Incomplete process inventory
-- **GIVEN** a partial running-process listing with missing rows
+- **GIVEN** a partial or empty running-process listing, missing rows, or a malformed summary
 - **WHEN** a VM count is derived
-- **THEN** absent rows are not treated as proof of stopped VMs and the count is qualified or unavailable
+- **THEN** absent rows are not treated as proof of stopped VMs and the current count is unavailable (N/A)
 
 ### Requirement: Verified VM and VDI metrics
 Overview SHALL present VM top CPU, RAM and network facts and individual VDI inventory/capacity/use only when their field paths, units and record types have been verified against supported PVM data.

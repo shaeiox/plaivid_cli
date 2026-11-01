@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plaivid_cli.application.overview import OverviewHistory, health, sparkline
-from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, InventoryData
+from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, ProcessObservation
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
 
@@ -46,21 +46,26 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
     inventory_section = snapshot.section("inventory")
-    inventory = _value(inventory_section)
+    process_section = snapshot.section("processes")
+    process_rows = process_section.value if process_section is not None else None
     running = None
     if (
-        isinstance(inventory, InventoryData) and inventory_section is not None
-        and inventory_section.status is CollectionStatus.CURRENT
-        and not inventory.unmatched_process_rows
-        and not any(record.state_disagreed for record in inventory.records)
+        process_section is not None
+        and process_section.status is CollectionStatus.CURRENT
+        and isinstance(process_rows, tuple)
+        and process_rows
+        and all(isinstance(row, ProcessObservation) for row in process_rows)
+        and tuple(row.row_number for row in process_rows) == tuple(range(1, len(process_rows) + 1))
     ):
-        running = sum(record.process_seen and record.state in {"running", "started"} for record in inventory.records)
+        # The last validated ROW is the helper's total, even if object inventory
+        # has unmatched/partial records. Never infer a count from object states.
+        running = process_rows[-1].row_number
         history.last_verified_running = running
-    elif inventory_section is not None and inventory_section.status is CollectionStatus.STALE:
+    elif process_section is not None and process_section.status is CollectionStatus.STALE:
         running = history.last_verified_running
     memory_pct = 100 * host.memory_used / host.memory_total if host.memory_used is not None and host.memory_total else None
     groups = {
-        "running-card": f"◆  RUNNING VMS\n{running if running is not None else 'N/A'}\n{_label(inventory_section, max(18, interval))}",
+        "running-card": f"◆  RUNNING VMS\n{running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
         "cpu-card": f"◉  HOST CPU\n{_pct(host.cpu_percent)}\n{_bar(host.cpu_percent)}  {_label(host_section, interval)}",
         "memory-card": f"▣  HOST MEMORY\n{_size(host.memory_used)} / {_size(host.memory_total)}\n{_bar(memory_pct)}  {_label(host_section, interval)}",
         "load-card": f"⌁  LOAD AVERAGE\n{host.load1 if host.load1 is not None else 'N/A'}\n5m / 15m: {host.load5 if host.load5 is not None else 'N/A'} / {host.load15 if host.load15 is not None else 'N/A'} · {_label(host_section, interval)}",
@@ -90,7 +95,7 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     dashboard = dashboard if isinstance(dashboard, DashboardSample) else DashboardSample()
     groups["vm-monitor"] = (
         "VIRTUAL MACHINES · " + (str(running) if running is not None else "N/A") + " running\n"
-        "Count uses object + process evidence; running-state semantics pending PVM review\n"
+        "Count from last verified pvm-running-vms ROW; N/A if listing incomplete\n"
         "Top CPU / RAM / Network: N/A (response fields/units unverified)\n"
         f"Dashboard API {_label(dashboard_section, max(18, interval))}"
     )
