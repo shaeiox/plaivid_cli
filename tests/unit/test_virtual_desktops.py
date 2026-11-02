@@ -130,7 +130,7 @@ def test_page_search_uuid_selection_and_all_actions_blocked(tmp_path, width) -> 
             for action in Action:
                 tui.query_one("#desktop-actions", Select).value = action.value
                 await pilot.pause(0.02)
-                assert "blocked" in str(tui.query_one("#desktop-action-status", Static).render())
+                assert "unverified" in str(tui.query_one("#desktop-action-status", Static).render())
             tui.query_one("#desktop-all", Checkbox).value = False
             await pilot.pause(0.05)
             for action in Action:
@@ -174,4 +174,196 @@ def test_inflight_desktop_read_cannot_publish_after_session_change() -> None:
         assert fresh.value[0].name == "new"
     finally:
         release.set()
+        collection.close()
+
+
+def test_config_rejects_unknown_or_duplicate_desktop_actions(tmp_path) -> None:
+    from plaivid_cli.config import ConfigurationError, load_settings
+
+    env = {"PLAIVID_STATE_DIR": str(tmp_path), "PLAIVID_VERIFIED_DESKTOP_ACTIONS": "start,pause"}
+    assert load_settings(env).verified_desktop_actions == {Action.START, Action.PAUSE}
+    for bad in ("start,start", "start,", "all", "start;kill"):
+        with pytest.raises(ConfigurationError):
+            load_settings({**env, "PLAIVID_VERIFIED_DESKTOP_ACTIONS": bad})
+
+
+def test_desktop_operation_selected_and_bulk_fail_closed(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.errors import AppError
+    from plaivid_cli.domain.models import PvmReply
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    items = (VirtualDesktop(UUID_A, "alpha"), VirtualDesktop(UUID_B, "beta"))
+    provider.list_desktops = lambda token: SourceResult(items, CollectionStatus.CURRENT, "desktops")
+    provider.action_reply = PvmReply("success")
+    section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+    try:
+        with pytest.raises(AppError, match="unverified"):
+            operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=False)
+        assert provider.dispatched == []
+        operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.START}))
+        plan = operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=False)
+        with pytest.raises(AppError, match="bulk Desktop actions need"):
+            operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
+        with pytest.raises(AppError, match="full unfiltered"):
+            operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=True)
+        with pytest.raises(AppError, match="unverified"):
+            operations.create_desktop_plan(Action.KILL, (items[0],), section, is_bulk=False)
+        with pytest.raises(AppError, match="confirmation"):
+            operations.approve_desktop(plan, section, confirmation="wrong")
+        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
+        result = operations.execute_desktop("fake", Action.START, (items[0],), section,
+                                            is_bulk=False, plan=plan, approval=approval)
+        assert result.targets[0].uuid == UUID_A
+        assert provider.dispatched == [(Action.START, UUID_A)]
+        # The old generation cannot be approved again after reconciliation.
+        with pytest.raises(AppError, match="current Desktop inventory"):
+            operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=False)
+        assert collection.snapshot.section("inventory") is None
+    finally:
+        collection.close()
+
+
+def test_desktop_bulk_stops_on_failure_and_reconciles_once(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.models import OperationState, PvmReply
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    items = (VirtualDesktop(UUID_A, "alpha"), VirtualDesktop(UUID_B, "beta"))
+    reads = []
+
+    def list_desktops(token):
+        reads.append(token)
+        return SourceResult(items, CollectionStatus.CURRENT, "desktops")
+
+    provider.list_desktops = list_desktops
+    operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.START}),
+                                   max_inventory_age_seconds=30)
+    section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+    provider.action_reply = PvmReply("failed", errno="146", message="rejected")
+    try:
+        plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
+        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
+        result = operations.execute_desktop("fake", Action.START, items, section,
+                                            is_bulk=True, plan=plan, approval=approval)
+        assert [item.state for item in result.targets] == [OperationState.FAILED, OperationState.NOT_STARTED]
+        assert provider.dispatched == [(Action.START, UUID_A)]
+        assert reads == ["fake", "fake"]
+    finally:
+        collection.close()
+
+
+def test_verified_desktop_start_requires_typed_confirmation(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.tui import DesktopConfirmation
+
+    provider, collection, application, operations, sessions, settings = runtime(tmp_path)
+    operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.START}))
+    provider.list_desktops = lambda token: SourceResult((VirtualDesktop(UUID_A, "alpha"),),
+                                                        CollectionStatus.CURRENT, "desktops")
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise():
+        async with tui.run_test() as pilot:
+            await pilot.pause(0.15)
+            tui.query_one("#tabs", TabbedContent).active = "desktops"
+            await pilot.pause(0.2)
+            tui.query_one("#desktop-actions", Select).value = Action.START.value
+            await pilot.pause(0.15)
+            screen = tui.screen
+            assert isinstance(screen, DesktopConfirmation)
+            assert provider.dispatched == []
+            screen.query_one("#desktop-confirm-input", Input).value = "wrong"
+            screen.confirm()
+            await pilot.pause(0.05)
+            assert isinstance(tui.screen, DesktopConfirmation)
+            assert provider.dispatched == []
+            screen.query_one("#desktop-confirm-input", Input).value = screen.phrase
+            screen.confirm()
+            await pilot.pause(0.25)
+            assert provider.dispatched == [(Action.START, UUID_A)]
+            assert "SUCCEEDED" in str(tui.query_one("#desktop-action-status", Static).render())
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
+
+
+def test_desktop_rejects_partial_stale_and_changed_target_set(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.errors import AppError
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    items = (VirtualDesktop(UUID_A, "alpha"), VirtualDesktop(UUID_B, "beta"))
+    provider.list_desktops = lambda token: SourceResult(items, CollectionStatus.PARTIAL, "desktops",
+                                                        quality_issues=("bad row",))
+    operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.STOP}),
+                                   max_inventory_age_seconds=30)
+    try:
+        partial = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+        with pytest.raises(AppError, match="complete current"):
+            operations.create_desktop_plan(Action.STOP, items, partial, is_bulk=True)
+        provider.list_desktops = lambda token: SourceResult(items, CollectionStatus.CURRENT, "desktops")
+        current = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+        with pytest.raises(AppError, match="full unfiltered"):
+            operations.create_desktop_plan(Action.STOP, (items[1],), current, is_bulk=True)
+        plan = operations.create_desktop_plan(Action.STOP, items, current, is_bulk=True)
+        approval = operations.approve_desktop(plan, current, confirmation=plan.confirmation)
+        collection.collect_once("fake", sections=("desktops",))
+        with pytest.raises(AppError, match="current Desktop inventory"):
+            operations.execute_desktop("fake", Action.STOP, items, current,
+                                       is_bulk=True, plan=plan, approval=approval)
+        assert provider.dispatched == []
+    finally:
+        collection.close()
+
+
+def test_desktop_bulk_unknown_stops_and_marks_remaining_unattempted(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.models import OperationState, PvmReply
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    items = (VirtualDesktop(UUID_A, "alpha"), VirtualDesktop(UUID_B, "beta"))
+    provider.list_desktops = lambda token: SourceResult(items, CollectionStatus.CURRENT, "desktops")
+    provider.action_reply = PvmReply("unexpected")
+    operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.START}),
+                                   max_inventory_age_seconds=30)
+    try:
+        section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+        plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
+        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
+        result = operations.execute_desktop("fake", Action.START, items, section,
+                                            is_bulk=True, plan=plan, approval=approval)
+        assert result.state is OperationState.OUTCOME_UNKNOWN
+        assert [item.state for item in result.targets] == [OperationState.OUTCOME_UNKNOWN, OperationState.NOT_STARTED]
+        assert provider.dispatched == [(Action.START, UUID_A)]
+    finally:
+        collection.close()
+
+
+def test_desktop_action_opt_in_revocation_blocks_already_approved_plan(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.errors import AppError
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    record = VirtualDesktop(UUID_A, "alpha")
+    provider.list_desktops = lambda token: SourceResult((record,), CollectionStatus.CURRENT, "desktops")
+    operations._settings = replace(settings, verified_desktop_actions=frozenset({Action.START}))
+    try:
+        section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+        plan = operations.create_desktop_plan(Action.START, (record,), section, is_bulk=False)
+        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
+        operations._settings = settings
+        with pytest.raises(AppError, match="unverified"):
+            operations.execute_desktop("fake", Action.START, (record,), section,
+                                       is_bulk=False, plan=plan, approval=approval)
+        assert provider.dispatched == []
+    finally:
         collection.close()

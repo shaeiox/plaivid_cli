@@ -8,6 +8,7 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
@@ -71,6 +72,43 @@ BULK_ACTIONS: tuple[Action, ...] = (
 
 def _action_label(action: Action) -> str:
     return action.value.title()
+
+
+class DesktopConfirmation(ModalScreen[bool]):
+    """Keyboard-accessible explicit confirmation bound to all full UUIDs."""
+
+    def __init__(self, plan: OperationPlan) -> None:
+        super().__init__()
+        self.phrase = plan.confirmation
+        self.plan = plan
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="desktop-confirm-box"):
+            yield Static(
+                f"Review {self.plan.action.value.upper()} · {len(self.plan.target_uuids)} Desktop(s) "
+                "· full unfiltered set for Apply to all.\n"
+                "PVM acceptance does not prove a completed state change. "
+                "Do not retry an uncertain outcome blindly.\n"
+                f"To confirm, type exactly: {self.phrase}", markup=False,
+            )
+            with VerticalScroll(id="desktop-confirm-targets"):
+                yield Static("\n".join(self.plan.target_uuids), markup=False)
+            yield Input(placeholder="Type the action and all target UUIDs", id="desktop-confirm-input")
+            yield Static("", id="desktop-confirm-error", markup=False)
+            with Horizontal(id="desktop-confirm-buttons"):
+                yield Button("Confirm", id="desktop-confirm-yes", variant="primary")
+                yield Button("Cancel", id="desktop-confirm-no")
+
+    @on(Button.Pressed, "#desktop-confirm-no")
+    def cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#desktop-confirm-yes")
+    def confirm(self) -> None:
+        if self.query_one("#desktop-confirm-input", Input).value != self.phrase:
+            self.query_one("#desktop-confirm-error", Static).update("Confirmation does not match the reviewed targets.")
+            return
+        self.dismiss(True)
 
 
 class PlaividTui(App[None]):
@@ -196,6 +234,11 @@ class PlaividTui(App[None]):
         #detail-box { height: 10; margin-top: 1; border: round $p-border;
                       background: $p-panel; padding: 1; }
         #action-status { height: 1; color: $p-yellow; }
+    DesktopConfirmation { align: center middle; background: $p-bg 70%; }
+    #desktop-confirm-box { width: 80%; max-height: 80%; padding: 1 2;
+                           border: round $p-yellow; background: $p-panel; }
+    #desktop-confirm-targets { height: 1fr; min-height: 4; }
+    #desktop-confirm-buttons { height: 2; }
         #desktop-toolbar { height: 3; margin-top: 1; padding: 0 1;
                            border: round $p-border; background: $p-panel; }
         #desktop-search { width: 1fr; }
@@ -837,7 +880,7 @@ class PlaividTui(App[None]):
             return
         all_targets = self.query_one("#desktop-all", Checkbox).value
         uuids = tuple(sorted(self._desktops)) if all_targets else ((self._desktop_selected,) if self._desktop_selected else ())
-        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · actions unavailable"
+        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · per-action verification required"
         self.query_one("#desktop-scope", Static).update(scope)
         record = self._desktops.get(self._desktop_selected or "")
         if record is None or self._desktop_selected not in self._desktop_rows:
@@ -858,12 +901,87 @@ class PlaividTui(App[None]):
             return
         action = Action(event.value)
         event.select.clear()
-        # No Desktop protocol has passed its own evidence gate. This handler
-        # deliberately cannot reach dispatch_action or OperationCoordinator.
-        scope = "all Desktops" if self.query_one("#desktop-all", Checkbox).value else "the selected Desktop"
-        self.query_one("#desktop-action-status", Static).update(
-            f"{action.value.title()} for {scope} blocked: Lite Desktop route, params and successful result not verified. Zero calls sent."
-        )
+        if self._operation_active or self.session is None:
+            self._desktop_message("Sign in and wait for the current operation to finish.")
+            return
+        section = self._desktop_section
+        all_targets = self.query_one("#desktop-all", Checkbox).value
+        if all_targets:
+            targets = tuple(self._desktops[uuid] for uuid in sorted(self._desktops))
+        elif self._desktop_selected in self._desktop_rows:
+            selected = self._desktops.get(self._desktop_selected or "")
+            targets = (selected,) if selected else ()
+        else:
+            targets = ()
+        if section is None:
+            self._desktop_message("Refresh the Desktop inventory before choosing an action.")
+            return
+        try:
+            plan = self.operations.create_desktop_plan(action, targets, section, is_bulk=all_targets)
+        except AppError as exc:
+            self._desktop_message(str(exc))
+            return
+        epoch = self._session_epoch
+
+        def decided(confirmed: bool | None) -> None:
+            if not confirmed or epoch != self._session_epoch or self.session is None:
+                self._desktop_message("Desktop action cancelled; no call sent.")
+                return
+            try:
+                approval = self.operations.approve_desktop(plan, section, confirmation=plan.confirmation)
+            except AppError as exc:
+                self._desktop_message(str(exc))
+                return
+            self._operation_active = True
+            self.query_one("#logout", Button).disabled = True
+            self.query_one("#desktop-actions", Select).disabled = True
+            self._desktop_message(f"{action.value.upper()} submitted for {len(targets)} Desktop(s)…")
+            self._execute_desktop(action, targets, section, plan, approval, epoch)
+
+        self.push_screen(DesktopConfirmation(plan), decided)
+
+    def _desktop_message(self, message: str) -> None:
+        self.query_one("#desktop-action-status", Static).update(redact_text(message))
+
+    @work(thread=True, group="desktop-operation", exclusive=False)
+    def _execute_desktop(
+        self, action: Action, targets: tuple[VirtualDesktop, ...],
+        section: SectionSnapshot[object], plan: OperationPlan,
+        approval: OperationApproval, epoch: int,
+    ) -> None:
+        try:
+            session = self.session
+            if session is None or epoch != self._session_epoch:
+                return
+            try:
+                result = self.operations.execute_desktop(
+                    session.token, action, targets, section,
+                    is_bulk=plan.is_bulk, plan=plan, approval=approval,
+                )
+            except AppError as exc:
+                self.call_from_thread(self._desktop_error_if_current, epoch, str(exc))
+            else:
+                self.call_from_thread(self._desktop_result_if_current, epoch, result)
+        finally:
+            try:
+                self.call_from_thread(self._desktop_operation_finished)
+            except RuntimeError:
+                pass
+
+    def _desktop_error_if_current(self, epoch: int, message: str) -> None:
+        if self.session is not None and epoch == self._session_epoch:
+            self._desktop_message(message)
+
+    def _desktop_result_if_current(self, epoch: int, result: OperationResult) -> None:
+        if self.session is not None and epoch == self._session_epoch:
+            summary = "; ".join(f"{item.uuid}: {item.state.value}" for item in result.targets)
+            self._desktop_message(f"{result.action.value.upper()} · {result.state.value} · {result.message} · {summary}")
+            self._publish_snapshot(self.application.collection.snapshot)
+
+    def _desktop_operation_finished(self) -> None:
+        self._operation_active = False
+        self.query_one("#logout", Button).disabled = False
+        self.query_one("#desktop-actions", Select).disabled = False
 
     def _render_host(self, snapshot: ApplicationSnapshot) -> None:
         status_section = snapshot.section("host_status")

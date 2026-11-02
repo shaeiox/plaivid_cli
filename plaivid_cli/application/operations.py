@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from plaivid_cli.application.collection import CollectionCoordinator, CollectionSuperseded
 from plaivid_cli.application.ports import PvmGateway
 from plaivid_cli.config import Settings
+from plaivid_cli.domain.desktops import VirtualDesktop
 from plaivid_cli.domain.errors import AppError
 from plaivid_cli.domain.models import (
     Action,
@@ -134,6 +135,125 @@ class OperationCoordinator:
             created_at=datetime.now(UTC),
             confirmation=self.confirmation_phrase(action, target_ids),
         )
+
+    def create_desktop_plan(
+        self, action: Action, targets: tuple[VirtualDesktop, ...],
+        section: SectionSnapshot[object], *, is_bulk: bool,
+    ) -> OperationPlan:
+        """Desktop-only admission; never substitute a VMRecord or VM inventory."""
+        if action not in self._settings.verified_desktop_actions:
+            raise AppError(
+                ErrorKind.POLICY,
+                f"Desktop {action.value} is unverified; no action call sent",
+                code="DESKTOP_ACTION_UNVERIFIED",
+            )
+        ids = tuple(item.uuid for item in targets)
+        if not ids or len(set(ids)) != len(ids) or (len(ids) > 1 and not is_bulk):
+            raise AppError(ErrorKind.POLICY, "Desktop targets must be non-empty, unique and explicitly scoped")
+        latest = self._collection.snapshot.section("desktops")
+        if (
+            latest is None or latest != section
+            or section.status is not CollectionStatus.CURRENT
+            or not isinstance(section.value, tuple)
+        ):
+            raise AppError(ErrorKind.POLICY, "complete current Desktop inventory required")
+        current = {item.uuid: item for item in section.value if isinstance(item, VirtualDesktop)}
+        if len(current) != len(section.value) or any(current.get(item.uuid) != item for item in targets):
+            raise AppError(ErrorKind.POLICY, "Desktop targets do not match the current listing")
+        if is_bulk and tuple(sorted(current)) != ids:
+            raise AppError(ErrorKind.POLICY, "all-target plan must include the full unfiltered Desktop listing")
+        age = self._settings.max_inventory_age_seconds
+        if age is None:
+            if is_bulk:
+                raise AppError(ErrorKind.POLICY, "bulk Desktop actions need PLAIVID_MAX_INVENTORY_AGE_SECONDS")
+            age = max(30.0, self._settings.refresh_interval * 2)
+        if not self._collection.is_fresh("desktops", max_age_seconds=age):
+            raise AppError(ErrorKind.POLICY, "Desktop listing expired; refresh before operating")
+        if section.succeeded_at is None or section.quality_issues:
+            raise AppError(ErrorKind.POLICY, "Desktop listing is incomplete")
+        return OperationPlan(
+            action=action, target_uuids=ids, inventory_generation=section.generation,
+            inventory_succeeded_at=section.succeeded_at, is_bulk=is_bulk,
+            freshness_limit_seconds=age, created_at=datetime.now(UTC),
+            confirmation=self.confirmation_phrase(action, ids),
+        )
+
+    def approve_desktop(
+        self, plan: OperationPlan, section: SectionSnapshot[object], *, confirmation: str,
+    ) -> OperationApproval:
+        if confirmation != plan.confirmation:
+            raise AppError(ErrorKind.POLICY, "Desktop confirmation did not match", code="APPROVAL_MISMATCH")
+        if section.generation != plan.inventory_generation:
+            raise AppError(ErrorKind.POLICY, "Desktop listing changed before approval")
+        return OperationApproval(
+            action=plan.action, target_uuids=plan.target_uuids,
+            inventory_generation=plan.inventory_generation,
+            issued_at=datetime.now(UTC), confirmation=confirmation,
+        )
+
+    def execute_desktop(
+        self, token: str, action: Action, targets: tuple[VirtualDesktop, ...],
+        section: SectionSnapshot[object], *, is_bulk: bool,
+        plan: OperationPlan, approval: OperationApproval,
+    ) -> OperationResult:
+        if self._closing.is_set():
+            raise AppError(ErrorKind.POLICY, "operation coordinator is shutting down")
+        with self._lane:
+            if self._closing.is_set():
+                raise AppError(ErrorKind.POLICY, "operation coordinator is shutting down")
+            current = self.create_desktop_plan(action, targets, section, is_bulk=is_bulk)
+            if (
+                plan.action is not current.action or plan.target_uuids != current.target_uuids
+                or plan.inventory_generation != current.inventory_generation
+                or plan.inventory_succeeded_at != current.inventory_succeeded_at
+                or plan.is_bulk != current.is_bulk
+                or plan.freshness_limit_seconds != current.freshness_limit_seconds
+                or plan.confirmation != current.confirmation
+            ):
+                raise AppError(ErrorKind.POLICY, "Desktop plan changed after review")
+            if (
+                approval.action is not action or approval.target_uuids != plan.target_uuids
+                or approval.inventory_generation != plan.inventory_generation
+                or approval.confirmation != plan.confirmation
+            ):
+                raise AppError(ErrorKind.POLICY, "Desktop action requires a matching confirmation")
+            try:
+                self._collection.begin_mutation(
+                    plan.target_uuids, expected_desktop_generation=plan.inventory_generation,
+                    max_age_seconds=plan.freshness_limit_seconds,
+                    require_complete_inventory=True,
+                )
+            except CollectionSuperseded as exc:
+                raise AppError(ErrorKind.POLICY, "Desktop inventory changed before dispatch") from exc
+            started = datetime.now(UTC)
+            outcomes: list[TargetOutcome] = []
+            stop_bulk = False
+            try:
+                for item in targets:
+                    if stop_bulk:
+                        outcomes.append(TargetOutcome(
+                            item.uuid, OperationState.NOT_STARTED,
+                            "not dispatched after earlier failure or unknown outcome",
+                        ))
+                        continue
+                    outcome = self._dispatch_one(token, action, item)
+                    outcomes.append(outcome)
+                    if outcome.state in {
+                        OperationState.FAILED, OperationState.REJECTED, OperationState.OUTCOME_UNKNOWN,
+                    }:
+                        stop_bulk = is_bulk
+            finally:
+                self._collection.end_mutation(plan.target_uuids, section_name="desktops")
+            try:
+                self._collection.collect_once(token, sections=("desktops",))
+            except Exception:
+                pass  # The result remains an accepted/uncertain command, not an observed transition.
+            state = aggregate_state(tuple(outcomes))
+            return OperationResult(
+                operation_id=str(uuidlib.uuid4()), action=action, state=state,
+                targets=tuple(outcomes), started_at=started, finished_at=datetime.now(UTC),
+                message=_aggregate_message(state, outcomes),
+            )
 
     @staticmethod
     def cancel(plan: OperationPlan) -> OperationResult:
@@ -308,7 +428,7 @@ class OperationCoordinator:
             message=_aggregate_message(aggregate, outcomes),
         )
 
-    def _dispatch_one(self, token: str, action: Action, record: VMRecord) -> TargetOutcome:
+    def _dispatch_one(self, token: str, action: Action, record: VMRecord | VirtualDesktop) -> TargetOutcome:
         try:
             reply = self._provider.dispatch_action(token, action, record.uuid)
         except AppError as exc:

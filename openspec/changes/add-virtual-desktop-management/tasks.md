@@ -18,9 +18,9 @@
 
 ## 4. Desktop actions (each blocked until its own evidence under item 1.4 and separate approval)
 - [x] 4.1 Expose Start/Resume/Pause/Stop/Reset/Kill as disabled or guarded for Desktop targets; prove fake gateway sees **zero** dispatch for each unverified action.
-- [ ] 4.2 For each approved action, extend the service with typed Desktop-target generation/freshness/approval and the exact verified route/params; use full UUID, no forged VMRecord or unrelated VM inventory gate. Bulk admission requires a configured positive age limit and complete current Desktop list.
-- [ ] 4.3 Verify selected vs **unfiltered all** scope, full ordered UUID set and confirmation, sequential bulk stop-on-definite-failure/unknown, timeout/error classifications, stale/partial admission and post-dispatch list reconciliation without per-Desktop read fan-out; only then enable that action.
+- [x] 4.2 Implement separate typed Desktop-target generation/freshness/approval and candidate documented `sbell vm` route/params; use full UUID, no forged VMRecord or unrelated VM inventory gate. Bulk admission requires a configured positive age limit and complete current Desktop list. Per-action operator attestation is default-off; real Desktop response evidence remains pending.
+- [x] 4.3 Synthetic tests cover selected vs **unfiltered all**, typed confirmation, sequential stop-on-failure/unknown, stale/partial admission and list reconciliation without per-Desktop reads. Enabling an action still requires operator verification of real Desktop protocol evidence.
 
 ## 5. Verification and rollout
-- [x] 5.1 Run full unit/Pilot suite, Ruff, Pyright, build and strict OpenSpec validation (132 passing tests); do not conflate fixtures with installed PVM acceptance.
+- [x] 5.1 Run full unit/Pilot suite, Ruff, Pyright, build and strict OpenSpec validation (139 passing tests after Desktop action integration); do not conflate fixtures with installed PVM acceptance.
 - [ ] 5.2 Update operator docs and manual validation checklist. Conduct only separately authorized non-production PVM read/operation tests; otherwise leave action gate explicitly blocked and report the evidence gap.

@@ -91,6 +91,7 @@ The table below is a quick reference for the **active runtime**. For every suppo
 | `PLAIVID_REFRESH` | `3` | Default TUI refresh cadence in seconds (Overview control accepts whole seconds 1–60; its expensive PVM reads remain slower). |
 | `PLAIVID_MAX_INVENTORY_AGE_SECONDS` | unset | Required positive age bound for bulk mutation admission. |
 | `PLAIVID_ALLOW_CREDENTIAL_ARGV` | disabled | Explicit acknowledgement of unresolved password/token argv exposure. |
+| `PLAIVID_VERIFIED_DESKTOP_ACTIONS` | unset | Per-action operator attestation after verifying a successful Lite Desktop operation. **Do not set from a request capture alone.** All Desktop mutations remain blocked by default. |
 | `PLAIVID_LOG_DB` | `/var/log/pvm/messages.db` | Optional existing audit database, opened read-only. |
 | `PLAIVID_LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 

@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from plaivid_cli.domain.models import Action
+
 
 class ConfigurationError(ValueError):
     """A required runtime setting is invalid or unsafe."""
@@ -53,6 +55,20 @@ def _enabled(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _verified_desktop_actions(env: Mapping[str, str]) -> frozenset[Action]:
+    """Operator's per-action attestation after inspecting Desktop response evidence."""
+    raw = env.get("PLAIVID_VERIFIED_DESKTOP_ACTIONS", "").strip()
+    if not raw:
+        return frozenset()
+    names = [part.strip().lower() for part in raw.split(",")]
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ConfigurationError("PLAIVID_VERIFIED_DESKTOP_ACTIONS must contain unique action names")
+    try:
+        return frozenset(Action(name) for name in names)
+    except ValueError as exc:
+        raise ConfigurationError("PLAIVID_VERIFIED_DESKTOP_ACTIONS contains an unsupported action") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     sbell_argv: tuple[str, ...]
@@ -67,6 +83,7 @@ class Settings:
     max_inventory_age_seconds: float | None
     audit_database: Path
     log_level: str
+    verified_desktop_actions: frozenset[Action] = frozenset()
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -101,4 +118,5 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         ),
         audit_database=Path(env.get("PLAIVID_LOG_DB", "/var/log/pvm/messages.db")),
         log_level=log_level,
+        verified_desktop_actions=_verified_desktop_actions(env),
     )

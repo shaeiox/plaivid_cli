@@ -71,7 +71,7 @@ The local suite uses fake providers, fake child runners, synthetic XML/text fixt
 
 Follow the read-only, credential-redacted, non-production evidence and measurement checklist in [`MONITORING_DASHBOARD.md`](MONITORING_DASHBOARD.md). Its PVM dashboard XML paths, physical NIC-list response, running-count semantics, VDI record types/units, screenshot comparison, and 3s/18s load budget have **not** been validated against an installed PVM. Do not treat synthetic tests or successful local builds as proof of those contracts.
 
-## Virtual Desktops (read-only implementation; action gate closed)
+## Virtual Desktops (read-only by default; independently gated actions)
 
 The Virtual Desktops tab makes one local `sbell user objects` request per due refresh
 using the operator-verified Lite Desktop XPath. While the tab is visible,
@@ -82,12 +82,29 @@ explicit. It preserves distinct enablement, local runtime and cluster runtime
 states and shows Owner/Zone and RAM units as unverified. Synthetic parser and
 Pilot tests are **not** PVM 7.1.26 acceptance evidence.
 
-All six Desktop action choices (Start, Resume, Pause, Stop, Reset, Kill) are
-**blocked for both selected and all scopes** and send no calls. A VM request
-capture does not establish successful Lite Desktop UUID applicability. Before
-any action can be enabled, obtain the redacted version-matched Desktop request,
-response, permissions and transition evidence listed in
-`openspec/changes/add-virtual-desktop-management/proposal.md`, then review each
-action independently. Do not send credentials or run production mutations to
-obtain evidence. The unfiltered all-target count and full UUIDs are inspectable
-in the scrollable Desktop detail region even when search is active.
+All six Desktop action choices (Start, Resume, Pause, Stop, Reset, Kill) remain
+**blocked by default** for selected and all scopes. The candidate `sbell vm`
+shapes documented for ordinary VMs do not establish successful Lite Desktop
+UUID applicability. An operator who has independently reviewed a redacted,
+version-matched successful Desktop request/response, allowed transitions and
+permissions for a given action can attest to that specific action using
+`PLAIVID_VERIFIED_DESKTOP_ACTIONS` (comma-separated action names, e.g. `start`;
+no `all` or wildcard). This is an **operator assertion, not automatic PVM
+verification**; do not set it on the strength of an HTTP request body alone.
+The current supplied Start capture confirms `/vm/start` and XML shape, but
+**no successful Desktop response or state transition has been supplied**.
+
+An opted-in action uses the existing local `sbell vm/<action>` adapter. The
+Desktop-specific service binds exact full UUIDs to a complete current Desktop
+section, applies the per-action gate again at dispatch, shares the serialized
+mutation lane, and reconciles with one Desktop list read. Each attempt requires
+typing the action and exact UUID set in a review dialog. Apply to all means
+the **full unfiltered listing**, including rows hidden by search, and requires
+an explicit positive `PLAIVID_MAX_INVENTORY_AGE_SECONDS` plus complete fresh
+inventory. A failed/unknown bulk result stops remaining dispatch. The result
+is a command response, not proof of completed state transition; do not blindly
+retry an unknown outcome. No host test or real mutation was run in this change.
+Review each action's evidence separately before opting in and retain the
+`PLAIVID_ALLOW_CREDENTIAL_ARGV` risk acknowledgement for token-bearing sbell
+calls. The unfiltered all-target count and full UUIDs are inspectable in the
+scrollable Desktop detail and confirmation regions even with search active.

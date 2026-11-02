@@ -114,6 +114,7 @@ class CollectionCoordinator:
         target_uuids: Iterable[str],
         *,
         expected_inventory_generation: int | None = None,
+        expected_desktop_generation: int | None = None,
         max_age_seconds: float | None = None,
         require_complete_inventory: bool = False,
     ) -> int:
@@ -124,6 +125,21 @@ class CollectionCoordinator:
         if not targets:
             raise ValueError("mutation barrier requires at least one target")
         with self._lock:
+            if expected_inventory_generation is not None and expected_desktop_generation is not None:
+                raise ValueError("only one inventory barrier may be selected")
+            if expected_desktop_generation is not None:
+                from plaivid_cli.domain.desktops import VirtualDesktop
+
+                desktops = self._sections.get("desktops")
+                if (
+                    desktops is None
+                    or desktops.generation != expected_desktop_generation
+                    or desktops.status is not CollectionStatus.CURRENT
+                    or not isinstance(desktops.value, tuple)
+                    or not self._fresh_locked(desktops, max_age_seconds)
+                    or not targets.issubset({item.uuid for item in desktops.value if isinstance(item, VirtualDesktop)})
+                ):
+                    raise CollectionSuperseded("Desktop inventory changed or expired before dispatch")
             if expected_inventory_generation is not None:
                 inventory = self._sections.get("inventory")
                 objects = self._sections.get("objects")
@@ -156,18 +172,20 @@ class CollectionCoordinator:
                     )
             return self._generation
 
-    def end_mutation(self, target_uuids: Iterable[str]) -> ApplicationSnapshot:
+    def end_mutation(self, target_uuids: Iterable[str], *, section_name: str = "inventory") -> ApplicationSnapshot:
         from plaivid_cli.domain.models import canonical_uuid
 
         targets = {canonical_uuid(uuid) for uuid in target_uuids}
+        if section_name not in {"inventory", "desktops"}:
+            raise ValueError("unsupported mutation section")
         now, monotonic = datetime.now(UTC), time.monotonic()
         with self._lock:
             self._generation += 1
             self._mutating.difference_update(targets)
-            prior = self._sections.get("inventory")
+            prior = self._sections.get(section_name)
             if prior is not None:
-                self._sections["inventory"] = SectionSnapshot(
-                    name="inventory",
+                self._sections[section_name] = SectionSnapshot(
+                    name=section_name,
                     value=None,
                     last_good_value=(prior.last_good_value if prior.last_good_value is not None else prior.value),
                     status=CollectionStatus.STALE,
@@ -175,7 +193,7 @@ class CollectionCoordinator:
                     succeeded_at=prior.succeeded_at,
                     generation=self._generation,
                     source=prior.source,
-                    error="inventory requires post-operation reconciliation",
+                    error=f"{section_name} requires post-operation reconciliation",
                     quality_issues=prior.quality_issues,
                     attempted_monotonic=monotonic,
                     succeeded_monotonic=prior.succeeded_monotonic,
