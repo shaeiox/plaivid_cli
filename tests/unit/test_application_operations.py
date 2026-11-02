@@ -18,7 +18,6 @@ from plaivid_cli.domain.models import (
     TargetOutcome,
     VMRecord,
 )
-from plaivid_cli.domain.policies import action_policy
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
 UUID_B = "800b0429-d82a-4e26-a5e2-225990172e6e"
@@ -178,15 +177,11 @@ def test_explicit_plan_cancellation_reports_cancelled_before_dispatch():
     collection.close()
 
 
-def test_stop_requires_exact_uuid_confirmation_bound_to_inventory_generation():
+def test_stop_dispatches_without_confirmation():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), (UUID_B,))
-    phrase = operations.confirmation_phrase(Action.STOP, selection.uuids)
-    approval = operations.approve(
-        Action.STOP, selection.records, section, confirmation=phrase
-    )
     result = operations.execute(
-        "token", Action.STOP, selection.records, section, is_bulk=False, approval=approval
+        "token", Action.STOP, selection.records, section, is_bulk=False
     )
     assert result.state is OperationState.SUCCEEDED
     assert provider.dispatched == [(Action.STOP, UUID_B)]
@@ -201,10 +196,6 @@ def test_immutable_operation_plan_is_invalidated_by_a_new_inventory_generation()
     )
     assert plan.target_uuids == (UUID_B,)
     assert plan.inventory_generation == section.generation
-    assert plan.confirmation == f"STOP {UUID_B}"
-    approval = operations.approve(
-        Action.STOP, selection.records, section, confirmation=plan.confirmation
-    )
     newer_snapshot = collection.collect_once("token", sections=("inventory",))
     newer_section = newer_snapshot.section("inventory")
     assert newer_section is not None and newer_section.generation != section.generation
@@ -215,7 +206,6 @@ def test_immutable_operation_plan_is_invalidated_by_a_new_inventory_generation()
             selection.records,
             section,
             is_bulk=False,
-            approval=approval,
             plan=plan,
         )
     except AppError as exc:
@@ -226,43 +216,16 @@ def test_immutable_operation_plan_is_invalidated_by_a_new_inventory_generation()
     collection.close()
 
 
-def test_stop_refuses_missing_or_wrong_confirmation_before_dispatch():
-    provider, collection, application, operations, _, section = make_application()
-    selection = application.resolve_targets(as_inventory(section), (UUID_B,))
-    try:
-        operations.approve(
-            Action.STOP, selection.records, section, confirmation=f"STOP {UUID_A}"
-        )
-    except AppError as exc:
-        assert exc.code == "APPROVAL_MISMATCH"
-    else:
-        raise AssertionError("wrong confirmation was accepted")
-    try:
-        operations.execute("token", Action.STOP, selection.records, section, is_bulk=False)
-    except AppError as exc:
-        assert exc.code == "APPROVAL_REQUIRED"
-    else:
-        raise AssertionError("stop dispatched without approval")
-    assert provider.dispatched == []
-    collection.close()
-
-
 def test_bulk_stops_on_pvm_failure_and_marks_remainder_not_started():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
-    approval = operations.approve(
-        Action.START,
-        selection.records,
-        section,
-        confirmation=operations.confirmation_phrase(Action.START, selection.uuids),
-    )
     provider.replies = [
         PvmReply("failed", None, "146", "VM 'alpha' is already started"),
         PvmReply("success"),
         PvmReply("success"),
     ]
     result = operations.execute(
-        "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+        "token", Action.START, selection.records, section, is_bulk=True
     )
     assert [item.state for item in result.targets] == [
         OperationState.FAILED,
@@ -280,15 +243,9 @@ def test_bulk_stops_on_pvm_failure_and_marks_remainder_not_started():
 def test_bulk_all_successful_replies_dispatch_every_target():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
-    approval = operations.approve(
-        Action.START,
-        selection.records,
-        section,
-        confirmation=operations.confirmation_phrase(Action.START, selection.uuids),
-    )
     provider.replies = [PvmReply("success"), PvmReply("success"), PvmReply("success")]
     result = operations.execute(
-        "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+        "token", Action.START, selection.records, section, is_bulk=True
     )
     assert result.state is OperationState.SUCCEEDED
     assert len(provider.dispatched) == len(selection.records)
@@ -298,15 +255,9 @@ def test_bulk_all_successful_replies_dispatch_every_target():
 def test_transport_exception_after_dispatch_stays_unknown_and_stops_bulk():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
-    approval = operations.approve(
-        Action.START,
-        selection.records,
-        section,
-        confirmation=operations.confirmation_phrase(Action.START, selection.uuids),
-    )
     provider.replies = [RuntimeError("socket closed")]
     result = operations.execute(
-        "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+        "token", Action.START, selection.records, section, is_bulk=True
     )
     assert result.targets[0].state is OperationState.OUTCOME_UNKNOWN
     assert result.targets[0].dispatched
@@ -358,16 +309,8 @@ def test_all_six_lifecycle_actions_dispatch_and_report_documented_success():
     for action in Action:
         provider, collection, application, operations, _, section = make_application()
         selection = application.resolve_targets(as_inventory(section), (UUID_B,))
-        approval = None
-        if action_policy(action).confirm_single:
-            approval = operations.approve(
-                action,
-                selection.records,
-                section,
-                confirmation=operations.confirmation_phrase(action, selection.uuids),
-            )
         result = operations.execute(
-            "token", action, selection.records, section, is_bulk=False, approval=approval
+            "token", action, selection.records, section, is_bulk=False
         )
         assert result.action is action
         assert result.state is OperationState.SUCCEEDED
@@ -410,13 +353,9 @@ def test_close_waits_for_active_dispatch_and_rejects_new_operations():
 def test_bulk_is_default_denied_without_a_configured_inventory_age():
     provider, collection, application, operations, _, section = make_application(max_age=False)
     selection = application.resolve_targets(as_inventory(section), ("all",))
-    phrase = operations.confirmation_phrase(Action.START, selection.uuids)
-    approval = operations.approve(
-        Action.START, selection.records, section, confirmation=phrase
-    )
     try:
         operations.execute(
-            "token", Action.START, selection.records, section, is_bulk=True, approval=approval
+            "token", Action.START, selection.records, section, is_bulk=True
         )
     except AppError as exc:
         assert "PLAIVID_MAX_INVENTORY_AGE_SECONDS" in str(exc)

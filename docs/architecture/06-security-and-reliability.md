@@ -6,7 +6,7 @@
 
 | Priority | Finding | Evidence | Impact / validation |
 |---|---|---|---|
-| **Critical before operational rollout** | Non-TTY mode implicitly approves destructive operations | `App._confirm()` returns `True` when stdin is not a TTY (`orchestrator.py:178–180`). README claims destructive actions ask for confirmation. | Scripts/pipelines can execute stop/kill/reset without explicit confirmation. Define safe explicit policy (e.g., fail closed unless a deliberate force/confirmation flag is supplied); test TTY and non-TTY paths. |
+| **Historical legacy finding; current policy differs** | Retired non-TTY confirmation | `orchestrator.py` once returned `True` without a TTY. The supported CLI now intentionally has **no confirmation** for VM lifecycle commands; explicit command and targets are intent. | Scripts can submit actions. Control session access and automation; current generation/freshness/bulk completeness gates remain in force. |
 | **High** | Partial bulk target resolution can execute valid targets while silently discarding invalid selectors | `vms.resolve_many()` returns targets and error together (`vms.py:406–420`); `_run_action()` ignores `errmsg` when targets exist (`orchestrator.py:133–145`). | A typo can produce an unintended subset operation. Validate all selectors and require explicit policy before any mutation; test mixed valid/invalid, duplicate, ambiguous, and empty targets. |
 | **High** | Login password and session token are command-line arguments to the sbell child process | XML password is built in `session._login_params()` and passed to `transport.sbell()`; token is appended in `transport.sbell()` (`session.py:80–108`, `transport.py:99–104`). | Local users/process inspection, diagnostics or crash tooling may reveal secrets. Confirm PVM-supported safer input channels; until then minimize lifetime, prevent logging, assess process permissions, and document residual exposure. No undocumented stdin mode should be assumed. |
 | **High** | Timeout kills only direct child and does not explicitly reap it | `_run()` kills `p` then raises without `communicate()/wait()` in timeout branch (`transport.py:66–77`). | Child cleanup/resource lifecycle may be incomplete; `sudo` or a wrapper could spawn descendants that remain. Verify on target, ensure process is waited/reaped and define process-group policy. |
@@ -28,7 +28,7 @@
 
 ## Authorization and destructive-action semantics
 
-Current source relies on PVM authorization of the session for commands. There is no client-side role model. Six action modules exist; `stop`, `kill`, and `reset` are marked destructive, but non-TTY confirmation is implicitly accepted. Bulk operation has a single interactive prompt and shows up to eight VM names plus a count. There is no per-target confirmation or dry-run.
+This section originally audited retired source. The supported runtime relies on PVM session authorization, has no client-side role model, and does **not** ask for confirmation for any VM or Desktop lifecycle action, including non-TTY CLI commands. Current bulk admission still requires a complete fresh inventory, positive configured age and serialized stop-on-failure execution. There is no dry-run.
 
 Recommended policy to validate: make mutation intent explicit, default unattended execution to fail closed, show a complete or safely paginated resolved target list before action, reject incomplete selector resolution unless user explicitly chooses otherwise, and distinguish timeout/unknown completion from definite failure. Do not blindly retry mutations.
 
@@ -52,4 +52,4 @@ Recommended policy to validate: make mutation intent explicit, default unattende
 2. Inspect process visibility and `sudo` behavior on the supported host; run safe tests with synthetic credentials only.
 3. Test timeout, signal, child-process cleanup, malformed XML, nonzero exit plus output, and PVM error envelopes with fake executables.
 4. Decide session file ownership/mode/directory and token retention/logout behavior; inspect no secrets in logs, errors, terminal screenshots, or test artifacts.
-5. Exercise destructive confirmation, mixed bulk selectors, per-target failures, and uncertain timeout outcomes with a fake provider before any real VM action.
+5. Exercise direct destructive dispatch, mixed bulk selectors, per-target failures, and uncertain timeout outcomes with a fake provider before any real VM action.

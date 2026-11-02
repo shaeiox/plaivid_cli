@@ -41,9 +41,9 @@ The TUI SHALL poll only while a relevant live view is active, show freshness and
 - **WHEN** the user navigates away from a live monitoring view
 - **THEN** its periodic refresh requests stop and no screen-owned worker remains active
 
-### Requirement: Inspectable operation confirmation
-Before any operation requiring confirmation, the TUI SHALL show the exact action, complete canonical target list, count, inventory status, last-success timestamp, computed age, and freshness limit that the approval covers.
+### Requirement: Direct TUI action selection
+The TUI SHALL submit a VM lifecycle action when the operator chooses it from the dropdown without a separate confirmation modal. It SHALL display selected/all scope and inventory freshness, and the application SHALL recheck target UUIDs and generation at dispatch.
 
-#### Scenario: Large bulk target set
-- **WHEN** a bulk operation exceeds the visible viewport
-- **THEN** the user can inspect the full target set before confirming and the confirmation remains bound to that set
+#### Scenario: Bulk target set
+- **WHEN** Apply to all is selected and an action is chosen
+- **THEN** the current complete inventory is submitted in canonical order if admission succeeds, without another prompt

@@ -34,9 +34,9 @@ One-shot commands SHALL return stable exit categories: verified success `0`, fai
 - **WHEN** any dispatched target has an unknown outcome
 - **THEN** the CLI returns exit code `4` and includes the unknown target in output
 
-### Requirement: Fail-closed CLI mutations
-The CLI SHALL reject mutations without an explicit action, canonical target set, required fresh inventory, and required action-bound approval; it SHALL never treat non-TTY execution as implicit consent.
+### Requirement: CLI mutations without approval prompts
+The CLI SHALL accept explicit lifecycle commands with resolved targets without a separate `--approve` flag or confirmation. It SHALL still reject invalid, ambiguous, stale or incomplete target inventory before dispatch, including in non-TTY mode.
 
-#### Scenario: Non-TTY mutation lacks approval
-- **WHEN** a mutation is invoked through a pipe without an explicit valid action/target approval
-- **THEN** the request is rejected before dispatch with exit code `2`
+#### Scenario: Non-TTY VM action
+- **WHEN** a VM lifecycle command is invoked through a pipe with an explicit target and fresh admitted inventory
+- **THEN** it submits without prompting; missing/invalid targets or stale inventory are rejected

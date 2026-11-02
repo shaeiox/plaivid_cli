@@ -38,7 +38,7 @@ Presentation ──> Application ──> Domain
 | Single-flight request admission/coalescing | `Application.CollectionCoordinator` | Uses logical request identity defined by ADR 0004; no independent admission in widgets/providers. |
 | Last-good section snapshot publication | `Application.CollectionCoordinator` | Uses its simple concrete in-memory section state from ADR 0005; no snapshot-store interface/port. |
 | Read-worker lifetime | `Application.CollectionCoordinator` | One bounded app-lifetime read lane; screens do not own persistent workers. |
-| Mutation admission, serialization and operation lifecycle | `Application.OperationCoordinator` (`application/operations.py`) | Owns target/confirmation binding, mutation state and per-target results (ADR 0012/0013). |
+| Mutation admission, serialization and operation lifecycle | `Application.OperationCoordinator` (`application/operations.py`) | Owns target/inventory-generation binding, mutation state and per-target results (ADR 0012/0013). |
 | Mutation-worker lifetime | `Application.OperationCoordinator` | App-lifetime-owned; navigation/modal destruction cannot cancel already-dispatched operation tracking. |
 | OS child-process lifetime | Infrastructure process runner | Owns argv/environment, deadline, pipe draining/closure, wait/reap and tested descendant cleanup; does not decide application scheduling or mutation policy (ADR 0007). |
 | Whole-process composition/start/stop | Bootstrap | Sole root constructs and closes coordinators/provider/presentation in order. It delegates, not a second scheduler/operation owner. |

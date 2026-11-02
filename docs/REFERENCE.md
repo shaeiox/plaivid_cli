@@ -19,10 +19,10 @@ Inventory prints object-store state and process-observed evidence separately. Ho
 ```bash
 plaivid start <target> [--json]
 plaivid resume <target> [--json]
-plaivid stop <target> --approve 'STOP <canonical-uuid>'
-plaivid reset <target> --approve 'RESET <canonical-uuid>'
-plaivid pause <target> --approve 'PAUSE <canonical-uuid>'
-plaivid kill <target> --approve 'KILL <canonical-uuid>'
+plaivid stop <target>
+plaivid reset <target>
+plaivid pause <target>
+plaivid kill <target>
 ```
 
 Supported target selectors:
@@ -34,9 +34,9 @@ Supported target selectors:
 - `state:<state>` (object-store state, with `state:running` matching `started` or `running`)
 - `process:present` or `process:missing`
 
-Comma-separated selectors form an explicit set. Duplicate targets, ambiguous prefixes, unsupported groups, and empty sets are rejected before dispatch. Bulk operations require a complete current inventory, `PLAIVID_MAX_INVENTORY_AGE_SECONDS`, and approval naming every canonical UUID in resolved order.
+Comma-separated selectors form an explicit set. Duplicate targets, ambiguous prefixes, unsupported groups, and empty sets are rejected before dispatch. Bulk operations require a complete current inventory, `PLAIVID_MAX_INVENTORY_AGE_SECONDS`, and a resolved canonical UUID set.
 
-For one-target Start/Resume, the explicit command/selection is the intent. Stop, Reset, Pause, and Kill require exact action/UUID approval; Kill is marked critical. The TUI dispatches from the Bulk action dropdown without a confirmation dialog.
+For all six actions, the explicit CLI command or TUI dropdown choice is the intent; no confirmation prompt or `--approve` flag is used. Kill remains classified as critical. The current inventory and generation are checked at dispatch.
 
 ## Result and exit meanings
 

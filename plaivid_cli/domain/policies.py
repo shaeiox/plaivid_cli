@@ -5,12 +5,12 @@ from __future__ import annotations
 from plaivid_cli.domain.models import Action, ActionPolicy, RiskLevel
 
 _POLICIES = {
-    Action.START: ActionPolicy(Action.START, RiskLevel.MODERATE, False, True),
-    Action.STOP: ActionPolicy(Action.STOP, RiskLevel.HIGH, True, True),
-    Action.KILL: ActionPolicy(Action.KILL, RiskLevel.CRITICAL, True, True),
-    Action.RESET: ActionPolicy(Action.RESET, RiskLevel.HIGH, True, True),
-    Action.PAUSE: ActionPolicy(Action.PAUSE, RiskLevel.HIGH, True, True),
-    Action.RESUME: ActionPolicy(Action.RESUME, RiskLevel.MODERATE, False, True),
+    Action.START: ActionPolicy(Action.START, RiskLevel.MODERATE),
+    Action.STOP: ActionPolicy(Action.STOP, RiskLevel.HIGH),
+    Action.KILL: ActionPolicy(Action.KILL, RiskLevel.CRITICAL),
+    Action.RESET: ActionPolicy(Action.RESET, RiskLevel.HIGH),
+    Action.PAUSE: ActionPolicy(Action.PAUSE, RiskLevel.HIGH),
+    Action.RESUME: ActionPolicy(Action.RESUME, RiskLevel.MODERATE),
 }
 
 

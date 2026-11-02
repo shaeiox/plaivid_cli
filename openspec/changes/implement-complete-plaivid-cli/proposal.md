@@ -9,9 +9,9 @@ The current application combines authentication, synchronous PVM calls, mutable 
 - Replace the legacy command loop/custom terminal renderer with a modular-monolith application and Textual TUI, retaining a practical one-shot CLI.
 - Add typed domain models, a single Bootstrap composition root, one CollectionCoordinator and one OperationCoordinator, narrow local PVM ports/adapters, bounded process execution, per-section snapshots, and explicit operation results.
 - Integrate only existing local `sbell` and `pvm-running-vms` interfaces and currently supported read/action calls; isolate unverified contracts and do not invent commands or semantics.
-- Deliver inventory, selected-VM details, host/Sball monitoring, available network/storage facts, read-only audit logs where permission/schema permit, and all six VM lifecycle actions with fail-closed targeting and confirmation.
+- Deliver inventory, selected-VM details, host/Sball monitoring, available network/storage facts, read-only audit logs where permission/schema permit, and all six VM lifecycle actions with fail-closed inventory targeting and no separate action confirmation.
 - Add fake executables, fixture-backed parser and application tests, CLI/Textual tests, package metadata, packaging checks, user documentation, and owner-run `docs/REAL_PVM_VALIDATION.md`.
-- **BREAKING:** non-TTY operations never inherit implicit confirmation; ambiguous/partial selectors reject the complete bulk request; automatic session eviction is disabled; successful PVM command acknowledgement is not reported as completion without verified evidence.
+- **BREAKING:** non-TTY operations use explicit command and targets as intent without prompting; ambiguous/partial selectors reject the complete bulk request; automatic session eviction is disabled; successful PVM command acknowledgement is not reported as completion without verified evidence.
 - Real-host authentication and release remain gated by the unresolved credential-in-argv exposure; no undocumented credential channel is assumed. No real PVM access or validation is performed by this change.
 
 ## Capabilities
@@ -34,3 +34,7 @@ None. `openspec list --specs` found no existing capability specs; all nine capab
 ## Impact
 
 Affected code: `plaivid_cli/` and existing entry point `plaivid`; tests and fixtures under `tests/`; project packaging/dependency metadata; README and operational documentation; one OpenSpec Change under `openspec/changes/implement-complete-plaivid-cli/`. Runtime PVM commands remain local. No target PVM configuration, system Python, remote collector, or application database is changed or introduced. Host/vendor contracts, target ABI/package compatibility, and operational thresholds remain explicitly pending owner validation.
+
+## Later action-intent decision
+
+The operator subsequently removed all VM/Desktop action confirmations. VM lifecycle CLI commands and the TUI action dropdown now submit directly after target/freshness admission, without `--approve` or a modal. Earlier confirmation language above records historical planning only and is superseded by this decision.

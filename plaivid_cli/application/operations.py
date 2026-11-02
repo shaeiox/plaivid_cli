@@ -1,4 +1,4 @@
-"""Serialized lifecycle dispatch with explicit approval and uncertainty."""
+"""Serialized lifecycle dispatch with inventory safeguards and uncertain outcomes."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from plaivid_cli.domain.models import (
     CollectionStatus,
     ErrorKind,
     InventoryData,
-    OperationApproval,
     OperationPlan,
     OperationResult,
     OperationState,
@@ -24,12 +23,12 @@ from plaivid_cli.domain.models import (
     TargetOutcome,
     VMRecord,
 )
-from plaivid_cli.domain.policies import action_policy, bulk_may_dispatch
+from plaivid_cli.domain.policies import bulk_may_dispatch
 from plaivid_cli.domain.redaction import redact_text
 
 
 class OperationCoordinator:
-    """Owns lifecycle dispatch order, approval binding, and result accounting."""
+    """Owns lifecycle dispatch order, inventory binding, and result accounting."""
 
     def __init__(
         self,
@@ -48,10 +47,6 @@ class OperationCoordinator:
         self._closing.set()
         with self._lane:
             return
-
-    @staticmethod
-    def confirmation_phrase(action: Action, targets: tuple[str, ...]) -> str:
-        return f"{action.value.upper()} {','.join(targets)}"
 
     def create_plan(
         self,
@@ -133,7 +128,6 @@ class OperationCoordinator:
             is_bulk=is_bulk,
             freshness_limit_seconds=max_age,
             created_at=datetime.now(UTC),
-            confirmation=self.confirmation_phrase(action, target_ids),
         )
 
     def create_desktop_plan(
@@ -169,26 +163,12 @@ class OperationCoordinator:
             action=action, target_uuids=ids, inventory_generation=section.generation,
             inventory_succeeded_at=section.succeeded_at, is_bulk=is_bulk,
             freshness_limit_seconds=age, created_at=datetime.now(UTC),
-            confirmation=self.confirmation_phrase(action, ids),
-        )
-
-    def approve_desktop(
-        self, plan: OperationPlan, section: SectionSnapshot[object], *, confirmation: str,
-    ) -> OperationApproval:
-        if confirmation != plan.confirmation:
-            raise AppError(ErrorKind.POLICY, "Desktop confirmation did not match", code="APPROVAL_MISMATCH")
-        if section.generation != plan.inventory_generation:
-            raise AppError(ErrorKind.POLICY, "Desktop listing changed before approval")
-        return OperationApproval(
-            action=plan.action, target_uuids=plan.target_uuids,
-            inventory_generation=plan.inventory_generation,
-            issued_at=datetime.now(UTC), confirmation=confirmation,
         )
 
     def execute_desktop(
         self, token: str, action: Action, targets: tuple[VirtualDesktop, ...],
         section: SectionSnapshot[object], *, is_bulk: bool,
-        plan: OperationPlan, approval: OperationApproval,
+        plan: OperationPlan,
     ) -> OperationResult:
         if self._closing.is_set():
             raise AppError(ErrorKind.POLICY, "operation coordinator is shutting down")
@@ -202,15 +182,8 @@ class OperationCoordinator:
                 or plan.inventory_succeeded_at != current.inventory_succeeded_at
                 or plan.is_bulk != current.is_bulk
                 or plan.freshness_limit_seconds != current.freshness_limit_seconds
-                or plan.confirmation != current.confirmation
             ):
                 raise AppError(ErrorKind.POLICY, "Desktop plan changed after review")
-            if (
-                approval.action is not action or approval.target_uuids != plan.target_uuids
-                or approval.inventory_generation != plan.inventory_generation
-                or approval.confirmation != plan.confirmation
-            ):
-                raise AppError(ErrorKind.POLICY, "Desktop action requires a matching confirmation")
             try:
                 self._collection.begin_mutation(
                     plan.target_uuids, expected_desktop_generation=plan.inventory_generation,
@@ -272,33 +245,6 @@ class OperationCoordinator:
             message="cancelled before dispatch; no PVM command was sent",
         )
 
-    def approve(
-        self,
-        action: Action,
-        targets: tuple[VMRecord, ...],
-        inventory: SectionSnapshot[object],
-        *,
-        confirmation: str | None = None,
-        interactive_confirmed: bool = False,
-    ) -> OperationApproval:
-        target_uuids = tuple(record.uuid for record in targets)
-        if not target_uuids:
-            raise AppError(ErrorKind.POLICY, "cannot approve an empty target set")
-        expected = self.confirmation_phrase(action, target_uuids)
-        if not interactive_confirmed and confirmation != expected:
-            raise AppError(
-                ErrorKind.POLICY,
-                f"approval must exactly match: {expected}",
-                code="APPROVAL_MISMATCH",
-            )
-        return OperationApproval(
-            action=action,
-            target_uuids=target_uuids,
-            inventory_generation=inventory.generation,
-            issued_at=datetime.now(UTC),
-            confirmation=expected,
-        )
-
     def execute(
         self,
         token: str,
@@ -307,7 +253,6 @@ class OperationCoordinator:
         inventory: SectionSnapshot[object],
         *,
         is_bulk: bool,
-        approval: OperationApproval | None = None,
         plan: OperationPlan | None = None,
     ) -> OperationResult:
         if self._closing.is_set():
@@ -321,7 +266,6 @@ class OperationCoordinator:
                 targets,
                 inventory,
                 is_bulk=is_bulk,
-                approval=approval,
                 plan=plan,
             )
 
@@ -333,7 +277,6 @@ class OperationCoordinator:
         inventory: SectionSnapshot[object],
         *,
         is_bulk: bool,
-        approval: OperationApproval | None,
         plan: OperationPlan | None,
     ) -> OperationResult:
         current_plan = self._build_plan(action, targets, inventory, is_bulk=is_bulk)
@@ -344,27 +287,10 @@ class OperationCoordinator:
             or plan.inventory_succeeded_at != current_plan.inventory_succeeded_at
             or plan.is_bulk != current_plan.is_bulk
             or plan.freshness_limit_seconds != current_plan.freshness_limit_seconds
-            or plan.confirmation != current_plan.confirmation
         ):
             raise AppError(ErrorKind.POLICY, "operation plan is stale or does not match current targets")
         plan = plan or current_plan
         target_ids = plan.target_uuids
-        policy = action_policy(action)
-        must_confirm = policy.confirm_single or (is_bulk and policy.confirm_bulk)
-        if must_confirm:
-            expected = self.confirmation_phrase(action, target_ids)
-            if (
-                approval is None
-                or approval.action is not action
-                or approval.target_uuids != target_ids
-                or approval.inventory_generation != inventory.generation
-                or approval.confirmation != expected
-            ):
-                raise AppError(
-                    ErrorKind.POLICY,
-                    f"operation requires approval bound to current inventory: {expected}",
-                    code="APPROVAL_REQUIRED",
-                )
 
         started = datetime.now(UTC)
         operation_id = str(uuidlib.uuid4())

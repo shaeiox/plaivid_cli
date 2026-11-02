@@ -96,7 +96,7 @@ def test_collection_last_good_and_one_read_per_refresh() -> None:
 
 
 @pytest.mark.parametrize("width", [80, 120])
-def test_page_search_uuid_selection_and_confirmation_gate(tmp_path, width) -> None:
+def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
     provider, collection, application, operations, sessions, _ = runtime(tmp_path)
     provider.desktop_calls = 0
 
@@ -142,19 +142,13 @@ def test_page_search_uuid_selection_and_confirmation_gate(tmp_path, width) -> No
             assert "PLAIVID_MAX_INVENTORY_AGE_SECONDS" in str(tui.query_one("#desktop-action-status", Static).render())
             tui.query_one("#desktop-all", Checkbox).value = False
             await pilot.pause(0.05)
-            from plaivid_cli.tui import DesktopConfirmation
-
-            for action in Action:
-                tui.query_one("#desktop-actions", Select).value = action.value
-                await pilot.pause(0.06)
-                assert isinstance(tui.screen, DesktopConfirmation)
-                assert provider.dispatched == []
-                tui.screen.cancel()
-                await pilot.pause(0.06)
-            assert provider.dispatched == []
+            tui.query_one("#desktop-actions", Select).value = Action.START.value
+            await pilot.pause(0.25)
+            assert provider.dispatched == [(Action.START, UUID_B)]
+            assert "SUCCEEDED" in str(tui.query_one("#desktop-action-status", Static).render())
             tui._request_refresh()
             await pilot.pause(0.15)
-            assert provider.desktop_calls == 2 and tui._desktop_selected == UUID_B
+            assert provider.desktop_calls == 3 and tui._desktop_selected == UUID_B
             tui._session_ended("test logout")
             assert table.row_count == 0 and tui._desktop_section is None
 
@@ -208,14 +202,11 @@ def test_desktop_operation_selected_and_bulk_fail_closed(tmp_path) -> None:
             operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
         with pytest.raises(AppError, match="full unfiltered"):
             operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=True)
-        with pytest.raises(AppError, match="confirmation"):
-            operations.approve_desktop(plan, section, confirmation="wrong")
-        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
         result = operations.execute_desktop("fake", Action.START, (items[0],), section,
-                                            is_bulk=False, plan=plan, approval=approval)
+                                            is_bulk=False, plan=plan)
         assert result.targets[0].uuid == UUID_A
         assert provider.dispatched == [(Action.START, UUID_A)]
-        # The old generation cannot be approved again after reconciliation.
+        # The old generation cannot be reused after reconciliation.
         with pytest.raises(AppError, match="current Desktop inventory"):
             operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=False)
         assert collection.snapshot.section("inventory") is None
@@ -242,9 +233,8 @@ def test_desktop_bulk_stops_on_failure_and_reconciles_once(tmp_path) -> None:
     provider.action_reply = PvmReply("failed", errno="146", message="rejected")
     try:
         plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
-        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
         result = operations.execute_desktop("fake", Action.START, items, section,
-                                            is_bulk=True, plan=plan, approval=approval)
+                                            is_bulk=True, plan=plan)
         assert [item.state for item in result.targets] == [OperationState.FAILED, OperationState.NOT_STARTED]
         assert provider.dispatched == [(Action.START, UUID_A)]
         assert reads == ["fake", "fake"]
@@ -252,32 +242,19 @@ def test_desktop_bulk_stops_on_failure_and_reconciles_once(tmp_path) -> None:
         collection.close()
 
 
-def test_verified_desktop_start_requires_typed_confirmation(tmp_path) -> None:
-
-    from plaivid_cli.tui import DesktopConfirmation
-
-    provider, collection, application, operations, sessions, settings = runtime(tmp_path)
-    provider.list_desktops = lambda token: SourceResult((VirtualDesktop(UUID_A, "alpha"),),
-                                                        CollectionStatus.CURRENT, "desktops")
+def test_desktop_start_dispatches_on_selection_without_dialog(tmp_path) -> None:
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    provider.list_desktops = lambda token: SourceResult(
+        (VirtualDesktop(UUID_A, "alpha"),), CollectionStatus.CURRENT, "desktops"
+    )
     tui = PlaividTui(application, operations, sessions)
 
-    async def exercise():
+    async def exercise() -> None:
         async with tui.run_test() as pilot:
             await pilot.pause(0.15)
             tui.query_one("#tabs", TabbedContent).active = "desktops"
             await pilot.pause(0.2)
             tui.query_one("#desktop-actions", Select).value = Action.START.value
-            await pilot.pause(0.15)
-            screen = tui.screen
-            assert isinstance(screen, DesktopConfirmation)
-            assert provider.dispatched == []
-            screen.query_one("#desktop-confirm-input", Input).value = "wrong"
-            screen.confirm()
-            await pilot.pause(0.05)
-            assert isinstance(tui.screen, DesktopConfirmation)
-            assert provider.dispatched == []
-            screen.query_one("#desktop-confirm-input", Input).value = screen.phrase
-            screen.confirm()
             await pilot.pause(0.25)
             assert provider.dispatched == [(Action.START, UUID_A)]
             assert "SUCCEEDED" in str(tui.query_one("#desktop-action-status", Static).render())
@@ -307,11 +284,10 @@ def test_desktop_rejects_partial_stale_and_changed_target_set(tmp_path) -> None:
         with pytest.raises(AppError, match="full unfiltered"):
             operations.create_desktop_plan(Action.STOP, (items[1],), current, is_bulk=True)
         plan = operations.create_desktop_plan(Action.STOP, items, current, is_bulk=True)
-        approval = operations.approve_desktop(plan, current, confirmation=plan.confirmation)
         collection.collect_once("fake", sections=("desktops",))
         with pytest.raises(AppError, match="current Desktop inventory"):
             operations.execute_desktop("fake", Action.STOP, items, current,
-                                       is_bulk=True, plan=plan, approval=approval)
+                                       is_bulk=True, plan=plan)
         assert provider.dispatched == []
     finally:
         collection.close()
@@ -330,9 +306,8 @@ def test_desktop_bulk_unknown_stops_and_marks_remaining_unattempted(tmp_path) ->
     try:
         section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
         plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
-        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
         result = operations.execute_desktop("fake", Action.START, items, section,
-                                            is_bulk=True, plan=plan, approval=approval)
+                                            is_bulk=True, plan=plan)
         assert result.state is OperationState.OUTCOME_UNKNOWN
         assert [item.state for item in result.targets] == [OperationState.OUTCOME_UNKNOWN, OperationState.NOT_STARTED]
         assert provider.dispatched == [(Action.START, UUID_A)]
@@ -343,7 +318,7 @@ def test_desktop_bulk_unknown_stops_and_marks_remaining_unattempted(tmp_path) ->
 
 
 @pytest.mark.parametrize("action", list(Action))
-def test_every_confirmed_desktop_action_reaches_fake_gateway(tmp_path, action) -> None:
+def test_every_desktop_action_reaches_fake_gateway(tmp_path, action) -> None:
     from plaivid_cli.domain.models import PvmReply
 
     provider, collection, _, operations, _, _ = runtime(tmp_path)
@@ -353,20 +328,17 @@ def test_every_confirmed_desktop_action_reaches_fake_gateway(tmp_path, action) -
     try:
         section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
         plan = operations.create_desktop_plan(action, (item,), section, is_bulk=False)
-        approval = operations.approve_desktop(plan, section, confirmation=plan.confirmation)
         assert provider.dispatched == []
         result = operations.execute_desktop("fake", action, (item,), section,
-                                            is_bulk=False, plan=plan, approval=approval)
+                                            is_bulk=False, plan=plan)
         assert result.targets[0].uuid == UUID_A
         assert provider.dispatched == [(action, UUID_A)]
     finally:
         collection.close()
 
 
-def test_desktop_ui_all_targets_ignores_search_after_explicit_confirmation(tmp_path) -> None:
+def test_desktop_ui_all_targets_ignores_search_without_confirmation(tmp_path) -> None:
     from dataclasses import replace
-
-    from plaivid_cli.tui import DesktopConfirmation
 
     provider, collection, application, operations, sessions, settings = runtime(tmp_path)
     operations._settings = replace(settings, max_inventory_age_seconds=30)
@@ -385,12 +357,6 @@ def test_desktop_ui_all_targets_ignores_search_after_explicit_confirmation(tmp_p
             tui.query_one("#desktop-all", Checkbox).value = True
             tui.query_one("#desktop-actions", Select).value = Action.START.value
             await pilot.pause(0.1)
-            screen = tui.screen
-            assert isinstance(screen, DesktopConfirmation)
-            assert screen.plan.target_uuids == (UUID_A, UUID_B)
-            assert provider.dispatched == []
-            screen.query_one("#desktop-confirm-input", Input).value = screen.phrase
-            screen.confirm()
             await pilot.pause(0.3)
             assert provider.dispatched == [(Action.START, UUID_A), (Action.START, UUID_B)]
 

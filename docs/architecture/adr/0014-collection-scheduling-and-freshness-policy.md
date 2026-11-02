@@ -36,7 +36,7 @@ One `Application.CollectionCoordinator` owns refresh cadence and single-flight r
 - **ADR 0014:** one coordinator's refresh cadence, demand/active-view policy, stale thresholds and retry pacing.
 - **ADR 0005:** section state shape, freshness metadata, partial/last-good publication and bounded samples; publication is executed by the CollectionCoordinator, not a separate store port.
 - **ADR 0007:** bounded execution mechanics. CollectionCoordinator and OperationCoordinator own their application work lifetimes; Infrastructure owns OS process lifetime (ADR 0011).
-- **ADR 0012:** mutation freshness gate and action confirmation; mutation requests do not use the polling schedule.
+- **ADR 0012:** mutation freshness and UUID-set gates; mutation requests do not use the polling schedule.
 
 ## Consequences
 

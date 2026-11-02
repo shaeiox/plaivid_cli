@@ -308,8 +308,6 @@ class ApplicationSnapshot:
 class ActionPolicy:
     action: Action
     risk: RiskLevel
-    confirm_single: bool
-    confirm_bulk: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,16 +355,6 @@ class OperationPlan:
     is_bulk: bool
     freshness_limit_seconds: float
     created_at: datetime
-    confirmation: str
-
-
-@dataclass(frozen=True, slots=True)
-class OperationApproval:
-    action: Action
-    target_uuids: tuple[str, ...]
-    inventory_generation: int
-    issued_at: datetime
-    confirmation: str
 
 
 @dataclass(frozen=True, slots=True)

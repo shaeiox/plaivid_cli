@@ -30,10 +30,10 @@
 
 ## 5. VM lifecycle operations
 
-- [x] 5.1 Implement immutable operation plans, action-specific risk/confirmation rules, inventory-generation binding, and fail-closed freshness/authorization gates; verify changed generations, partial inventories, and unset destructive-bulk age reject before dispatch.
+- [x] 5.1 Implement immutable operation plans, action-specific risk labels and inventory safeguards, inventory-generation binding, and fail-closed freshness/authorization gates; verify changed generations, partial inventories, and unset destructive-bulk age reject before dispatch.
 - [x] 5.2 Implement OperationCoordinator serialization and the six repository-evidenced action parameter forms; verify exact fake-provider calls and target order for each action.
 - [x] 5.3 Implement per-target and aggregate states, dispatch/acceptance/completion distinction, stop-on-first-failure-or-unknown, and `NOT_STARTED` remainder reporting; verify unknown precedence, accepted-unconfirmed aggregation, and no automatic retries.
-- [x] 5.4 Wire action confirmation to TUI and explicit non-TTY approval to CLI; verify approval binds exact action/UUIDs/current generation and that TTY absence never implies approval.
+- [x] 5.4 Updated operator policy: remove action confirmation from TUI and CLI, including `--approve`; verify direct intent and current inventory/UUID binding for TTY and non-TTY.
 - [x] 5.5 Implement mutation/read generation barriers and post-operation stale marking; verify pre-mutation reads cannot overwrite newer affected-UUID results.
 
 ## 6. Security and reliability

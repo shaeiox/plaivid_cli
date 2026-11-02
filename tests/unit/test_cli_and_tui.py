@@ -5,13 +5,14 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
 from textual.widgets import Select, TabbedContent
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
 from plaivid_cli.application.services import PlaividApplication
 from plaivid_cli.application.session import SessionManager, SessionStore
-from plaivid_cli.cli import EXIT_OK, EXIT_REJECTED, EXIT_UNKNOWN, build_parser, run_command
+from plaivid_cli.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
 from plaivid_cli.config import load_settings
 from plaivid_cli.domain.models import (
     Action,
@@ -123,7 +124,7 @@ def runtime(tmp_path: Path):
     return provider, collection, application, operations, sessions, settings
 
 
-def test_cli_inventory_and_approval_gate_with_fake_provider(tmp_path, capsys):
+def test_cli_inventory_and_direct_action_with_fake_provider(tmp_path, capsys):
     provider, collection, application, operations, sessions, settings = runtime(tmp_path)
     parser = build_parser()
     inventory_args = parser.parse_args(["inventory"])
@@ -148,24 +149,12 @@ def test_cli_inventory_and_approval_gate_with_fake_provider(tmp_path, capsys):
     assert payload["data"]["records"][0]["uuid"] == UUID_A
     assert payload["data"]["records"][0]["object"]["state"] == "started"
 
+    with pytest.raises(SystemExit):
+        parser.parse_args(["stop", UUID_A, "--approve", f"STOP {UUID_A}"])
     stop_args = parser.parse_args(["stop", UUID_A])
     assert run_command(
-        stop_args,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
-    ) == EXIT_REJECTED
-    assert provider.dispatched == []
-    capsys.readouterr()
-
-    stop_approved = parser.parse_args(["stop", UUID_A, "--approve", f"STOP {UUID_A}"])
-    assert run_command(
-        stop_approved,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
+        stop_args, application=application, operations=operations,
+        sessions=sessions, settings=settings,
     ) == EXIT_OK
     output = capsys.readouterr().out
     assert "SUCCEEDED" in output
@@ -379,6 +368,30 @@ def test_tui_mounts_dashboard_using_only_fake_local_provider(tmp_path):
             await pilot.pause(0.2)
             assert provider.audit.calls == first_audit_reads
             assert "operator" in str(tui.query_one("#session-label").render())
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
+
+
+def test_vm_tui_stop_submits_without_confirmation_dialog(tmp_path):
+    from textual.widgets import Checkbox, DataTable
+
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise() -> None:
+        async with tui.run_test() as pilot:
+            await pilot.pause(0.15)
+            tui.query_one("#tabs", TabbedContent).active = "fleet"
+            await pilot.pause(0.2)
+            assert tui.query_one("#fleet-table", DataTable).row_count == 2
+            assert not tui.query_one("#select-all", Checkbox).value
+            tui.query_one("#bulk-actions", Select).value = Action.STOP.value
+            await pilot.pause(0.3)
+            assert provider.dispatched == [(Action.STOP, UUID_A)]
+            assert "SUCCEEDED" in str(tui.query_one("#action-status").render())
 
     try:
         asyncio.run(exercise())

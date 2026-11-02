@@ -8,7 +8,6 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
@@ -41,7 +40,6 @@ from plaivid_cli.domain.models import (
     HostMetrics,
     HostStatus,
     InventoryData,
-    OperationApproval,
     OperationPlan,
     OperationResult,
     PvmSession,
@@ -72,44 +70,6 @@ BULK_ACTIONS: tuple[Action, ...] = (
 
 def _action_label(action: Action) -> str:
     return action.value.title()
-
-
-class DesktopConfirmation(ModalScreen[bool]):
-    """Keyboard-accessible explicit confirmation bound to all full UUIDs."""
-
-    def __init__(self, plan: OperationPlan) -> None:
-        super().__init__()
-        self.phrase = plan.confirmation
-        self.plan = plan
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="desktop-confirm-box"):
-            yield Static(
-                f"Review {self.plan.action.value.upper()} · {len(self.plan.target_uuids)} Desktop(s) "
-                "· full unfiltered set for Apply to all.\n"
-                "UNVERIFIED LITE DESKTOP PROTOCOL: this will ATTEMPT a real vm command. "
-                "PVM may reject it; acceptance does not prove a completed state change. "
-                "Do not retry an uncertain outcome blindly.\n"
-                f"To confirm, type exactly: {self.phrase}", markup=False,
-            )
-            with VerticalScroll(id="desktop-confirm-targets"):
-                yield Static("\n".join(self.plan.target_uuids), markup=False)
-            yield Input(placeholder="Type the action and all target UUIDs", id="desktop-confirm-input")
-            yield Static("", id="desktop-confirm-error", markup=False)
-            with Horizontal(id="desktop-confirm-buttons"):
-                yield Button("Confirm", id="desktop-confirm-yes", variant="primary")
-                yield Button("Cancel", id="desktop-confirm-no")
-
-    @on(Button.Pressed, "#desktop-confirm-no")
-    def cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#desktop-confirm-yes")
-    def confirm(self) -> None:
-        if self.query_one("#desktop-confirm-input", Input).value != self.phrase:
-            self.query_one("#desktop-confirm-error", Static).update("Confirmation does not match the reviewed targets.")
-            return
-        self.dismiss(True)
 
 
 class PlaividTui(App[None]):
@@ -235,11 +195,6 @@ class PlaividTui(App[None]):
         #detail-box { height: 10; margin-top: 1; border: round $p-border;
                       background: $p-panel; padding: 1; }
         #action-status { height: 1; color: $p-yellow; }
-    DesktopConfirmation { align: center middle; background: $p-bg 70%; }
-    #desktop-confirm-box { width: 80%; max-height: 80%; padding: 1 2;
-                           border: round $p-yellow; background: $p-panel; }
-    #desktop-confirm-targets { height: 1fr; min-height: 4; }
-    #desktop-confirm-buttons { height: 2; }
         #desktop-summary { height: 5; margin-top: 1; align-vertical: middle; }
         #desktop-refresh { width: 11; min-width: 11; margin: 0 0 0 1; }
         #desktop-list { height: 1fr; min-height: 13; border: round $p-border;
@@ -959,24 +914,12 @@ class PlaividTui(App[None]):
         except AppError as exc:
             self._desktop_message(str(exc))
             return
-        epoch = self._session_epoch
-
-        def decided(confirmed: bool | None) -> None:
-            if not confirmed or epoch != self._session_epoch or self.session is None:
-                self._desktop_message("Desktop action cancelled; no call sent.")
-                return
-            try:
-                approval = self.operations.approve_desktop(plan, section, confirmation=plan.confirmation)
-            except AppError as exc:
-                self._desktop_message(str(exc))
-                return
-            self._operation_active = True
-            self.query_one("#logout", Button).disabled = True
-            self.query_one("#desktop-actions", Select).disabled = True
-            self._desktop_message(f"{action.value.upper()} submitted for {len(targets)} Desktop(s)…")
-            self._execute_desktop(action, targets, section, plan, approval, epoch)
-
-        self.push_screen(DesktopConfirmation(plan), decided)
+        # Selecting the action is the operator's intent; no extra confirmation.
+        self._operation_active = True
+        self.query_one("#logout", Button).disabled = True
+        self.query_one("#desktop-actions", Select).disabled = True
+        self._desktop_message(f"{action.value.upper()} submitted for {len(targets)} Desktop(s)…")
+        self._execute_desktop(action, targets, section, plan, self._session_epoch)
 
     def _desktop_message(self, message: str) -> None:
         self.query_one("#desktop-action-status", Static).update(redact_text(message))
@@ -984,8 +927,7 @@ class PlaividTui(App[None]):
     @work(thread=True, group="desktop-operation", exclusive=False)
     def _execute_desktop(
         self, action: Action, targets: tuple[VirtualDesktop, ...],
-        section: SectionSnapshot[object], plan: OperationPlan,
-        approval: OperationApproval, epoch: int,
+        section: SectionSnapshot[object], plan: OperationPlan, epoch: int,
     ) -> None:
         try:
             session = self.session
@@ -994,7 +936,7 @@ class PlaividTui(App[None]):
             try:
                 result = self.operations.execute_desktop(
                     session.token, action, targets, section,
-                    is_bulk=plan.is_bulk, plan=plan, approval=approval,
+                    is_bulk=plan.is_bulk, plan=plan,
                 )
             except AppError as exc:
                 self.call_from_thread(self._desktop_error_if_current, epoch, str(exc))
@@ -1116,22 +1058,13 @@ class PlaividTui(App[None]):
         except AppError as exc:
             self._show_error(str(exc))
             return
-        # The operator's explicit action click is the intent; no extra dialog.
-        try:
-            approval = self.operations.approve(
-                action, selection.records, section, interactive_confirmed=True
-            )
-        except AppError as exc:
-            self._show_error(str(exc))
-            return
-        self._launch_operation(action, selection, section, approval, plan)
+        self._launch_operation(action, selection, section, plan)
 
     def _launch_operation(
         self,
         action: Action,
         selection: TargetSelection,
         section: SectionSnapshot[object],
-        approval: OperationApproval | None,
         plan: OperationPlan,
     ) -> None:
         if self._operation_active:
@@ -1140,7 +1073,7 @@ class PlaividTui(App[None]):
         self._operation_active = True
         self.query_one("#bulk-actions", Select).disabled = True
         self.query_one("#logout", Button).disabled = True
-        self._execute_action(action, selection, section, approval, plan)
+        self._execute_action(action, selection, section, plan)
 
     @work(thread=True, group="operation", exclusive=False)
     def _execute_action(
@@ -1148,7 +1081,6 @@ class PlaividTui(App[None]):
         action: Action,
         selection: TargetSelection,
         section: SectionSnapshot[object],
-        approval: OperationApproval | None,
         plan: OperationPlan,
     ) -> None:
         try:
@@ -1163,7 +1095,6 @@ class PlaividTui(App[None]):
                     selection.records,
                     section,
                     is_bulk=selection.is_bulk,
-                    approval=approval,
                     plan=plan,
                 )
             except AppError as exc:

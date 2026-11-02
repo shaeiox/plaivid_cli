@@ -75,8 +75,8 @@ Presentation ──> Application ──> Domain
 | Single-flight read admission/coalescing | `Application.CollectionCoordinator` | Uses logical identity from ADR 0004; one active result is shared, obsolete timer ticks are dropped. |
 | Last-good section snapshot publication | `Application.CollectionCoordinator` | Holds simple concrete in-memory section values. No SnapshotStore port or second state-store service (ADR 0005). |
 | Read-worker lifetime | `Application.CollectionCoordinator` | Bounded, app-lifetime-owned read work; screens do not own provider processes. |
-| Mutation admission and lifecycle | `Application.OperationCoordinator` | Owns confirmation binding, serial mutation order, per-target results and mutation-worker lifetime (ADRs 0007/0012/0013). |
-| OS process lifetime | Infrastructure process runner | Owns spawn, bounded output/deadline, pipe cleanup, wait/reap and tested descendant policy; not application scheduling or confirmation (ADR 0007). |
+| Mutation admission and lifecycle | `Application.OperationCoordinator` | Owns inventory/UUID binding, serial mutation order, per-target results and mutation-worker lifetime (ADRs 0007/0012/0013). |
+| OS process lifetime | Infrastructure process runner | Owns spawn, bounded output/deadline, pipe cleanup, wait/reap and tested descendant policy; not application scheduling or mutation policy (ADR 0007). |
 | Composition and shutdown | `Bootstrap` | Solely constructs and closes provider/coordinators/UI. It does not duplicate their policies. |
 
 ADR 0011 owns layer/dependency rules. ADR 0004 owns source/batch/request identity. ADR 0014 owns freshness thresholds and scheduling policy as implemented by the single CollectionCoordinator. This explicit split does not create another package/service.
@@ -96,8 +96,8 @@ If Textual is accepted after the ADR 0001 prototype, it owns terminal-cell diffe
 ## CLI and TUI responsibilities
 
 - **CLI:** Typer (still a candidate) owns process-level help/options and explicit one-shot read commands, plain output, and stable exit categories from ADR 0013. It calls Application use cases; it does not host TUI navigation.
-- **TUI:** Textual (conditional) is launched only when the required input/output streams are TTYs. It owns navigation, focus, selection, filters/sort presentation, visible progress and confirmation UX; collection remains Application-owned.
-- **Non-TTY:** never launch a headless TUI, sleep for a second sample, or start hidden polling. Each read command performs one bounded collection and exits. Help/version/config-only commands do not collect. A non-TTY overview is one snapshot, not an implicit live loop. No mutation command is part of the first Change; any later non-TTY mutation is rejected unless a separately approved explicit approval is bound to action/UUIDs/freshness (ADR 0012).
+- **TUI:** Textual (conditional) is launched only when the required input/output streams are TTYs. It owns navigation, focus, selection, filters/sort presentation, visible progress and action intent; collection remains Application-owned.
+- **Non-TTY:** never launch a headless TUI, sleep for a second sample, or start hidden polling. Each read command performs one bounded collection and exits. Help/version/config-only commands do not collect. A non-TTY overview is one snapshot, not an implicit live loop. VM lifecycle CLI commands now submit without a prompt or `--approve`; explicit command and targets are the operator intent. Freshness and UUID checks still apply (ADR 0012).
 - **Foreground polling:** only an active, visible monitoring view may request scheduled refreshes, with visible freshness/refresh state and approved cadence. No polling survives leaving the relevant view or process.
 - A PVM login may create a PVM session; it is not a VM-state read. The first Change must not automatically evict an existing session or log out a user's session. Any target validation session side effect requires explicit authorization and is gated by the credential blocker below.
 

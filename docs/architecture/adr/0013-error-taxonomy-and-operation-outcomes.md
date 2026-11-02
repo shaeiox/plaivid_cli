@@ -37,7 +37,7 @@ Return all per-target outcomes, safe causes, and counts plus one aggregate:
 
 - `SUCCEEDED` only when all requested targets are confirmed complete.
 - `FAILED` when execution was attempted and all attempted targets definitively failed, with no unknown/accepted-unconfirmed target.
-- `REJECTED` when no target was dispatched and policy/input/confirmation rejected the request.
+- `REJECTED` when no target was dispatched and policy/input rejected the request.
 - `PARTIAL` when at least one target succeeded and another definitively failed or was not started, with no unknown/accepted-unconfirmed target.
 - `COMMAND_ACCEPTED_UNCONFIRMED` if any target has that status and none is `OUTCOME_UNKNOWN`; it remains visible in the overall summary.
 - `OUTCOME_UNKNOWN` if any target is unknown; this has precedence over ordinary partial/failure summaries and stays visible in aggregate counts.
@@ -56,7 +56,7 @@ Propose stable exit categories for one-shot commands; interactive TUI presents t
 |---:|---|---|
 | `0` | `SUCCESS` | Read completed as requested, or all requested mutations are confirmed complete. Help/version/config-only success also returns zero without collection. |
 | `1` | `FAILED` | Definite request/collection failure or all attempted mutations definitely failed. |
-| `2` | `REJECTED` | Invalid input, stale/ambiguous target, safety/confirmation rejection; no mutation dispatched. |
+| `2` | `REJECTED` | Invalid input, stale/ambiguous target, safety-policy rejection; no mutation dispatched. |
 | `3` | `PARTIAL` | Partial read result, or confirmed successes mixed with definite failures/`NOT_STARTED`; no unknown outcome. |
 | `4` | `OUTCOME_UNKNOWN` | Any post-dispatch unknown or accepted-but-unconfirmed mutation. This takes precedence over other aggregate categories. |
 
@@ -67,7 +67,7 @@ Exact numeric compatibility remains subject to CLI review, but categories must b
 - User output identifies category, partial/stale sections, per-target counts/reasons, and whether command acceptance or completion is known.
 - Diagnostics use a safe operation ID, source/category, elapsed time, and safe PVM errno/exit information. Never log passwords/tokens/login XML or unreviewed full payloads.
 - Preserve internal exception chaining; sanitize at display/log boundaries.
-- Retry timing is ADR 0014; worker/process mechanics are ADR 0007; mutation admission/confirmation is ADR 0012.
+- Retry timing is ADR 0014; worker/process mechanics are ADR 0007; mutation admission is ADR 0012.
 
 ## Validation required
 

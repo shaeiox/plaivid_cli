@@ -24,12 +24,12 @@ The page SHALL show a name-filtered Desktop list and selected detail, retain ful
 - **THEN** they do not label the ID as a human-readable Zone or invent an Owner
 
 ### Requirement: Explicit action scope and accessibility
-The page SHALL offer the VM page's Start, Resume, Pause, Stop, Reset and Kill choices for the selected Desktop or an explicit Apply to all Desktops scope. It SHALL warn that Desktop applicability is unverified, require typed confirmation for every action, and keep scope, count and inspectable full target UUIDs accessible by keyboard. A name search SHALL NOT silently restrict all-target scope.
+The page SHALL offer the VM page's Start, Resume, Pause, Stop, Reset and Kill choices for the selected Desktop or an explicit Apply to all Desktops scope. It SHALL warn that Desktop applicability is unverified, submit actions directly without a confirmation prompt, and keep scope, count and inspectable full target UUIDs accessible by keyboard. A name search SHALL NOT silently restrict all-target scope.
 
 #### Scenario: Select all while filtering
 - **GIVEN** a local name filter hiding some rows
 - **WHEN** the operator selects Apply to all Desktops
-- **THEN** the page says that all unfiltered Desktops are targeted, exposes the full target set for review, and does not dispatch before confirmation
+- **THEN** the page says that all unfiltered Desktops are targeted, exposes the full target set for review, and does not dispatch before action selection
 
 ### Requirement: VM page control alignment
 The Desktop page SHALL match the VM page's summary-card and Refresh placement and the action-selector, all-target checkbox and Audit-control order and sizing. Name search SHALL remain an additional Desktop control.

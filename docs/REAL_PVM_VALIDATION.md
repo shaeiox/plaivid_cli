@@ -36,15 +36,15 @@ The local source establishes only the request forms; acceptance and completion s
 For each of `start`, `stop`, `kill`, `reset`, `pause`, and `resume`:
 
 1. **PENDING MANUAL PVM VALIDATION** — Verify the expected precondition and current VM identity using the approved PVM operator interface. Confirm the CLI targets the same canonical UUID.
-2. **PENDING MANUAL PVM VALIDATION** — Submit one action only after reviewing its action/UUID confirmation. Record the CLI's response and operation state. The current implementation maps every post-dispatch response to `OUTCOME_UNKNOWN`. Only owner/vendor evidence and a reviewed code change may establish a narrower acceptance or completion mapping.
+2. **PENDING MANUAL PVM VALIDATION** — Submit one action with explicit targets and no confirmation prompt. Record the CLI's response and operation state. The current implementation maps documented `success`/`failed` replies separately; unrecognized statuses or transport errors remain `OUTCOME_UNKNOWN`. Only owner/vendor evidence and a reviewed code change may establish a narrower acceptance or completion mapping.
 3. **PENDING MANUAL PVM VALIDATION** — Verify actual state change and side effects independently. Confirm that stop/pause/kill/reset semantics, guest data effects, cancellation, and expected recovery match the product's documented contract. Never infer idempotency from one response.
 4. **PENDING MANUAL PVM VALIDATION** — Check one intentionally rejected but safe precondition, if and only if the vendor/owner identifies a safe disposable test. Confirm a post-dispatch ambiguous or timeout result is reported as `OUTCOME_UNKNOWN`; reconcile independently and do not retry blindly.
-5. **PENDING MANUAL PVM VALIDATION** — Verify `start`/`resume` explicit single-target intent, Stop/Reset/Pause single-target confirmation, and the distinct critical Kill confirmation. Confirm each approval covers the exact action and canonical UUID.
+5. **PENDING MANUAL PVM VALIDATION** — Verify all six VM actions submit directly on explicit selection, without any confirmation or `--approve` flag. Confirm current inventory and the exact canonical UUID set are still checked before dispatch.
 
 Bulk behavior is intentionally deferred until individual action contracts and inventory assumptions are accepted:
 
-- **PENDING MANUAL PVM VALIDATION** — Confirm bulk remains denied when `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is unset, inventory is partial/stale, a target is ambiguous, or the approval UUID sequence differs.
-- **PENDING MANUAL PVM VALIDATION** — On a separately approved disposable test set, verify target order, exact approval phrase, one-at-a-time dispatch, stop-on-unknown behavior, and remainder `NOT_STARTED`. Do not test continuation after an accepted-but-unconfirmed result unless a verified acceptance contract and a separate owner-approved continuation policy have first been documented.
+- **PENDING MANUAL PVM VALIDATION** — Confirm bulk remains denied when `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is unset, inventory is partial/stale, a target is ambiguous, or the resolved UUID set changes before dispatch.
+- **PENDING MANUAL PVM VALIDATION** — On a separately approved disposable test set, verify target order, direct dispatch without another prompt, one-at-a-time dispatch, stop-on-unknown behavior, and remainder `NOT_STARTED`. Do not test continuation after an accepted-but-unconfirmed result unless a verified acceptance contract and a separate owner-approved continuation policy have first been documented.
 - **PENDING MANUAL PVM VALIDATION** — Verify post-operation collection cannot publish a pre-operation read over newer state and that an outcome-unknown target is reconciled before any operator-directed retry.
 
 ## Failure and shutdown checks
@@ -71,7 +71,7 @@ The local suite uses fake providers, fake child runners, synthetic XML/text fixt
 
 Follow the read-only, credential-redacted, non-production evidence and measurement checklist in [`MONITORING_DASHBOARD.md`](MONITORING_DASHBOARD.md). Its PVM dashboard XML paths, physical NIC-list response, running-count semantics, VDI record types/units, screenshot comparison, and 3s/18s load budget have **not** been validated against an installed PVM. Do not treat synthetic tests or successful local builds as proof of those contracts.
 
-## Virtual Desktops (confirmed attempts; protocol acceptance pending)
+## Virtual Desktops (direct action attempts; protocol acceptance pending)
 
 The Virtual Desktops tab makes one local `sbell user objects` request per due refresh
 using the operator-verified Lite Desktop XPath. While the tab is visible,
@@ -83,9 +83,9 @@ states and shows Owner/Zone and RAM units as unverified. Synthetic parser and
 Pilot tests are **not** PVM 7.1.26 acceptance evidence.
 
 The Desktop action dropdown can attempt the six documented `sbell vm` command
-shapes **after an explicit typed confirmation** for the full target UUID set.
-The user has requested that confirmed attempts no longer be blocked by a
-configuration attestation. The supplied Start request confirms `/vm/start`
+shapes immediately after the operator selects an action for a Desktop or the
+full unfiltered all-target set. No extra confirmation or environment attestation
+is required. The supplied Start request confirms `/vm/start`
 and the XML body; a successful response proving Lite Desktop applicability is
 **still not available**. These are real mutations initiated by the operator,
 not verified Desktop protocols; PVM may reject them. Do not infer completion
@@ -99,6 +99,6 @@ rows hidden by search, and requires a positive
 failed/unknown bulk result stops remaining dispatch. Do not blindly retry an
 unknown outcome. Token-bearing sbell calls still require the existing
 `PLAIVID_ALLOW_CREDENTIAL_ARGV` risk acknowledgement. The full target list is
-inspectable in the scrollable detail and confirmation regions. For reliable
+inspectable in the scrollable detail region. For reliable
 production use, independently verify a successful version-matched response,
 permissions and state transition for **each** Desktop action.

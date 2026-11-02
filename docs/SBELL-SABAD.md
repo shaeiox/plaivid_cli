@@ -386,8 +386,8 @@ the command name or a VM uuid.
 ## 11. Safety notes for future development
 
 - **Destructive operations** (`vm/stop`, `vm/kill`, `vm/reset`, `object/delete`,
-  `sball/node-power-off`) change real infrastructure. Gate them behind explicit
-  confirmation, as this app does.
+  `sball/node-power-off`) change real infrastructure. Use deliberate action selection and inventory freshness checks; this app
+  does not display a separate confirmation prompt.
 - **Never log tokens or passwords.** The token grants full session access; the
   JWT payload is fine to show, the signature is not.
 - **Mind session slots** - log out tokens; use the 185 recovery rather than

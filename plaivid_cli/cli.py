@@ -24,7 +24,6 @@ from plaivid_cli.domain.models import (
     PvmSession,
     VMDetail,
 )
-from plaivid_cli.domain.policies import action_policy
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.version import __version__
 
@@ -41,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Linux-local terminal client for Plaivid PVM management.",
         epilog=(
             "Credential argv exposure is unresolved and login is blocked by default. "
-            "Bulk operations require PLAIVID_MAX_INVENTORY_AGE_SECONDS and exact approval."
+            "Bulk operations require PLAIVID_MAX_INVENTORY_AGE_SECONDS and complete fresh inventory."
         ),
     )
     parser.add_argument("--version", action="version", version=f"plaivid {__version__}")
@@ -71,10 +70,6 @@ def build_parser() -> argparse.ArgumentParser:
             "targets",
             nargs="+",
             help="UUID, exact name, unique name prefix, index, all, state:<state>, or process:<present|missing>",
-        )
-        operation.add_argument(
-            "--approve",
-            help="exact acknowledgement: ACTION UUID[,UUID...]; required for risky/bulk actions",
         )
         operation.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     return parser
@@ -303,27 +298,12 @@ def _operate(
     plan = operations.create_plan(
         action, selection.records, section, is_bulk=selection.is_bulk
     )
-    policy = action_policy(action)
-    confirmation_required = policy.confirm_single or (selection.is_bulk and policy.confirm_bulk)
-    approval = None
-    expected = plan.confirmation
-    if args.approve is not None:
-        approval = operations.approve(action, selection.records, section, confirmation=args.approve)
-    elif confirmation_required:
-        print(
-            f"Approval required. Repeat with --approve {expected!r}. "
-            "The approval is checked against this fresh inventory and exact UUID set.",
-            file=sys.stderr,
-        )
-        return EXIT_REJECTED
-
     result = operations.execute(
         session.token,
         action,
         selection.records,
         section,
         is_bulk=selection.is_bulk,
-        approval=approval,
         plan=plan,
     )
     if args.json:
