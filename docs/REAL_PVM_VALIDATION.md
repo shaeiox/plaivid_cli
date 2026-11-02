@@ -71,7 +71,7 @@ The local suite uses fake providers, fake child runners, synthetic XML/text fixt
 
 Follow the read-only, credential-redacted, non-production evidence and measurement checklist in [`MONITORING_DASHBOARD.md`](MONITORING_DASHBOARD.md). Its PVM dashboard XML paths, physical NIC-list response, running-count semantics, VDI record types/units, screenshot comparison, and 3s/18s load budget have **not** been validated against an installed PVM. Do not treat synthetic tests or successful local builds as proof of those contracts.
 
-## Virtual Desktops (read-only by default; independently gated actions)
+## Virtual Desktops (confirmed attempts; protocol acceptance pending)
 
 The Virtual Desktops tab makes one local `sbell user objects` request per due refresh
 using the operator-verified Lite Desktop XPath. While the tab is visible,
@@ -82,29 +82,23 @@ explicit. It preserves distinct enablement, local runtime and cluster runtime
 states and shows Owner/Zone and RAM units as unverified. Synthetic parser and
 Pilot tests are **not** PVM 7.1.26 acceptance evidence.
 
-All six Desktop action choices (Start, Resume, Pause, Stop, Reset, Kill) remain
-**blocked by default** for selected and all scopes. The candidate `sbell vm`
-shapes documented for ordinary VMs do not establish successful Lite Desktop
-UUID applicability. An operator who has independently reviewed a redacted,
-version-matched successful Desktop request/response, allowed transitions and
-permissions for a given action can attest to that specific action using
-`PLAIVID_VERIFIED_DESKTOP_ACTIONS` (comma-separated action names, e.g. `start`;
-no `all` or wildcard). This is an **operator assertion, not automatic PVM
-verification**; do not set it on the strength of an HTTP request body alone.
-The current supplied Start capture confirms `/vm/start` and XML shape, but
-**no successful Desktop response or state transition has been supplied**.
+The Desktop action dropdown can attempt the six documented `sbell vm` command
+shapes **after an explicit typed confirmation** for the full target UUID set.
+The user has requested that confirmed attempts no longer be blocked by a
+configuration attestation. The supplied Start request confirms `/vm/start`
+and the XML body; a successful response proving Lite Desktop applicability is
+**still not available**. These are real mutations initiated by the operator,
+not verified Desktop protocols; PVM may reject them. Do not infer completion
+from an accepted command. No live mutation was performed during development.
 
-An opted-in action uses the existing local `sbell vm/<action>` adapter. The
-Desktop-specific service binds exact full UUIDs to a complete current Desktop
-section, applies the per-action gate again at dispatch, shares the serialized
-mutation lane, and reconciles with one Desktop list read. Each attempt requires
-typing the action and exact UUID set in a review dialog. Apply to all means
-the **full unfiltered listing**, including rows hidden by search, and requires
-an explicit positive `PLAIVID_MAX_INVENTORY_AGE_SECONDS` plus complete fresh
-inventory. A failed/unknown bulk result stops remaining dispatch. The result
-is a command response, not proof of completed state transition; do not blindly
-retry an unknown outcome. No host test or real mutation was run in this change.
-Review each action's evidence separately before opting in and retain the
-`PLAIVID_ALLOW_CREDENTIAL_ARGV` risk acknowledgement for token-bearing sbell
-calls. The unfiltered all-target count and full UUIDs are inspectable in the
-scrollable Desktop detail and confirmation regions even with search active.
+The Desktop-specific service binds exact full UUIDs to a complete current
+Desktop section, shares the serialized mutation lane, and reconciles with one
+Desktop list read. Apply to all means the **full unfiltered listing**, including
+rows hidden by search, and requires a positive
+`PLAIVID_MAX_INVENTORY_AGE_SECONDS` plus complete fresh inventory. A
+failed/unknown bulk result stops remaining dispatch. Do not blindly retry an
+unknown outcome. Token-bearing sbell calls still require the existing
+`PLAIVID_ALLOW_CREDENTIAL_ARGV` risk acknowledgement. The full target list is
+inspectable in the scrollable detail and confirmation regions. For reliable
+production use, independently verify a successful version-matched response,
+permissions and state transition for **each** Desktop action.

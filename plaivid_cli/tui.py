@@ -87,7 +87,8 @@ class DesktopConfirmation(ModalScreen[bool]):
             yield Static(
                 f"Review {self.plan.action.value.upper()} · {len(self.plan.target_uuids)} Desktop(s) "
                 "· full unfiltered set for Apply to all.\n"
-                "PVM acceptance does not prove a completed state change. "
+                "UNVERIFIED LITE DESKTOP PROTOCOL: this will ATTEMPT a real vm command. "
+                "PVM may reject it; acceptance does not prove a completed state change. "
                 "Do not retry an uncertain outcome blindly.\n"
                 f"To confirm, type exactly: {self.phrase}", markup=False,
             )
@@ -239,12 +240,23 @@ class PlaividTui(App[None]):
                            border: round $p-yellow; background: $p-panel; }
     #desktop-confirm-targets { height: 1fr; min-height: 4; }
     #desktop-confirm-buttons { height: 2; }
-        #desktop-toolbar { height: 3; margin-top: 1; padding: 0 1;
-                           border: round $p-border; background: $p-panel; }
-        #desktop-search { width: 1fr; }
-        #desktop-table { height: 1fr; min-height: 6; border: round $p-border; }
-        #desktop-quality, #desktop-scope { height: auto; color: $p-muted; }
-        #desktop-detail-scroll { height: 9; border: round $p-border; background: $p-panel; }
+        #desktop-summary { height: 5; margin-top: 1; align-vertical: middle; }
+        #desktop-refresh { width: 11; min-width: 11; margin: 0 0 0 1; }
+        #desktop-list { height: 1fr; min-height: 13; border: round $p-border;
+                        background: $p-panel; }
+        #desktop-toolbar { height: 3; padding: 0 1; align-vertical: middle;
+                           background: $p-panel; }
+        #desktop-actions { width: 20; }
+        #desktop-all { width: auto; margin-left: 2; }
+        #desktop-audit-toggle { width: 11; min-width: 11; margin-left: 2; }
+        #desktop-search { width: 1fr; margin-left: 1; }
+        #desktop-table { height: 1fr; min-height: 8; background: $p-surface;
+                         border: round $p-border; }
+        #desktop-scope { height: 1; color: $p-muted; }
+        #desktop-detail-scroll { height: 10; margin-top: 1;
+                                 border: round $p-border; background: $p-panel; }
+        #desktop-audit-panel { display: none; height: auto; min-height: 7;
+                               border: round $p-border; background: $p-panel; padding: 1; }
         #desktop-detail { height: auto; background: $p-panel; padding: 1; }
         #desktop-action-status { height: auto; color: $p-yellow; }
         #audit-panel { display: none; height: auto; min-height: 7;
@@ -384,20 +396,32 @@ class PlaividTui(App[None]):
                     yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
                     yield Static("READ-ONLY AUDIT\nWaiting for session…", id="audit-panel", markup=False)
                 with TabPane("Virtual Desktops", id="desktops"):
-                    with Horizontal(id="desktop-toolbar"):
-                        yield Input(placeholder="Search Desktop name", id="desktop-search")
-                        yield Button("Refresh", id="desktop-refresh")
-                        yield Select(
-                            [(_action_label(action), action.value) for action in BULK_ACTIONS],
-                            prompt="Action (unverified)", allow_blank=True, id="desktop-actions",
-                        )
-                        yield Checkbox("Apply to all Desktops", id="desktop-all")
-                    yield Static("Not collected", id="desktop-quality", markup=False)
-                    yield Static("Select a Desktop; all means the unfiltered inventory.", id="desktop-scope", markup=False)
-                    yield DataTable(id="desktop-table", cursor_type="row", zebra_stripes=True)
+                    with Horizontal(id="desktop-summary"):
+                        with Vertical(classes="metric-card"):
+                            yield Static("DEFINED DESKTOPS", classes="metric-title")
+                            yield Static("—", id="desktop-count", classes="metric-value")
+                        with Vertical(classes="metric-card"):
+                            yield Static("SELECTED", classes="metric-title")
+                            yield Static("—", id="desktop-selected-label", classes="metric-value")
+                        with Vertical(classes="metric-card"):
+                            yield Static("INVENTORY", classes="metric-title")
+                            yield Static("Not collected", id="desktop-quality", classes="metric-value")
+                        yield Button("Refresh", id="desktop-refresh", variant="primary")
+                    with Vertical(id="desktop-list"):
+                        with Horizontal(id="desktop-toolbar"):
+                            yield Select(
+                                [(_action_label(action), action.value) for action in BULK_ACTIONS],
+                                prompt="Bulk action", allow_blank=True, id="desktop-actions",
+                            )
+                            yield Checkbox("Apply to all Desktops", id="desktop-all")
+                            yield Button("Audit", id="desktop-audit-toggle")
+                            yield Input(placeholder="Search Desktop name", id="desktop-search")
+                        yield DataTable(id="desktop-table", cursor_type="row", zebra_stripes=True)
+                        yield Static("No operation submitted.", id="desktop-action-status", markup=False)
+                    yield Static("Selected Desktop · 0 target(s)", id="desktop-scope", markup=False)
                     with VerticalScroll(id="desktop-detail-scroll"):
                         yield Static("Select a Desktop to inspect its details.", id="desktop-detail", markup=False)
-                    yield Static("Desktop actions are blocked pending action-specific PVM evidence.", id="desktop-action-status", markup=False)
+                    yield Static("READ-ONLY AUDIT\nWaiting for session…", id="desktop-audit-panel", markup=False)
             yield Static("1 Overview · 2 Virtual Machines · 3 Virtual Desktops · R refresh · Q quit", id="notice")
             yield Footer()
 
@@ -405,6 +429,7 @@ class PlaividTui(App[None]):
         apply_theme(self, self._palette)
         self.query_one("#logout", Button).tooltip = "Logout"
         self.query_one("#vm-list", Vertical).border_title = "VM LIST"
+        self.query_one("#desktop-list", Vertical).border_title = "DESKTOP LIST"
         table = self.query_one("#fleet-table", DataTable)
         self._table_columns = table.add_columns("#", "VM name", "Object state", "Process", "vCPU", "Memory")
         self._desktop_columns = self.query_one("#desktop-table", DataTable).add_columns(
@@ -488,8 +513,12 @@ class PlaividTui(App[None]):
         self.query_one("#desktop-search", Input).value = ""
         self.query_one("#desktop-all", Checkbox).value = False
         self.query_one("#desktop-quality", Static).update("Not collected")
+        self.query_one("#desktop-count", Static).update("—")
+        self.query_one("#desktop-selected-label", Static).update("—")
         self.query_one("#desktop-detail", Static).update("Select a Desktop to inspect its details.")
-        self.query_one("#desktop-action-status", Static).update("Desktop actions are blocked pending action-specific PVM evidence.")
+        self.query_one("#desktop-action-status", Static).update("No operation submitted.")
+        self.query_one("#desktop-audit-panel", Static).update("READ-ONLY AUDIT\nWaiting for session…")
+        self.query_one("#desktop-audit-panel", Static).display = False
         self._inventory_section = None
         self._inventory = None
         self._inventory_generation = None
@@ -577,7 +606,14 @@ class PlaividTui(App[None]):
         panel = self.query_one("#audit-panel", Static)
         panel.display = not panel.display
         if panel.display:
-            self._request_audit()
+            self._request_audit("audit-panel")
+
+    @on(Button.Pressed, "#desktop-audit-toggle")
+    def show_desktop_audit(self) -> None:
+        panel = self.query_one("#desktop-audit-panel", Static)
+        panel.display = not panel.display
+        if panel.display:
+            self._request_audit("desktop-audit-panel")
 
     @on(Button.Pressed, "#rediscover")
     def rediscover(self) -> None:
@@ -823,6 +859,7 @@ class PlaividTui(App[None]):
         if section.quality_issues:
             quality += f" · {len(section.quality_issues)} issue(s)"
         self.query_one("#desktop-quality", Static).update(quality)
+        self.query_one("#desktop-count", Static).update(str(len(self._desktops)) if section.has_value else "—")
         self._filter_desktops()
 
     @on(Input.Changed, "#desktop-search")
@@ -880,7 +917,8 @@ class PlaividTui(App[None]):
             return
         all_targets = self.query_one("#desktop-all", Checkbox).value
         uuids = tuple(sorted(self._desktops)) if all_targets else ((self._desktop_selected,) if self._desktop_selected else ())
-        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · per-action verification required"
+        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · review before dispatch"
+        self.query_one("#desktop-selected-label", Static).update((self._desktop_selected or "—")[:8])
         self.query_one("#desktop-scope", Static).update(scope)
         record = self._desktops.get(self._desktop_selected or "")
         if record is None or self._desktop_selected not in self._desktop_rows:
@@ -1156,7 +1194,7 @@ class PlaividTui(App[None]):
         self.query_one("#action-status", Static).update(redact_text(message))
 
     @work(thread=True, group="audit", exclusive=True)
-    def _request_audit(self) -> None:
+    def _request_audit(self, panel_id: str = "audit-panel") -> None:
         if self.session is None:
             return
         try:
@@ -1173,10 +1211,10 @@ class PlaividTui(App[None]):
                     for entry in entries
                 )
                 text = "\n".join(lines)
-        self.call_from_thread(self._publish_audit, text)
+        self.call_from_thread(self._publish_audit, panel_id, text)
 
-    def _publish_audit(self, text: str) -> None:
-        self.query_one("#audit-panel", Static).update(redact_text(text))
+    def _publish_audit(self, panel_id: str, text: str) -> None:
+        self.query_one(f"#{panel_id}", Static).update(redact_text(text))
 
 
 def _display(value: int | float | str | None, *, suffix: str = "") -> str:

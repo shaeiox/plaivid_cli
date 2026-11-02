@@ -56,6 +56,16 @@ plaivid stop TARGET --approve 'STOP UUID'  Submit a confirmed stop
 
 The remaining lifecycle commands are `kill`, `reset`, `pause`, and `resume`. Targets may be a canonical UUID, exact VM name, unique name prefix, displayed inventory index, `all`, `state:<state>`, or `process:present|missing`. Comma-separated selections are accepted, for example `plaivid stop UUID1,UUID2 --approve 'STOP UUID1,UUID2'`. `state:running` is derived from object-store state; process observations remain distinct evidence and are not silently substituted for object state.
 
+The **Virtual Desktops** TUI tab mirrors the VM page's summary, Refresh,
+action dropdown, all-target checkbox and Audit layout, with an additional local
+name search. Choosing one of six Desktop actions opens a review dialog requiring
+the exact action and full UUID set before an attempt is sent. The commands use
+the documented `sbell vm/<action>` forms; successful applicability to Lite
+Desktops is **not yet established by a captured response**. Treat them as
+operator-authorized attempts, not verified production behavior. All-target
+Desktop actions require a configured positive inventory age limit and target
+the complete unfiltered listing. See [real PVM validation](docs/REAL_PVM_VALIDATION.md#virtual-desktops-confirmed-attempts-protocol-acceptance-pending).
+
 For actions requiring approval, the CLI prints the exact expected phrase and does not dispatch without it. The phrase binds the action and canonical UUID sequence; on execution, the application also binds the approval internally to the just-collected inventory generation and freshness. The TUI Bulk action dropdown dispatches the chosen action on selection without a confirmation dialog; the operator's explicit selection is the intent. CLI commands still require the exact phrase.
 
 Bulk operations are fail-closed until `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is set to an approved finite positive value. Bulk inventory must be complete and current. Replies follow the documented sbell/sabad envelope (`docs/SBELL-SABAD.md` §3): `status=success` is reported as `SUCCEEDED`, and `status=failed` as `FAILED` with its `errno` and PVM message. Transport errors, timeouts, and unrecognised statuses are `OUTCOME_UNKNOWN`; they stop bulk processing and must not be blindly retried. The VM state itself is re-read by the post-action inventory refresh. The CLI exit categories are `0` successful read or verified operation, `1` failure, `2` rejected, `3` partial, and `4` outcome unknown (including any future acceptance without verified completion).
@@ -91,7 +101,6 @@ The table below is a quick reference for the **active runtime**. For every suppo
 | `PLAIVID_REFRESH` | `3` | Default TUI refresh cadence in seconds (Overview control accepts whole seconds 1–60; its expensive PVM reads remain slower). |
 | `PLAIVID_MAX_INVENTORY_AGE_SECONDS` | unset | Required positive age bound for bulk mutation admission. |
 | `PLAIVID_ALLOW_CREDENTIAL_ARGV` | disabled | Explicit acknowledgement of unresolved password/token argv exposure. |
-| `PLAIVID_VERIFIED_DESKTOP_ACTIONS` | unset | Per-action operator attestation after verifying a successful Lite Desktop operation. **Do not set from a request capture alone.** All Desktop mutations remain blocked by default. |
 | `PLAIVID_LOG_DB` | `/var/log/pvm/messages.db` | Optional existing audit database, opened read-only. |
 | `PLAIVID_LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 

@@ -48,4 +48,15 @@ Execute bulk sequentially in the existing serialized mutation lane and stop furt
 
 ## Verification plan
 
-Use a redacted, versioned full response fixture plus synthetic minimal/multiple/empty/duplicate/invalid XML; fake gateway checks the exact single query, token gating, and errors; collection tests cover single-flight, section isolation and logout races; Textual Pilot checks 80/120 widths, search, keyboard selection, detail, empty/error/stale state and no per-row calls. Operation tests first assert **zero dispatch for each unverified action**. After each action gate is cleared, add selected/all UUID-vs-name, filtered bulk scope, admission/approval, partial failure/unknown/stop-and-reconcile tests with its verified route/params fixtures, followed by separately authorized non-production PVM acceptance. Run full suite, Ruff, Pyright, build and strict OpenSpec validation; record any Python-version limitations rather than claiming unsupported coverage.
+Use a redacted, versioned full response fixture plus synthetic minimal/multiple/empty/duplicate/invalid XML; fake gateway checks the exact single query, token gating, and errors; collection tests cover single-flight, section isolation and logout races; Textual Pilot checks 80/120 widths, search, keyboard selection, detail, empty/error/stale state and no per-row calls. Operation tests assert **zero dispatch until typed confirmation** and reject stale/partial or ambiguous targets. Fake-backed tests cover selected/all UUID-vs-name, filtered bulk scope, admission/approval, partial failure/unknown/stop-and-reconcile; real Desktop protocol acceptance still requires separate authorization and successful deployed evidence. Run full suite, Ruff, Pyright, build and strict OpenSpec validation; record any Python-version limitations rather than claiming unsupported coverage.
+
+## Later dispatch decision
+
+The operator subsequently directed confirmed Desktop actions to attempt the
+documented candidate `vm/<action>` commands rather than remain blocked by a
+separate environment attestation. Keep the Desktop-only plan and generation
+barrier, typed full-UUID confirmation (including all targets), serialized lane,
+post-dispatch Desktop read and explicit warning that applicability is unverified.
+Do not treat candidate route/params as a successful Desktop contract or run
+mutations in development. The Desktop summary/toolbar now mirror the VM page
+in control order, widths and Refresh placement; search is an additional field.

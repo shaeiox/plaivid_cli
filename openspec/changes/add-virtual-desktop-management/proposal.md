@@ -35,3 +35,20 @@ After review, expected areas are `domain/` Desktop types; a pure PVM XML parser;
 2. **Per-action gate:** confirm that the captured UUID is a `pvm_desktop_obj` of type `pvm_desktop_lite_virtual_desktop`, confirm the omitted start URL, and supply redacted Desktop-specific module/command, exact params, successful `<response>` envelope, transitions and permissions **for each requested action** (Start, Resume, Pause, Stop, Reset, Kill) on PVM 7.1.26. Stop body/route and Start body match VM shapes, Pause has only a route, and Resume/Reset/Kill are VM-only repository references; none yet prove Lite Desktop applicability. Never send tokens/passwords or run production mutations for this proposal. An action remains unavailable until its own evidence is reviewed; confirm whether activating it requires a second review after evidence arrives.
 3. Approve refresh cadence and request budget (one list read per due cycle, one explicit refresh, no per-row **read** requests), status vocabulary, whether `memory/size` is MB, and whether `perm` and `parent` connections resolve to owner/zone names or only identifiers. Confirm that **Apply to all** means all Desktops in the unfiltered current list, regardless of a name search; no selection by currently visible rows alone.
 4. Approve this proposal **before any implementation**. Synthetic tests alone are not real-host acceptance; any non-production PVM validation requires separate operator authorization.
+
+## Later implementation decision (supersedes the earlier dispatch gate)
+
+After the read-only page and default-off attestation implementation, the operator
+explicitly requested that a confirmed Desktop action **attempt a call** rather
+than return "no action call sent". The UI therefore uses documented candidate
+`sbell vm/<action>` shapes after typed review of the selected UUID or the full
+unfiltered bulk target set. This is an operator-authorized attempt, **not** proof
+that a Lite Desktop accepts the VM commands. The supplied Start capture now
+identifies `/sabad-plaivid/vm/start` and its XML body; no successful Lite Desktop
+response has been provided for Start or the other actions. No live calls were
+made while implementing this change. Keep the complete/fresh Desktop listing,
+positive bulk age limit, typed confirmation, serialized dispatch, failure/unknown
+stop and reconciliation barriers. Production protocol acceptance remains pending
+redacted successful response and state-transition evidence per action.
+The Desktop page's control order, sizing and summary/Refresh layout now mirror
+the VM page; local name search remains an additional Desktop-only control.

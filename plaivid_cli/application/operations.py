@@ -141,12 +141,6 @@ class OperationCoordinator:
         section: SectionSnapshot[object], *, is_bulk: bool,
     ) -> OperationPlan:
         """Desktop-only admission; never substitute a VMRecord or VM inventory."""
-        if action not in self._settings.verified_desktop_actions:
-            raise AppError(
-                ErrorKind.POLICY,
-                f"Desktop {action.value} is unverified; no action call sent",
-                code="DESKTOP_ACTION_UNVERIFIED",
-            )
         ids = tuple(item.uuid for item in targets)
         if not ids or len(set(ids)) != len(ids) or (len(ids) > 1 and not is_bulk):
             raise AppError(ErrorKind.POLICY, "Desktop targets must be non-empty, unique and explicitly scoped")
