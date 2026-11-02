@@ -397,3 +397,70 @@ def test_vm_tui_stop_submits_without_confirmation_dialog(tmp_path):
         asyncio.run(exercise())
     finally:
         collection.close()
+
+
+def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
+    """Typing never collects; visible UUID selection and unfiltered bulk stay distinct."""
+    from dataclasses import replace
+
+    from textual.widgets import Checkbox, DataTable, Input, Static
+
+    async def exercise(width: int) -> None:
+        provider, collection, application, operations, sessions, settings = runtime(tmp_path / str(width))
+        operations._settings = replace(settings, max_inventory_age_seconds=30)
+        calls = 0
+        original = provider.list_objects
+
+        def counted(token):
+            nonlocal calls
+            calls += 1
+            return original(token)
+
+        provider.list_objects = counted
+        tui = PlaividTui(application, operations, sessions)
+        try:
+            async with tui.run_test(size=(width, 40)) as pilot:
+                await pilot.pause(.2)
+                tui.action_vms_page()
+                await pilot.pause(.05)
+                table = tui.query_one("#fleet-table", DataTable)
+                search = tui.query_one("#vm-search", Input)
+                assert table.row_count == 2
+                initial_calls = calls
+                search.focus()
+                await pilot.press("b", "e", "t", "a")
+                await pilot.pause(.05)
+                assert calls == initial_calls
+                assert table.row_count == 1
+                assert tui._selected_uuid == UUID_B
+                assert UUID_B in str(tui.query_one("#detail-box", Static).render())
+                assert "1 shown" in str(tui.query_one("#vm-scope", Static).render())
+                assert table.virtual_size.width <= table.region.width
+                # A changed input must re-render even if the inventory generation has not changed.
+                tui._publish_snapshot(collection.snapshot)
+                assert table.row_count == 1
+                search.value = "missing"
+                await pilot.pause(.05)
+                assert table.row_count == 0 and tui._selected_uuid is None
+                assert "No matching VMs" in str(tui.query_one("#detail-box", Static).render())
+                tui._begin_action(Action.START)
+                assert not provider.dispatched
+                search.value = "beta"
+                await pilot.pause(.05)
+                tui._begin_action(Action.START)
+                await pilot.pause(.2)
+                assert provider.dispatched == [(Action.START, UUID_B)]
+                tui.query_one("#select-all", Checkbox).value = True
+                await pilot.pause(.05)
+                assert "All unfiltered VMs · 2 target(s) · 1 shown" in str(tui.query_one("#vm-scope", Static).render())
+                tui._begin_action(Action.STOP)
+                await pilot.pause(.25)
+                assert provider.dispatched[-2:] == [(Action.STOP, UUID_A), (Action.STOP, UUID_B)]
+                tui._session_ended("test logout")
+                assert search.value == "" and table.row_count == 0
+                assert not tui.query_one("#select-all", Checkbox).value
+        finally:
+            collection.close()
+
+    for width in (80, 120):
+        asyncio.run(exercise(width))

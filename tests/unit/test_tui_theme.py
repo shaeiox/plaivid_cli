@@ -35,12 +35,12 @@ from plaivid_cli.presentation.theme import (
 from plaivid_cli.tui import PlaividTui
 
 
-def test_brand_uses_static_blue_purple_rose_gradient_without_changing_text():
+def test_brand_uses_one_accent_without_decorative_gradient():
     wordmark = brand()
-    assert "PLAIVID" in wordmark.plain and "PVM MONITOR" in wordmark.plain
+    assert "PLAIVID" in wordmark.plain and "PVM console" in wordmark.plain
     styles = {str(span.style) for span in wordmark.spans}
     assert str(wordmark.style) == f"bold {PRIMARY}"
-    assert len(styles) >= 8  # each brand character has its own color
+    assert styles == {"#a5a5ba"}  # only the subtitle overrides the accent
     assert not any("blink" in style for style in styles)
 
 
@@ -74,7 +74,7 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 assert tui.query_one("#overview-refresh", Button).region.height == 1
                 assert tui.query_one(Footer).region.height == 1
                 # The live panel shows real collection status, not an animated fake heartbeat.
-                assert "HOST HEARTBEAT" in str(tui.query_one("#heartbeat-card", Static).render())
+                assert "Host heartbeat" in str(tui.query_one("#heartbeat-card", Static).render())
                 field = tui.query_one("#interval-input", Input)
                 field.focus()
                 await pilot.press("2")
@@ -83,12 +83,13 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 tui.action_vms_page()
                 await pilot.pause(.1)
                 assert tui.query_one("#tabs", TabbedContent).active == "fleet"
-                assert "VM LIST" in str(tui.query_one("#vm-list").border_title)
+                assert "VM list" in str(tui.query_one("#vm-list").border_title)
                 assert tui.query_one("#fleet-summary").region.height == 5
                 assert tui.query_one("#vm-toolbar").region.height == 3
                 for selector, widget in (
                     ("#refresh-button", Button), ("#audit-toggle", Button),
                     ("#bulk-actions", Select), ("#select-all", Checkbox),
+                    ("#vm-search", Input),
                 ):
                     assert tui.query_one(selector, widget).region.height == 1
                 assert tui.query_one("#refresh-button", Button).styles.background.hex.lower() == tui._palette.panel
@@ -137,7 +138,7 @@ def test_256_and_standard_terminal_render_with_matching_widget_and_control_theme
                     assert tui.query_one("#fleet-table").styles.background.hex.lower() == palette.background
                     assert tui.query_one(".metric-card").styles.background.hex.lower() == palette.background
                 assert tui.query_one("#tabs", TabbedContent).active == "overview"
-                assert "HOST CPU" in str(tui.query_one("#cpu-card", Static).render())
+                assert "Host CPU" in str(tui.query_one("#cpu-card", Static).render())
         finally:
             collection.close()
 
@@ -182,6 +183,41 @@ def test_long_vm_name_keeps_table_readable_at_80_columns(tmp_path, monkeypatch):
                 detail = str(tui.query_one("#detail-box", Static).render())
                 assert "Eleven-Cluster-ReverseProxy" in detail
                 assert original.uuid in detail
+        finally:
+            collection.close()
+
+    asyncio.run(exercise())
+
+
+def test_search_focus_and_live_resize_preserve_keyboard_access(tmp_path, monkeypatch):
+    monkeypatch.setenv("COLORTERM", "truecolor")
+
+    async def exercise() -> None:
+        _, collection, application, operations, sessions, _ = runtime(tmp_path)
+        tui = PlaividTui(application, operations, sessions)
+        try:
+            async with tui.run_test(size=(80, 40)) as pilot:
+                await pilot.pause(.2)
+                assert not tui.query_one("#shell").has_class("wide")
+                tui.action_vms_page()
+                await pilot.pause(.05)
+                search = tui.query_one("#vm-search", Input)
+                search.focus()
+                await pilot.press("q")  # Text entry must not trigger the global quit binding.
+                assert tui.is_running and search.value == "q"
+                assert tui.focused is search
+                assert search.region.height == 1
+                assert search.region.width > 0
+                await pilot.resize_terminal(120, 40)
+                await pilot.pause(.05)
+                assert tui.query_one("#shell").has_class("wide")
+                assert search.region.width > 0
+                tui.set_focus(None)
+                await pilot.press("1")
+                assert tui.query_one("#tabs", TabbedContent).active == "overview"
+                await pilot.resize_terminal(80, 40)
+                await pilot.pause(.05)
+                assert not tui.query_one("#shell").has_class("wide")
         finally:
             collection.close()
 

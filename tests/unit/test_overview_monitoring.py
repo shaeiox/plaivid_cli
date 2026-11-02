@@ -119,7 +119,7 @@ def test_overview_navigation_interval_nic_tabs_and_vm_operations_remain_availabl
             await pilot.pause(.2)
             assert tui.query_one("#tabs", TabbedContent).active == "overview"
             assert "Refresh: 3s" in str(tui.query_one("#refresh-label").render())
-            assert "RUNNING VMS" in str(tui.query_one("#running-card").render())
+            assert "Running VMs" in str(tui.query_one("#running-card").render())
             assert "eno2" in tui._nic_tab_names
             tui._nic_selected = "eno2"
             tui._render_overview(collection.snapshot)
@@ -304,14 +304,14 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
 
     history = OverviewHistory()
     complete = cards(snapshot(CollectionStatus.CURRENT, result.value, 1), history, 3)
-    assert "RUNNING VMS\n6\n" in complete["running-card"]
-    assert "VIRTUAL MACHINES · 6 running" in complete["vm-monitor"]
+    assert "Running VMs\n6\n" in complete["running-card"]
+    assert "Virtual machines · 6 running" in complete["vm-monitor"]
 
     # Neither a partial result nor header-only output proves zero or six.
     for rows in (result.value, ()):
         partial = cards(snapshot(CollectionStatus.PARTIAL, rows, 2), history, 3)
-        assert "RUNNING VMS\nN/A\n" in partial["running-card"]
+        assert "Running VMs\nN/A\n" in partial["running-card"]
     empty = cards(snapshot(CollectionStatus.CURRENT, (), 3), history, 3)
-    assert "RUNNING VMS\nN/A\n" in empty["running-card"]
+    assert "Running VMs\nN/A\n" in empty["running-card"]
     stale = cards(snapshot(CollectionStatus.STALE, None, 4), history, 3)
-    assert "RUNNING VMS\n6\n" in stale["running-card"]
+    assert "Running VMs\n6\n" in stale["running-card"]

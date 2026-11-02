@@ -65,13 +65,13 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         running = history.last_verified_running
     memory_pct = 100 * host.memory_used / host.memory_total if host.memory_used is not None and host.memory_total else None
     groups = {
-        "running-card": f"◆  RUNNING VMS\n{running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
-        "cpu-card": f"◉  HOST CPU\n{_pct(host.cpu_percent)}\n{_bar(host.cpu_percent)}  {_label(host_section, interval)}",
-        "memory-card": f"▣  HOST MEMORY\n{_size(host.memory_used)} / {_size(host.memory_total)}\n{_bar(memory_pct)}  {_label(host_section, interval)}",
-        "load-card": f"⌁  LOAD AVERAGE\n{host.load1 if host.load1 is not None else 'N/A'}\n5m / 15m: {host.load5 if host.load5 is not None else 'N/A'} / {host.load15 if host.load15 is not None else 'N/A'} · {_label(host_section, interval)}",
-        "cpu-chart": f"CPU UTILIZATION\n{sparkline(history.values['cpu'])}",
-        "memory-chart": f"MEMORY UTILIZATION\n{sparkline(history.values['memory'])}",
-        "load-chart": f"SYSTEM LOAD\n{sparkline(history.values['load'])}",
+        "running-card": f"Running VMs\n{running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
+        "cpu-card": f"Host CPU\n{_pct(host.cpu_percent)}\n{_bar(host.cpu_percent)}  {_label(host_section, interval)}",
+        "memory-card": f"Host memory\n{_size(host.memory_used)} / {_size(host.memory_total)}\n{_bar(memory_pct)}  {_label(host_section, interval)}",
+        "load-card": f"System load\n{host.load1 if host.load1 is not None else 'N/A'}\n5m / 15m: {host.load5 if host.load5 is not None else 'N/A'} / {host.load15 if host.load15 is not None else 'N/A'} · {_label(host_section, interval)}",
+        "cpu-chart": f"CPU utilization\n{sparkline(history.values['cpu'])}",
+        "memory-chart": f"Memory utilization\n{sparkline(history.values['memory'])}",
+        "load-chart": f"System load\n{sparkline(history.values['load'])}",
     }
     required = {
         "Dashboard API": (snapshot.section("dashboard"), max(18, interval)),
@@ -88,18 +88,18 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     latest = max(successes, key=lambda section: section.succeeded_monotonic or 0) if successes else None
     latency = f"{latest.latency_seconds * 1000:.0f} ms" if latest and latest.latency_seconds is not None else "N/A"
     lines = [f"{name}: {entry.status} · {entry.age:.0f}s" if entry.age is not None else f"{name}: {entry.status}" for name, entry in statuses.items()]
-    groups["heartbeat-card"] = f"♥  HOST HEARTBEAT\n{overall}\nLast {latest.succeeded_at.astimezone().strftime('%H:%M:%S') if latest and latest.succeeded_at else 'N/A'} · {latency}"
-    groups["heartbeat-details"] = "COLLECTION HEALTH  ·  " + "  |  ".join(lines) + "  |  VDI: N/A (unverified)"
+    groups["heartbeat-card"] = f"Host heartbeat\n{overall}\nLast {latest.succeeded_at.astimezone().strftime('%H:%M:%S') if latest and latest.succeeded_at else 'N/A'} · {latency}"
+    groups["heartbeat-details"] = "Collection health  ·  " + "  |  ".join(lines) + "  |  VDI: N/A (unverified)"
     dashboard_section = snapshot.section("dashboard")
     dashboard = _value(dashboard_section)
     dashboard = dashboard if isinstance(dashboard, DashboardSample) else DashboardSample()
     groups["vm-monitor"] = (
-        "VIRTUAL MACHINES · " + (str(running) if running is not None else "N/A") + " running\n"
+        "Virtual machines · " + (str(running) if running is not None else "N/A") + " running\n"
         "Count from last verified pvm-running-vms ROW; N/A if listing incomplete\n"
         "Top CPU / RAM / Network: N/A (response fields/units unverified)\n"
         f"Dashboard API {_label(dashboard_section, max(18, interval))}"
     )
-    groups["vdi-monitor"] = "VIRTUAL DISK IMAGES\nN/A · no verified per-VDI inventory or capacity/usage contract"
+    groups["vdi-monitor"] = "Virtual disk images\nN/A · no verified per-VDI inventory or capacity/usage contract"
     pvm_resources = (
         f"CPU entries {len(dashboard.cpu_info)} · RAM used/free/total (API raw units) "
         f"{dashboard.ram_used_raw or 'N/A'} / {dashboard.ram_free_raw or 'N/A'} / "

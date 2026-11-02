@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
@@ -81,22 +81,22 @@ class PlaividTui(App[None]):
     CSS = """
         Screen { background: $p-bg; color: $p-text; }
         #shell { height: 1fr; padding: 0 1; background: $p-bg; }
-        #topbar { height: 3; padding: 0 1; margin: 0 0 1 0;
-                  background: $p-panel; border: round $p-border; }
+        #topbar { height: 2; padding: 0 1; margin: 0 0 1 0;
+                  background: $p-panel; border-bottom: solid $p-border; }
         #brand { width: 1fr; content-align: left middle; }
         #session-label { width: auto; color: $p-green; content-align: right middle; padding: 0 1; }
-        #logout { width: 5; min-width: 5; height: 1; margin: 0; padding: 0;
+        #logout { width: 6; min-width: 6; height: 1; margin: 0; padding: 0;
                   background: $p-surface; color: $p-rose; border: none; }
         #logout:focus { background: $p-surface; color: $p-rose; text-style: bold underline; }
 
-        #login-box { width: 64; max-width: 92%; height: auto; border: round $p-border;
+        #login-box { width: 64; max-width: 92%; height: auto; border-left: solid $p-blue;
                      background: $p-panel; padding: 1 2; margin: 2 0; }
         #login-title { color: $p-blue; text-style: bold; padding-bottom: 1; }
         #login-warning { color: $p-yellow; padding: 1 0; }
         #login-error { color: $p-rose; padding: 1 0; }
         #login-buttons { height: 1; align-horizontal: right; margin-top: 1; }
-        Input { background: $p-surface; border: round $p-border; color: $p-text; }
-        Input:focus { border: round $p-cyan; }
+        Input { background: $p-surface; border: solid $p-border; color: $p-text; }
+        Input:focus { border: solid $p-blue; }
 
         /* One-line actions in every page; reserve filled color for keyboard focus. */
         Button, Button.-primary, Button.-style-default, Button.-style-flat {
@@ -131,7 +131,7 @@ class PlaividTui(App[None]):
 
         #overview { height: 1fr; }
         #overview-scroll { height: 1fr; scrollbar-color: $p-border; }
-        #overview-toolbar { height: 3; background: $p-panel; border: round $p-border;
+        #overview-toolbar { height: 3; background: $p-panel; border-bottom: solid $p-border;
                             padding: 0 1; margin-top: 1; }
         #overview-title { width: 1fr; color: $p-blue; text-style: bold; }
         #refresh-label { width: 14; color: $p-cyan; }
@@ -145,24 +145,21 @@ class PlaividTui(App[None]):
         #overview-toolbar Button:focus { background: $p-surface; color: $p-blue; text-style: bold underline; }
         #interval-error { height: 1; color: $p-rose; }
         #host-identity { height: auto; color: $p-muted; background: $p-panel;
-                         border-left: solid $p-cyan; padding: 1; margin-top: 1; }
-        .dashboard-heading { height: 2; color: $p-blue; text-style: bold;
+                         border-left: solid $p-border; padding: 1; margin-top: 1; }
+        .dashboard-heading { height: 2; color: $p-text; text-style: bold;
                              padding: 0 1; margin-top: 1; }
         #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
         #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
         .wide #summary-grid { grid-size: 4; }
         .wide #chart-grid { grid-size: 3; }
-        .dashboard-card { height: 6; padding: 0 1; border: round $p-border;
+        .dashboard-card { height: 6; padding: 0 1; border-left: solid $p-border;
                           background: $p-surface; color: $p-text; }
-        #heartbeat-card { height: 5; border: round $p-border;
+        #heartbeat-card { height: 5; border-left: solid $p-border;
                           background: $p-panel; margin-top: 1; }
         #heartbeat-details { height: auto; padding: 0 1; color: $p-muted;
                              background: $p-panel; border-left: solid $p-border; }
-        .chart-card { height: 4; padding: 0 1; border: round $p-border;
+        .chart-card { height: 4; padding: 0 1; border-left: solid $p-border;
                       background: $p-panel; }
-        #cpu-chart { border-top: solid $p-cyan; }
-        #memory-chart { border-top: solid $p-purple; }
-        #load-chart { border-top: solid $p-blue; }
         #nic-tabs { height: auto; }
         .nic-tab { width: auto; min-width: 10; margin-right: 1; }
         #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5;
@@ -177,8 +174,8 @@ class PlaividTui(App[None]):
 
         #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
         .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
-                       border: round $p-border; background: $p-surface; }
-        .metric-card:focus-within { border: round $p-green; }
+                       border-left: solid $p-border; background: $p-surface; }
+        .metric-card:focus-within { border-left: solid $p-blue; }
         .metric-title { color: $p-muted; text-style: bold; }
         .metric-value { color: $p-cyan; text-style: bold; }
         #refresh-button { width: 11; min-width: 11; margin: 0 0 0 1; }
@@ -190,8 +187,8 @@ class PlaividTui(App[None]):
         #audit-toggle { width: 11; min-width: 11; margin-left: 2; }
         #fleet-table { height: 1fr; min-height: 8; background: $p-surface;
                        border: round $p-border; }
-        DataTable > .datatable--header { background: $p-panel; color: $p-purple; }
-        DataTable:focus > .datatable--cursor { background: $p-purple; color: $p-bg; }
+        DataTable > .datatable--header { background: $p-panel; color: $p-text; text-style: bold; }
+        DataTable:focus > .datatable--cursor { background: $p-blue; color: $p-bg; }
         #detail-box { height: 10; margin-top: 1; border: round $p-border;
                       background: $p-panel; padding: 1; }
         #action-status { height: 1; color: $p-yellow; }
@@ -204,10 +201,13 @@ class PlaividTui(App[None]):
         #desktop-actions { width: 20; }
         #desktop-all { width: auto; margin-left: 2; }
         #desktop-audit-toggle { width: 11; min-width: 11; margin-left: 2; }
-        #desktop-search { width: 1fr; margin-left: 1; }
+        #desktop-search, #vm-search { width: 1fr; height: 1; margin-left: 1; padding: 0 1;
+                                      border: none; background: $p-surface; }
+        #desktop-search:focus, #vm-search:focus { border: none; background: $p-surface;
+                                                  color: $p-blue; text-style: underline; }
         #desktop-table { height: 1fr; min-height: 8; background: $p-surface;
                          border: round $p-border; }
-        #desktop-scope { height: 1; color: $p-muted; }
+        #desktop-scope, #vm-scope { height: 1; color: $p-muted; }
         #desktop-detail-scroll { height: 10; margin-top: 1;
                                  border: round $p-border; background: $p-panel; }
         #desktop-audit-panel { display: none; height: auto; min-height: 7;
@@ -278,7 +278,7 @@ class PlaividTui(App[None]):
             with Horizontal(id="topbar"):
                 yield Static(brand(self._palette), id="brand", markup=False)
                 yield Static("● Offline", id="session-label", markup=False)
-                yield Button("⏻", id="logout", variant="default")
+                yield Button("Exit", id="logout", variant="default")
             with VerticalScroll(id="login-box"):
                 yield Label("Operator sign-in", id="login-title")
                 yield Static(
@@ -295,45 +295,45 @@ class PlaividTui(App[None]):
                 with TabPane("Overview", id="overview"):
                     with VerticalScroll(id="overview-scroll"):
                         with Horizontal(id="overview-toolbar"):
-                            yield Static("⊷  LIVE  /  HOST TELEMETRY", id="overview-title")
+                            yield Static("Host telemetry", id="overview-title")
                             yield Static(f"Refresh: {self._overview_schedule.interval:g}s", id="refresh-label")
                             yield Input(value=f"{self._overview_schedule.interval:g}", id="interval-input", placeholder="sec")
                             yield Button("Apply", id="interval-apply")
                             yield Button("Refresh", id="overview-refresh")
                         yield Static("", id="interval-error", markup=False)
                         yield Static("LOCAL HOST  N/A · PVM HOST  N/A", id="host-identity", markup=False)
-                        yield Static("01  /  HOST OVERVIEW", classes="dashboard-heading")
+                        yield Static("Host readings", classes="dashboard-heading")
                         with Grid(id="summary-grid"):
                             for card in ("running-card", "cpu-card", "memory-card", "load-card"):
                                 yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
-                        yield Static("♥  HOST HEARTBEAT\nLOADING", id="heartbeat-card", classes="dashboard-card", markup=False)
+                        yield Static("Host heartbeat\nLOADING", id="heartbeat-card", classes="dashboard-card", markup=False)
                         yield Static("Awaiting collector responses", id="heartbeat-details", markup=False)
-                        yield Static("02  /  RESOURCE HISTORY", classes="dashboard-heading")
+                        yield Static("Resource history", classes="dashboard-heading")
                         with Grid(id="chart-grid"):
                             for chart in ("cpu-chart", "memory-chart", "load-chart"):
                                 yield Static("Waiting for samples", id=chart, classes="chart-card", markup=False)
-                        yield Static("03  /  PHYSICAL NETWORK INTERFACES", classes="dashboard-heading")
+                        yield Static("Physical network", classes="dashboard-heading")
                         with Horizontal(id="nic-tabs"):
                             pass
                         yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
                         yield Button("Rediscover", id="rediscover")
-                        yield Static("04  /  VIRTUAL MACHINES", classes="dashboard-heading")
+                        yield Static("Virtual machines", classes="dashboard-heading")
                         yield Static("Waiting for VM monitoring…", id="vm-monitor", markup=False)
-                        yield Static("05  /  VIRTUAL DISK IMAGES", classes="dashboard-heading")
+                        yield Static("Virtual disk images", classes="dashboard-heading")
                         yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
                         with Horizontal(id="host-grid"):
-                            yield Static("HOST STATUS\nWaiting for collection…", id="host-status", markup=False)
-                            yield Static("HOST METRICS\nWaiting for collection…", id="host-metrics", markup=False)
+                            yield Static("Host status\nWaiting for collection…", id="host-status", markup=False)
+                            yield Static("Host metrics\nWaiting for collection…", id="host-metrics", markup=False)
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
-                            yield Static("DEFINED VMS", classes="metric-title")
+                            yield Static("Defined VMs", classes="metric-title")
                             yield Static("—", id="vm-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("PROCESS SEEN", classes="metric-title")
+                            yield Static("Processes seen", classes="metric-title")
                             yield Static("—", id="process-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("INVENTORY", classes="metric-title")
+                            yield Static("Inventory", classes="metric-title")
                             yield Static("Not collected", id="inventory-quality", classes="metric-value")
                         yield Button("Refresh", id="refresh-button", variant="primary")
                     with Vertical(id="vm-list"):
@@ -346,20 +346,22 @@ class PlaividTui(App[None]):
                             )
                             yield Checkbox("Apply to all VMs", id="select-all")
                             yield Button("Audit", id="audit-toggle")
+                            yield Input(placeholder="Search VM name", id="vm-search")
                         yield DataTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
                         yield Static("No operation submitted.", id="action-status", markup=False)
+                    yield Static("Selected VM · 0 target(s)", id="vm-scope", markup=False)
                     yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
-                    yield Static("READ-ONLY AUDIT\nWaiting for session…", id="audit-panel", markup=False)
+                    yield Static("Read-only audit\nWaiting for session…", id="audit-panel", markup=False)
                 with TabPane("Virtual Desktops", id="desktops"):
                     with Horizontal(id="desktop-summary"):
                         with Vertical(classes="metric-card"):
-                            yield Static("DEFINED DESKTOPS", classes="metric-title")
+                            yield Static("Defined Desktops", classes="metric-title")
                             yield Static("—", id="desktop-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("SELECTED", classes="metric-title")
+                            yield Static("Selected", classes="metric-title")
                             yield Static("—", id="desktop-selected-label", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("INVENTORY", classes="metric-title")
+                            yield Static("Inventory", classes="metric-title")
                             yield Static("Not collected", id="desktop-quality", classes="metric-value")
                         yield Button("Refresh", id="desktop-refresh", variant="primary")
                     with Vertical(id="desktop-list"):
@@ -376,15 +378,15 @@ class PlaividTui(App[None]):
                     yield Static("Selected Desktop · 0 target(s)", id="desktop-scope", markup=False)
                     with VerticalScroll(id="desktop-detail-scroll"):
                         yield Static("Select a Desktop to inspect its details.", id="desktop-detail", markup=False)
-                    yield Static("READ-ONLY AUDIT\nWaiting for session…", id="desktop-audit-panel", markup=False)
+                    yield Static("Read-only audit\nWaiting for session…", id="desktop-audit-panel", markup=False)
             yield Static("1 Overview · 2 Virtual Machines · 3 Virtual Desktops · R refresh · Q quit", id="notice")
             yield Footer()
 
     def on_mount(self) -> None:
         apply_theme(self, self._palette)
         self.query_one("#logout", Button).tooltip = "Logout"
-        self.query_one("#vm-list", Vertical).border_title = "VM LIST"
-        self.query_one("#desktop-list", Vertical).border_title = "DESKTOP LIST"
+        self.query_one("#vm-list", Vertical).border_title = "VM list"
+        self.query_one("#desktop-list", Vertical).border_title = "Desktop list"
         table = self.query_one("#fleet-table", DataTable)
         self._table_columns = table.add_columns("#", "VM name", "Object state", "Process", "vCPU", "Memory")
         self._desktop_columns = self.query_one("#desktop-table", DataTable).add_columns(
@@ -396,11 +398,11 @@ class PlaividTui(App[None]):
         self._set_width_class()
         self._resume_session()
 
-    def on_resize(self) -> None:
-        self._set_width_class()
+    def on_resize(self, event: events.Resize) -> None:
+        self._set_width_class(event.size.width)
 
-    def _set_width_class(self) -> None:
-        self.query_one("#shell", Vertical).set_class(self.size.width >= 110, "wide")
+    def _set_width_class(self, width: int | None = None) -> None:
+        self.query_one("#shell", Vertical).set_class((width if width is not None else self.size.width) >= 110, "wide")
 
     def action_overview_page(self) -> None:
         if self.session is not None:
@@ -472,12 +474,14 @@ class PlaividTui(App[None]):
         self.query_one("#desktop-selected-label", Static).update("—")
         self.query_one("#desktop-detail", Static).update("Select a Desktop to inspect its details.")
         self.query_one("#desktop-action-status", Static).update("No operation submitted.")
-        self.query_one("#desktop-audit-panel", Static).update("READ-ONLY AUDIT\nWaiting for session…")
+        self.query_one("#desktop-audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#desktop-audit-panel", Static).display = False
         self._inventory_section = None
         self._inventory = None
         self._inventory_generation = None
         self._records.clear()
+        self.query_one("#vm-search", Input).value = ""
+        self.query_one("#select-all", Checkbox).value = False
         self._selected_uuid = None
         self._table_order = ()
         self._table_content.clear()
@@ -487,10 +491,10 @@ class PlaividTui(App[None]):
         self.query_one("#inventory-quality", Static).update("Not collected")
         self.query_one("#detail-box", Static).update("Select a VM to inspect its details.")
         self.query_one("#action-status", Static).update("No operation submitted.")
-        self.query_one("#audit-panel", Static).update("READ-ONLY AUDIT\nWaiting for session…")
+        self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#audit-panel", Static).display = False
-        self.query_one("#host-status", Static).update("HOST STATUS\nWaiting for collection…")
-        self.query_one("#host-metrics", Static).update("HOST METRICS\nWaiting for collection…")
+        self.query_one("#host-status", Static).update("Host status\nWaiting for collection…")
+        self.query_one("#host-metrics", Static).update("Host metrics\nWaiting for collection…")
         self._visible_snapshot = None
         self._history = OverviewHistory()
         self._render_cache.clear()
@@ -675,7 +679,7 @@ class PlaividTui(App[None]):
     def _color_heartbeat(self, text: str) -> None:
         color = (self._palette.error if "OFFLINE" in text else self._palette.warning if "WARNING" in text else self._palette.border)
         if color != self._heartbeat_color:
-            self.query_one("#heartbeat-card", Static).styles.border = ("round", color)
+            self.query_one("#heartbeat-card", Static).styles.border_left = ("solid", color)
             self._heartbeat_color = color
 
     def _put(self, widget_id: str, text: str) -> None:
@@ -732,58 +736,15 @@ class PlaividTui(App[None]):
                 inventory = value
         self._inventory = inventory
         self._records = {record.uuid: record for record in inventory.records} if inventory else {}
-        selected_uuid = self._selected_uuid
-        table = self.query_one("#fleet-table", DataTable)
-        records: list[VMRecord] = []
+        self._filter_vms()
         if inventory is not None:
-            records = sorted(
-                inventory.records,
-                key=lambda item: (0 if item.process_seen else 1, item.name.casefold(), item.uuid),
-            )
-            rows = {
-                record.uuid: (
-                    str(index), redact_text(record.name),
-                    redact_text(record.state), "Observed" if record.process_seen else "Not observed",
-                    _display(record.vcpu), _display(record.mem_mb, suffix=" MB"),
-                )
-                for index, record in enumerate(records, start=1)
-            }
-            order = tuple(rows)
-            if order != self._table_order:
-                table.clear(columns=False)
-                for uuid, cells in rows.items():
-                    table.add_row(*(Text(value) for value in cells), key=uuid)
-            else:
-                for uuid, cells in rows.items():
-                    old = self._table_content.get(uuid, ())
-                    for column, cell in enumerate(cells):
-                        if column >= len(old) or cell != old[column]:
-                            table.update_cell(uuid, self._table_columns[column], Text(cell), update_width=True)
-            self._table_order, self._table_content = order, rows
             self.query_one("#vm-count", Static).update(str(len(inventory.records)))
             self.query_one("#process-count", Static).update(
                 str(sum(record.process_seen for record in inventory.records))
             )
         else:
-            if self._table_order:
-                table.clear(columns=False)
-                self._table_order, self._table_content = (), {}
             self.query_one("#vm-count", Static).update("—")
             self.query_one("#process-count", Static).update("—")
-        if records:
-            selected_uuid = (
-                selected_uuid if selected_uuid in self._records else records[0].uuid
-            )
-            self._selected_uuid = selected_uuid
-            selected_row = next(
-                index for index, record in enumerate(records) if record.uuid == selected_uuid
-            )
-            table.move_cursor(row=selected_row, animate=False)
-            self._render_record(self._records[selected_uuid])
-        else:
-            self._selected_uuid = None
-            self._detail_base = "No VM records are currently available."
-            self.query_one("#detail-box", Static).update(self._detail_base)
         if inventory_section is None:
             quality = "Unavailable"
         else:
@@ -814,6 +775,9 @@ class PlaividTui(App[None]):
         if section.quality_issues:
             quality += f" · {len(section.quality_issues)} issue(s)"
         self.query_one("#desktop-quality", Static).update(quality)
+        self.query_one("#desktop-quality", Static).styles.color = (
+            self._palette.success if section.status is CollectionStatus.CURRENT else self._palette.warning
+        )
         self.query_one("#desktop-count", Static).update(str(len(self._desktops)) if section.has_value else "—")
         self._filter_desktops()
 
@@ -872,7 +836,7 @@ class PlaividTui(App[None]):
             return
         all_targets = self.query_one("#desktop-all", Checkbox).value
         uuids = tuple(sorted(self._desktops)) if all_targets else ((self._desktop_selected,) if self._desktop_selected else ())
-        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · review before dispatch"
+        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s)"
         self.query_one("#desktop-selected-label", Static).update((self._desktop_selected or "—")[:8])
         self.query_one("#desktop-scope", Static).update(scope)
         record = self._desktops.get(self._desktop_selected or "")
@@ -971,12 +935,69 @@ class PlaividTui(App[None]):
         self.query_one("#host-status", Static).update(_host_status_text(status, status_section))
         self.query_one("#host-metrics", Static).update(_host_metrics_text(metrics, metric_section))
 
+    @on(Checkbox.Changed, "#select-all")
+    def vm_scope_changed(self) -> None:
+        self._filter_vms()
+
+    @on(Input.Changed, "#vm-search")
+    def vm_search_changed(self) -> None:
+        # Search is strictly local: changing the input never starts collection.
+        self._filter_vms()
+
+    def _filter_vms(self) -> None:
+        query = self.query_one("#vm-search", Input).value.strip().casefold()
+        records = sorted(
+            (record for record in self._records.values() if query in record.name.casefold()),
+            key=lambda item: (0 if item.process_seen else 1, item.name.casefold(), item.uuid),
+        )
+        rows = {
+            record.uuid: (
+                str(index), redact_text(record.name),
+                redact_text(record.state), "Observed" if record.process_seen else "Not observed",
+                _display(record.vcpu), _display(record.mem_mb, suffix=" MB"),
+            )
+            for index, record in enumerate(records, start=1)
+        }
+        order = tuple(rows)
+        table = self.query_one("#fleet-table", DataTable)
+        if order != self._table_order:
+            table.clear(columns=False)
+            for uuid, cells in rows.items():
+                table.add_row(*(Text(cell) for cell in cells), key=uuid)
+        else:
+            for uuid, cells in rows.items():
+                old = self._table_content.get(uuid, ())
+                for column, cell in enumerate(cells):
+                    if column >= len(old) or cell != old[column]:
+                        table.update_cell(uuid, self._table_columns[column], Text(cell), update_width=True)
+        self._table_order, self._table_content = order, rows
+        all_targets = self.query_one("#select-all", Checkbox).value
+        count = len(self._records) if all_targets else int(bool(order))
+        self.query_one("#vm-scope", Static).update(
+            f"{'All unfiltered VMs' if all_targets else 'Selected VM'} · {count} target(s)"
+            f" · {len(order)} shown"
+        )
+        if self._selected_uuid not in rows:
+            self._selected_uuid = order[0] if order else None
+        if self._selected_uuid:
+            table.move_cursor(row=order.index(self._selected_uuid), animate=False)
+            self._render_record(self._records[self._selected_uuid])
+        else:
+            self._detail_base = (
+                "No matching VMs. Clear search to view the inventory."
+                if query and self._inventory is not None else
+                "No VM records are currently available."
+            )
+            self.query_one("#detail-box", Static).update(self._detail_base)
+
     @on(DataTable.RowHighlighted, "#fleet-table")
     def row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         # A queued highlight may arrive while the screen is being torn down.
         if not self._running or not self.is_mounted(event.data_table):
             return
         key = getattr(event.row_key, "value", str(event.row_key))
+        if str(key) not in self._table_order:
+            return  # Ignore queued highlights for rows hidden by search.
         self._selected_uuid = str(key)
         record = self._records.get(self._selected_uuid)
         if record is not None:
@@ -1018,7 +1039,7 @@ class PlaividTui(App[None]):
         self.query_one("#detail-box", Static).update(redact_text(self._detail_base + extra))
 
     def action_details(self) -> None:
-        if self._selected_uuid:
+        if self._selected_uuid in self._table_order:
             self._load_detail(self._selected_uuid)
 
     @on(Select.Changed, "#bulk-actions")
@@ -1041,7 +1062,7 @@ class PlaividTui(App[None]):
             return
         if self.query_one("#select-all", Checkbox).value:
             selectors = ("all",)
-        elif self._selected_uuid:
+        elif self._selected_uuid in self._table_order:
             selectors = (self._selected_uuid,)
         else:
             self._show_error("Select a VM row first.")

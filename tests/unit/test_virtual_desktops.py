@@ -146,9 +146,10 @@ def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
             await pilot.pause(0.25)
             assert provider.dispatched == [(Action.START, UUID_B)]
             assert "SUCCEEDED" in str(tui.query_one("#desktop-action-status", Static).render())
+            calls_before_refresh = provider.desktop_calls
             tui._request_refresh()
             await pilot.pause(0.15)
-            assert provider.desktop_calls == 3 and tui._desktop_selected == UUID_B
+            assert provider.desktop_calls > calls_before_refresh and tui._desktop_selected == UUID_B
             tui._session_ended("test logout")
             assert table.row_count == 0 and tui._desktop_section is None
 

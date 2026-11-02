@@ -84,26 +84,10 @@ def palette_for(color_system: str | None, *, no_color: bool = False) -> Palette:
     return ANSI16
 
 
-# The reference's blue → purple → rose brand arc, applied only to the wordmark.
-_BRAND_STOPS = ((71, 150, 228), (132, 122, 206), (195, 103, 127))
-
-
-def _brand_color(position: int, count: int) -> str:
-    step = position / max(1, count - 1) * 2
-    index = min(1, int(step))
-    fraction = step - index
-    first, second = _BRAND_STOPS[index : index + 2]
-    channels = (round(a + (b - a) * fraction) for a, b in zip(first, second, strict=True))
-    return "#" + "".join(f"{channel:02x}" for channel in channels)
-
-
 def brand(palette: Palette = TRUECOLOR) -> Text:
-    """Compact block mark and restrained static gradient; no extra dependencies."""
-    text = Text("▝▜  ", style=f"bold {palette.primary}")
-    name = "PLAIVID"
-    for index, letter in enumerate(name):
-        text.append(letter, style=f"bold {_brand_color(index, len(name))}" if palette is TRUECOLOR else f"bold {palette.primary}")
-    text.append("  /  PVM MONITOR", style=palette.muted)
+    """Single-accent wordmark; the source readings, not a gradient, lead."""
+    text = Text("▝▜  PLAIVID", style=f"bold {palette.primary}")
+    text.append("  /  PVM console", style=palette.muted)
     return text
 
 
@@ -114,7 +98,7 @@ def styled_metric(value: str, *, heading: bool = False, palette: Palette = TRUEC
     for index, line in enumerate(lines):
         if index:
             text.append("\n")
-        style = f"bold {palette.secondary}" if heading or index == 0 else f"bold {palette.accent}" if index == 1 else palette.muted
+        style = f"bold {palette.foreground}" if heading or index == 0 else f"bold {palette.accent}" if index == 1 else palette.muted
         text.append(line, style=style)
     # Text and color communicate status together. Avoid styling untrusted markup.
     for word, color in (

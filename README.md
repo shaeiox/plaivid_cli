@@ -57,8 +57,10 @@ plaivid stop TARGET            Submit a stop command
 The remaining lifecycle commands are `kill`, `reset`, `pause`, and `resume`. Targets may be a canonical UUID, exact VM name, unique name prefix, displayed inventory index, `all`, `state:<state>`, or `process:present|missing`. Comma-separated selections are accepted, for example `plaivid stop UUID1,UUID2`. `state:running` is derived from object-store state; process observations remain distinct evidence and are not silently substituted for object state.
 
 The **Virtual Desktops** TUI tab mirrors the VM page's summary, Refresh,
-action dropdown, all-target checkbox and Audit layout, with an additional local
-name search. Choosing one of six Desktop actions submits the selected UUID or the full
+action dropdown, all-target checkbox and Audit layout. Both inventory tabs have
+local name search: it does not trigger a PVM read, and selection follows visible
+UUID rows. Apply to all always targets the complete unfiltered inventory, not just
+search matches. The VM scope line shows both the target count and visible count. Choosing one of six Desktop actions submits the selected UUID or the full
 unfiltered Desktop set immediately, without another confirmation. The commands use
 the documented `sbell vm/<action>` forms; successful applicability to Lite
 Desktops is **not yet established by a captured response**. Treat them as
