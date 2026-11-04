@@ -46,3 +46,33 @@ def test_missing_section_is_not_verified():
 def test_logo_colour_follows_the_verdict():
     assert logo_text().style == f"bold {LOGO_COLOR}"
     assert logo_text(ALARM).style == f"bold {ALARM}"
+
+
+def test_failed_read_with_missing_pid_file_is_not_operational():
+    failed = section(None, GOOD, CollectionStatus.UNAVAILABLE)
+    level, banner, colour = _quorum_verdict(failed, TRUECOLOR, pid_file=False)
+    assert (level, colour) == ("bad", ALARM)
+    assert banner == "SBALL NOT OPERATIONAL · PID file missing, sbell not responding"
+
+
+def test_failed_read_with_pid_file_present_stays_not_verified():
+    failed = section(None, GOOD, CollectionStatus.UNAVAILABLE)
+    assert _quorum_verdict(failed, TRUECOLOR, pid_file=True)[1] == "SBALL NOT VERIFIED · unavailable"
+    assert _quorum_verdict(failed, TRUECOLOR, pid_file=None)[1] == "SBALL NOT VERIFIED · unavailable"
+
+
+def test_pid_file_check_reports_missing_present_and_unknown(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from plaivid_cli.infrastructure.local_monitor import sballd_pid_file_present
+
+    missing = tmp_path / "sballd.pid"
+    assert sballd_pid_file_present(missing) is False
+    missing.write_text("1234\n")
+    assert sballd_pid_file_present(missing) is True
+
+    def denied(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    assert sballd_pid_file_present(missing) is None

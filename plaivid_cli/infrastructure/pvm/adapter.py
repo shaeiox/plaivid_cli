@@ -25,7 +25,7 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.infrastructure.diagnostics import redact_text
-from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
+from plaivid_cli.infrastructure.local_monitor import LinuxMonitor, sballd_pid_file_present
 from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
 from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
@@ -260,7 +260,11 @@ class LocalPvmAdapter:
     def local_host(self) -> SourceResult[LocalHostSample]:
         sample = self._local_monitor.host()
         status = CollectionStatus.CURRENT if sample.memory_total is not None and sample.load1 is not None else CollectionStatus.PARTIAL
-        sample = replace(sample, pvm_uptime_seconds=self._sball_uptime_seconds())
+        sample = replace(
+            sample,
+            pvm_uptime_seconds=self._sball_uptime_seconds(),
+            sballd_pid_file=sballd_pid_file_present(),
+        )
         return SourceResult(sample, status, "local /proc, systemctl sballd")
 
     def _sball_uptime_seconds(self) -> float | None:

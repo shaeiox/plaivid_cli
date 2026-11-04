@@ -49,6 +49,7 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation import host_metrics as hm
+from plaivid_cli.domain.overview import LocalHostSample
 from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
@@ -950,10 +951,15 @@ class PlaividTui(App[None]):
         metric_section = snapshot.section("host_metrics")
         status = as_host_status(status_section) if status_section else None
         metrics = as_host_metrics(metric_section) if metric_section else None
-        level, _, _ = _quorum_verdict(status_section, self._palette)
+        local = snapshot.section("local_host")
+        local_sample = local.value if local is not None and local.value is not None else (local.last_good_value if local else None)
+        pid_file = local_sample.sballd_pid_file if isinstance(local_sample, LocalHostSample) else None
+        level, _, _ = _quorum_verdict(status_section, self._palette, pid_file)
         logo_colour = {"ok": LOGO_COLOR, "warn": self._palette.warning, "bad": ALARM}[level]
         self.query_one("#host-logo", Static).update(logo_text(logo_colour))
-        self.query_one("#host-status", Static).update(_host_status_text(status, status_section, self._palette))
+        self.query_one("#host-status", Static).update(
+            _host_status_text(status, status_section, self._palette, pid_file)
+        )
         self._render_metric_panels(metrics, metric_section)
 
     def _render_metric_panels(self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> None:
@@ -1221,17 +1227,22 @@ def _section_status(section: SectionSnapshot[object] | None) -> str:
     return section.status.value.replace("_", " ")
 
 
-def _quorum_verdict(section: SectionSnapshot[object] | None, palette=TRUECOLOR) -> tuple[str, str, str]:
+def _quorum_verdict(
+    section: SectionSnapshot[object] | None, palette=TRUECOLOR, pid_file: bool | None = None
+) -> tuple[str, str, str]:
     """Quorum verdict from the *live* read only: (level, banner, colour).
 
     level is ``ok`` (current and quorate), ``warn`` (quorate but partial or stale) or ``bad``
     (not quorate, or not verifiable). A failed read never keeps the last good value as current.
+    When the read fails and the sballd PID file is missing, the service is reported as not operational.
     """
     if section is None:
         return "bad", "SBALL NOT VERIFIED · no status", ALARM
     live = section.value if isinstance(section.value, HostStatus) else None
     collection = section.status.value.replace("_", " ")
     if live is None:
+        if pid_file is False:
+            return "bad", "SBALL NOT OPERATIONAL · PID file missing, sbell not responding", ALARM
         return "bad", f"SBALL NOT VERIFIED · {collection}", ALARM
     state = (live.sball_state or "").strip().lower()
     if state == "quorate" and section.status is CollectionStatus.CURRENT:
@@ -1241,8 +1252,13 @@ def _quorum_verdict(section: SectionSnapshot[object] | None, palette=TRUECOLOR) 
     return "bad", f"SBALL NOT QUORATE · {live.sball_state or 'state unknown'}", ALARM
 
 
-def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object] | None, palette=TRUECOLOR) -> Text:
-    _, banner, colour = _quorum_verdict(section, palette)
+def _host_status_text(
+    status: HostStatus | None,
+    section: SectionSnapshot[object] | None,
+    palette=TRUECOLOR,
+    pid_file: bool | None = None,
+) -> Text:
+    _, banner, colour = _quorum_verdict(section, palette, pid_file)
     live = section.value if isinstance(section.value, HostStatus) else None
     text = Text()
     text.append(redact_text(banner) + "\n", style=f"bold {colour}")

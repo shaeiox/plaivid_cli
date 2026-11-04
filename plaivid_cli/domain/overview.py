@@ -17,6 +17,8 @@ class LocalHostSample:
     uptime_seconds: float | None = None
     # Elapsed time since sballd became active, from `systemctl status sballd`.
     pvm_uptime_seconds: float | None = None
+    # True when the sballd PID file exists; None when it could not be checked.
+    sballd_pid_file: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

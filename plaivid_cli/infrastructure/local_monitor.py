@@ -33,6 +33,17 @@ def _number(path: Path) -> int | None:
     return result if result is not None and result >= 0 else None
 
 
+SBALLD_PID_FILE = Path("/var/run/pvm/sballd.pid")
+
+
+def sballd_pid_file_present(path: Path = SBALLD_PID_FILE) -> bool | None:
+    """Whether the sballd PID file exists. None when the check itself fails (e.g. permissions)."""
+    try:
+        return path.exists()
+    except OSError:
+        return None
+
+
 class LinuxMonitor:
     def __init__(self, proc: Path = Path("/proc"), sys_net: Path = Path("/sys/class/net")) -> None:
         self.proc = proc
