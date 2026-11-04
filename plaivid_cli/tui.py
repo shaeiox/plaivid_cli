@@ -672,6 +672,10 @@ class PlaividTui(App[None]):
             if sections:
                 self._start_refresh(sections)
         else:
+            background = self._overview_schedule.background_due()
+            if background:
+                self._start_refresh(background)
+                return
             import time
 
             now = time.monotonic()
@@ -709,7 +713,8 @@ class PlaividTui(App[None]):
         except Exception as exc:
             self.call_from_thread(self._show_refresh_error, epoch, type(exc).__name__)
         else:
-            self.call_from_thread(self._publish_if_current, snapshot, epoch)
+            background = sections == ("local_host",)
+            self.call_from_thread(self._publish_if_current, snapshot, epoch, background)
         finally:
             self.call_from_thread(self._refresh_finished)
 
@@ -724,9 +729,14 @@ class PlaividTui(App[None]):
         if self.session is not None and epoch == self._session_epoch:
             self._show_error(f"Refresh failed: {kind}")
 
-    def _publish_if_current(self, snapshot: ApplicationSnapshot, epoch: int) -> None:
+    def _publish_if_current(self, snapshot: ApplicationSnapshot, epoch: int, background: bool = False) -> None:
         if self.session is not None and epoch == self._session_epoch:
-            self._publish_snapshot(snapshot)
+            if background:
+                # Another tab is visible: record the sample and redraw only the graphs.
+                self._history.add(snapshot)
+                self._render_charts()
+            else:
+                self._publish_snapshot(snapshot)
 
     def _put(self, widget_id: str, text: str) -> None:
         if self._render_cache.get(widget_id) != text:
@@ -763,7 +773,7 @@ class PlaividTui(App[None]):
         )
         cpu_header.append("   last 60 s · scale 0–100 %", style=palette.muted)
         cpu_chart.set_chart(
-            series=(Series("cpu", cpu_colour(cpu_now, palette), cpu, area=True),),
+            series=(Series("cpu", cpu_colour(cpu_now, palette), cpu),),
             t_end=newest,
             scale_top=100.0,
             header=cpu_header,

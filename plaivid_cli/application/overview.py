@@ -83,6 +83,20 @@ class OverviewSchedule:
         self.leave()
         self.next_due.clear()
 
+    def background_due(self, *, now: float | None = None) -> tuple[str, ...]:
+        """Keep the local graph history sampling while another tab is shown.
+
+        Only the local /proc sample runs (no server request), at the same cadence as the Overview.
+        """
+        if self.active or self.busy:
+            return ()
+        clock = time.monotonic() if now is None else now
+        if clock >= self.next_due.get("local", float("inf")):
+            self.next_due["local"] = clock + self.interval
+            self.busy = True
+            return ("local_host",)
+        return ()
+
     def due(self, *, now: float | None = None) -> tuple[str, ...]:
         if not self.active or self.busy:
             return ()
