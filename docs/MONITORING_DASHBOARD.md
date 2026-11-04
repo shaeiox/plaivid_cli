@@ -28,3 +28,9 @@ No actual PVM environment or dashboard screenshot was available in this workspac
 5. Compare 80/120-column renders, keyboard navigation, NIC switching, VM operations, logout/login and resize against an owner-provided screenshot. Verify no full-screen clears or duplicate polling. Do not submit real VM mutations except under the separate `docs/REAL_PVM_VALIDATION.md` authorization procedure.
 
 Local verification: fake PVM/OS fixtures, Textual Pilot, pytest, Ruff, Pyright. Target-PVM acceptance remains **PENDING MANUAL PVM VALIDATION**.
+
+## Host monitoring panels (`sbell monitoring metrics`)
+
+The Overview's **Host monitoring** section is built from one `monitoring/metrics` response per refresh cycle. Panels: SYSTEM (host, host ID, platform, kernel, virtualization, boot time, uptime), CPU (usage, cores, scheduler count, run queue, blocked tasks, context switches, interrupts, forks), MEMORY (RAM and swap), LOAD & TASKS (task, process, thread and open-fd counts), NETWORK INTERFACES, STORAGE (real filesystems only), TEMPERATURE, SESSIONS (logged-in users), and TOP PROCESSES BY CPU (top 10 shown; top 50 kept).
+
+Rules: a missing value is shown as `—`, never as zero. The process `full_command` field is never read or displayed, because it can contain sbell argv and session tokens. Units for the per-process memory percentage are taken as reported and are not independently verified on the target host. Synthetic test fixtures live in `tests/fixtures/monitoring-metrics.xml`.

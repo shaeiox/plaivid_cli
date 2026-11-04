@@ -16,8 +16,11 @@ from plaivid_cli.domain.models import (
     NetworkInterface,
     ObjectVM,
     ProcessObservation,
+    ProcessSample,
     SourceResult,
     StoragePartition,
+    TemperatureReading,
+    UserSession,
     VMDetail,
     canonical_uuid,
 )
@@ -218,6 +221,94 @@ def parse_sball_status(root: ET.Element) -> ParseResult[HostStatus | None]:
     return ParseResult(status, CollectionStatus.CURRENT, source="sball/show")
 
 
+_PROCESS_LIMIT = 50
+
+
+def _real(value: str | None) -> float | None:
+    """Signed decimal (temperatures may be negative); None for missing or non-finite text."""
+    if value is None:
+        return None
+    try:
+        parsed = float(value.strip())
+    except (AttributeError, ValueError):
+        return None
+    return parsed if parsed == parsed and parsed not in (float("inf"), float("-inf")) else None
+
+
+def _text(element: ET.Element | None, path: str) -> str | None:
+    if element is None:
+        return None
+    value = (element.findtext(path) or "").strip()
+    return value or None
+
+
+def _host_facts(metrics: ET.Element, system: ET.Element | None) -> dict[str, object]:
+    """Fields from system_info, load_stats, process_stats, system_stats and the lists."""
+    load = metrics.find(".//load_stats")
+    procs = metrics.find(".//process_stats")
+    sysstats = metrics.find(".//system_stats")
+    temperatures = tuple(
+        TemperatureReading(sensor=_text(item, "sensor_key") or "sensor", celsius=value)
+        for item in metrics.findall(".//temperature_stat")
+        if (value := _real(item.findtext("temperature"))) is not None
+    )
+    users = tuple(
+        UserSession(
+            user=_text(item, "user") or "?",
+            terminal=_text(item, "terminal"),
+            host=_text(item, "host"),
+            started=_text(item, "started_human"),
+        )
+        for item in metrics.findall(".//user_stat")
+    )
+    rows: list[ProcessSample] = []
+    for item in metrics.findall(".//process_info_item"):
+        pid = _int(item.findtext("pid"))
+        if pid is None:
+            continue
+        # full_command is deliberately never read: it can contain sbell argv and tokens.
+        rows.append(ProcessSample(
+            pid=pid,
+            ppid=_int(item.findtext("ppid")),
+            username=_text(item, "username"),
+            cpu_pct=_float(item.findtext("cpu")),
+            memory_pct=_float(item.findtext("memory")),
+            threads=_int(item.findtext("threads")),
+            state=_text(item, "status_list/item"),
+            command=_text(item, "command"),
+            exe=_text(item, "exe"),
+            started=_text(item, "start_time_human"),
+            uptime=_text(item, "uptime_human"),
+        ))
+    rows.sort(key=lambda row: (-(row.cpu_pct or 0.0), row.pid))
+    total = _int(procs.findtext("num_processes")) if procs is not None else None
+    return {
+        "host_id": _text(system, "host_id"),
+        "platform_family": _text(system, "platform_family"),
+        "kernel_version": _text(system, "kernel_version"),
+        "virtualization": " ".join(
+            part for part in (_text(system, "virtualization_system"), _text(system, "virtualization_role")) if part
+        ) or None,
+        "boot_time": _text(system, "boot_time_human"),
+        "uptime_seconds": _int(system.findtext("uptime")) if system is not None else None,
+        "cpu_count": _int(load.findtext("cpus")) if load is not None else None,
+        "run_queue": _int(load.findtext("run_queue")) if load is not None else None,
+        "blocked_tasks": _int(load.findtext("blocked")) if load is not None else None,
+        "blocked_percent": _float(load.findtext("blocked_percent")) if load is not None else None,
+        "total_tasks": _int(load.findtext("total_tasks")) if load is not None else None,
+        "num_processes": total,
+        "num_threads": _int(procs.findtext("num_threads")) if procs is not None else None,
+        "open_fds": _int(procs.findtext("open_fds")) if procs is not None else None,
+        "context_switches": _int(sysstats.findtext("context_switches")) if sysstats is not None else None,
+        "interrupts": _int(sysstats.findtext("interrupts")) if sysstats is not None else None,
+        "forks": _int(sysstats.findtext("forks")) if sysstats is not None else None,
+        "temperatures": temperatures,
+        "users": users,
+        "processes": tuple(rows[:_PROCESS_LIMIT]),
+        "process_total": total if total is not None else (len(rows) or None),
+    }
+
+
 def parse_metrics(root: ET.Element) -> ParseResult[HostMetrics | None]:
     metrics = root.find(".//metrics")
     if metrics is None:
@@ -285,6 +376,7 @@ def parse_metrics(root: ET.Element) -> ParseResult[HostMetrics | None]:
         ),
         interfaces=tuple(interfaces),
         storage=tuple(sorted(storage, key=lambda item: (item.category, item.mountpoint))),
+        **_host_facts(metrics, system),
     )
     return ParseResult(value, CollectionStatus.CURRENT, source="monitoring/metrics")
 

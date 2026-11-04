@@ -48,6 +48,7 @@ from plaivid_cli.domain.models import (
     VMRecord,
 )
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation import host_metrics as hm
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
     apply_theme,
@@ -71,6 +72,12 @@ BULK_ACTIONS: tuple[Action, ...] = (
 def _action_label(action: Action) -> str:
     return action.value.title()
 
+
+# Grid panels first; the process table is last and rendered full-width below the grid.
+_METRIC_PANELS = (
+    "metrics-system", "metrics-cpu", "metrics-memory", "metrics-tasks", "metrics-network",
+    "metrics-storage", "metrics-temperature", "metrics-sessions", "metrics-processes",
+)
 
 class PlaividTui(App[None]):
     """Operator dashboard; all I/O is delegated to application coordinators."""
@@ -167,10 +174,13 @@ class PlaividTui(App[None]):
                                                  background: $p-panel; }
         #rediscover { margin: 1 0; }
         #host-grid { height: auto; }
-        #host-status, #host-metrics { width: 1fr; height: auto; min-height: 6;
-                                      border: round $p-border; background: $p-panel;
-                                      padding: 1; }
-        #host-status { margin-right: 1; }
+        #host-status { width: 1fr; height: auto; min-height: 6; border: round $p-border;
+                       background: $p-panel; padding: 1; }
+        #metrics-grid { grid-size: 2; grid-gutter: 1; height: auto; }
+        .wide #metrics-grid { grid-size: 3; }
+        .metric-panel { height: auto; min-height: 6; border: round $p-border;
+                        background: $p-panel; padding: 0 1; color: $p-text; }
+        #metrics-processes { margin-top: 1; }
 
         #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
         .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
@@ -323,7 +333,11 @@ class PlaividTui(App[None]):
                         yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
                         with Horizontal(id="host-grid"):
                             yield Static("Host status\nWaiting for collection…", id="host-status", markup=False)
-                            yield Static("Host metrics\nWaiting for collection…", id="host-metrics", markup=False)
+                        yield Static("Host monitoring", classes="dashboard-heading")
+                        with Grid(id="metrics-grid"):
+                            for panel in _METRIC_PANELS[:-1]:
+                                yield Static("Waiting for collection…", id=panel, classes="metric-panel", markup=False)
+                        yield Static("Waiting for collection…", id="metrics-processes", classes="metric-panel", markup=False)
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
@@ -494,7 +508,8 @@ class PlaividTui(App[None]):
         self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#audit-panel", Static).display = False
         self.query_one("#host-status", Static).update("Host status\nWaiting for collection…")
-        self.query_one("#host-metrics", Static).update("Host metrics\nWaiting for collection…")
+        for panel in _METRIC_PANELS:
+            self.query_one(f"#{panel}", Static).update("Waiting for collection…")
         self._visible_snapshot = None
         self._history = OverviewHistory()
         self._render_cache.clear()
@@ -933,7 +948,23 @@ class PlaividTui(App[None]):
         status = as_host_status(status_section) if status_section else None
         metrics = as_host_metrics(metric_section) if metric_section else None
         self.query_one("#host-status", Static).update(_host_status_text(status, status_section))
-        self.query_one("#host-metrics", Static).update(_host_metrics_text(metrics, metric_section))
+        self._render_metric_panels(metrics, metric_section)
+
+    def _render_metric_panels(self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> None:
+        status = _section_status(section)
+        texts = {
+            "metrics-system": hm.system_panel(metrics, status),
+            "metrics-cpu": hm.cpu_panel(metrics),
+            "metrics-memory": hm.memory_panel(metrics),
+            "metrics-tasks": hm.tasks_panel(metrics),
+            "metrics-network": hm.network_panel(metrics),
+            "metrics-storage": hm.storage_panel(metrics),
+            "metrics-temperature": hm.temperature_panel(metrics),
+            "metrics-sessions": hm.sessions_panel(metrics),
+            "metrics-processes": hm.processes_panel(metrics),
+        }
+        for panel, text in texts.items():
+            self.query_one(f"#{panel}", Static).update(text)
 
     @on(Checkbox.Changed, "#select-all")
     def vm_scope_changed(self) -> None:
@@ -1193,24 +1224,6 @@ def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object
             f"RAM  {_bytes(status.ram_used_bytes)} / {_bytes(status.ram_total_bytes)}",
             f"Load  {_display(status.load1)}  {_display(status.load5)}  {_display(status.load15)}",
             f"Storage  {_bytes(status.storage_available_bytes)} free / {_bytes(status.storage_total_bytes)}",
-        ]
-    )
-    return redact_text("\n".join(lines))
-
-
-def _host_metrics_text(metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> str:
-    lines = ["HOST METRICS", f"Collection  {_section_status(section)}"]
-    if metrics is None:
-        lines.append("No current monitoring values.")
-        return redact_text("\n".join(lines))
-    lines.extend(
-        [
-            f"System  {metrics.hostname or '—'}  ·  {metrics.os_version or '—'}",
-            f"CPU  {_display(metrics.cpu_pct, suffix='%')}  ·  logical cores  {_display(metrics.logical_cores)}",
-            f"Memory  {_bytes(metrics.memory_used_bytes)} / {_bytes(metrics.memory_total_bytes)}",
-            f"Swap  {_bytes(metrics.swap_used_bytes)} / {_bytes(metrics.swap_total_bytes)}",
-            f"Uptime  {metrics.uptime or '—'}",
-            f"Interfaces  {len(metrics.interfaces)}  ·  storage mounts  {len(metrics.storage)}",
         ]
     )
     return redact_text("\n".join(lines))
