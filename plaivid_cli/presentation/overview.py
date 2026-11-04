@@ -37,6 +37,17 @@ def _size(value: int | float | None) -> str:
     return "N/A"
 
 
+def _uptime(seconds: float | None) -> str:
+    if seconds is None:
+        return "N/A"
+    total = int(seconds)
+    weeks, rest = divmod(total, 604800)
+    days, rest = divmod(rest, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{weeks}w {days}d {hours}h {minutes}m {secs}s"
+
+
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
 
@@ -100,18 +111,10 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         f"Dashboard API {_label(dashboard_section, max(18, interval))}"
     )
     groups["vdi-monitor"] = "Virtual disk images\nN/A · no verified per-VDI inventory or capacity/usage contract"
-    pvm_resources = (
-        f"CPU entries {len(dashboard.cpu_info)} · RAM used/free/total (API raw units) "
-        f"{dashboard.ram_used_raw or 'N/A'} / {dashboard.ram_free_raw or 'N/A'} / "
-        f"{dashboard.ram_total_raw or 'N/A'}"
-        if dashboard.cpu_info or any((dashboard.ram_used_raw, dashboard.ram_free_raw, dashboard.ram_total_raw))
-        else "CPU/RAM details N/A"
-    )
     groups["host-identity"] = (
         f"LOCAL  {host.hostname or 'N/A'}   /   PVM  {dashboard.host_name or 'N/A'}"
         f" · ID {dashboard.host_id or 'N/A'}\n"
-        f"API {_label(dashboard_section, max(18, interval))} · PVM {pvm_resources}\n"
-        "Local /proc values are not verified as PVM-host values."
+        f"PVM Uptime  {_uptime(host.pvm_uptime_seconds)}"
     )
     return {key: redact_text(value) for key, value in groups.items()}
 

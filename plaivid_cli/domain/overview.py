@@ -15,6 +15,8 @@ class LocalHostSample:
     load5: float | None = None
     load15: float | None = None
     uptime_seconds: float | None = None
+    # Elapsed time since sballd became active, from `systemctl status sballd`.
+    pvm_uptime_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

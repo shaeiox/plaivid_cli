@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from plaivid_cli.domain.desktops import VirtualDesktop
@@ -27,6 +28,7 @@ from plaivid_cli.infrastructure.diagnostics import redact_text
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
 from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
+from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
 from plaivid_cli.infrastructure.pvm.parsers import (
     parse_metrics,
     parse_object_inventory,
@@ -86,6 +88,9 @@ def _action_params(action: Action, uuid: str) -> str:
             "<exit_from_replicate>yes</exit_from_replicate></vm_start>"
         )
     return _xml_text("vm_key", key)
+
+
+SBALLD_STATUS_ARGV = ("systemctl", "status", "sballd", "--no-pager")
 
 
 class LocalPvmAdapter:
@@ -255,7 +260,16 @@ class LocalPvmAdapter:
     def local_host(self) -> SourceResult[LocalHostSample]:
         sample = self._local_monitor.host()
         status = CollectionStatus.CURRENT if sample.memory_total is not None and sample.load1 is not None else CollectionStatus.PARTIAL
-        return SourceResult(sample, status, "local /proc")
+        sample = replace(sample, pvm_uptime_seconds=self._sball_uptime_seconds())
+        return SourceResult(sample, status, "local /proc, systemctl sballd")
+
+    def _sball_uptime_seconds(self) -> float | None:
+        # Read-only local service status; any failure simply leaves uptime unknown.
+        try:
+            result = self._runner.run(SBALLD_STATUS_ARGV, timeout=5)
+        except ProcessError:
+            return None
+        return sball_uptime_seconds(result.stdout, datetime.now(UTC))
 
     def physical_nics(self, token: str) -> SourceResult[tuple[PhysicalNic, ...]]:
         # Same configured local command, privilege and token-argv gate as all reads.
