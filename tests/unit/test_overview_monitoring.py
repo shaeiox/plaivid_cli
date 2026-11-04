@@ -305,7 +305,6 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
     history = OverviewHistory()
     complete = cards(snapshot(CollectionStatus.CURRENT, result.value, 1), history, 3)
     assert "Running VMs\n6\n" in complete["running-card"]
-    assert "Virtual machines · 6 running" in complete["vm-monitor"]
 
     # Neither a partial result nor header-only output proves zero or six.
     for rows in (result.value, ()):

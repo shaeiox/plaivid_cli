@@ -161,15 +161,11 @@ class PlaividTui(App[None]):
         .wide #chart-grid { grid-size: 3; }
         .dashboard-card { height: 6; padding: 0 1; border-left: solid $p-border;
                           background: $p-surface; color: $p-text; }
-        #heartbeat-card { height: 5; border-left: solid $p-border;
-                          background: $p-panel; margin-top: 1; }
-        #heartbeat-details { height: auto; padding: 0 1; color: $p-muted;
-                             background: $p-panel; border-left: solid $p-border; }
         .chart-card { height: 4; padding: 0 1; border-left: solid $p-border;
                       background: $p-panel; }
         #nic-tabs { height: auto; }
         .nic-tab { width: auto; min-width: 10; margin-right: 1; }
-        #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5;
+        #nic-detail { height: auto; min-height: 5;
                                                  padding: 1; border: round $p-border;
                                                  background: $p-panel; }
         #rediscover { margin: 1 0; }
@@ -266,7 +262,6 @@ class PlaividTui(App[None]):
         self._table_content: dict[str, tuple[str, ...]] = {}
         self._table_columns = ()
         self._render_cache: dict[str, str] = {}
-        self._heartbeat_color: str | None = None
         self._overview_schedule = OverviewSchedule(
             min(60, max(1, application.settings.refresh_interval))
         )
@@ -316,8 +311,6 @@ class PlaividTui(App[None]):
                         with Grid(id="summary-grid"):
                             for card in ("running-card", "cpu-card", "memory-card", "load-card"):
                                 yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
-                        yield Static("Host heartbeat\nLOADING", id="heartbeat-card", classes="dashboard-card", markup=False)
-                        yield Static("Awaiting collector responses", id="heartbeat-details", markup=False)
                         yield Static("Resource history", classes="dashboard-heading")
                         with Grid(id="chart-grid"):
                             for chart in ("cpu-chart", "memory-chart", "load-chart"):
@@ -327,10 +320,6 @@ class PlaividTui(App[None]):
                             pass
                         yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
                         yield Button("Rediscover", id="rediscover")
-                        yield Static("Virtual machines", classes="dashboard-heading")
-                        yield Static("Waiting for VM monitoring…", id="vm-monitor", markup=False)
-                        yield Static("Virtual disk images", classes="dashboard-heading")
-                        yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
                         with Horizontal(id="host-grid"):
                             yield Static("Host status\nWaiting for collection…", id="host-status", markup=False)
                         yield Static("Host monitoring", classes="dashboard-heading")
@@ -513,14 +502,13 @@ class PlaividTui(App[None]):
         self._visible_snapshot = None
         self._history = OverviewHistory()
         self._render_cache.clear()
-        self._heartbeat_color = None
         self.query_one("#nic-tabs", Horizontal).remove_children()
         self._nic_tab_names = ()
         self._nic_selected = None
         for widget_id in (
-            "running-card", "cpu-card", "memory-card", "load-card", "heartbeat-card",
-            "cpu-chart", "memory-chart", "load-chart", "heartbeat-details", "nic-detail",
-            "vm-monitor", "vdi-monitor", "host-identity",
+            "running-card", "cpu-card", "memory-card", "load-card",
+            "cpu-chart", "memory-chart", "load-chart", "nic-detail",
+            "host-identity",
         ):
             self.query_one(f"#{widget_id}", Static).update("Waiting for authenticated monitoring data…")
 
@@ -614,15 +602,11 @@ class PlaividTui(App[None]):
         if self.session is None:
             return
         if self._refresh_busy:
-            if self.query_one("#tabs", TabbedContent).active == "overview":
-                self._render_heartbeat_age()
             return
         if self.query_one("#tabs", TabbedContent).active == "overview":
             sections = self._overview_schedule.due()
             if sections:
                 self._start_refresh(sections)
-            else:
-                self._render_heartbeat_age()
         else:
             import time
 
@@ -680,23 +664,6 @@ class PlaividTui(App[None]):
         if self.session is not None and epoch == self._session_epoch:
             self._publish_snapshot(snapshot)
 
-    def _render_heartbeat_age(self) -> None:
-        # Low-cost UI clock: no PVM calls; render only if the text changed.
-        snapshot = self._visible_snapshot
-        if snapshot is None:
-            return
-        values = cards(snapshot, self._history, self._overview_schedule.interval)
-        self._put("heartbeat-card", values["heartbeat-card"])
-        self._color_heartbeat(values["heartbeat-card"])
-        details = values["heartbeat-details"]
-        self._put("heartbeat-details", details)
-
-    def _color_heartbeat(self, text: str) -> None:
-        color = (self._palette.error if "OFFLINE" in text else self._palette.warning if "WARNING" in text else self._palette.border)
-        if color != self._heartbeat_color:
-            self.query_one("#heartbeat-card", Static).styles.border_left = ("solid", color)
-            self._heartbeat_color = color
-
     def _put(self, widget_id: str, text: str) -> None:
         if self._render_cache.get(widget_id) != text:
             self.query_one(f"#{widget_id}", Static).update(styled_metric(text, palette=self._palette))
@@ -708,7 +675,6 @@ class PlaividTui(App[None]):
         values = cards(snapshot, self._history, self._overview_schedule.interval)
         for widget_id, text in values.items():
             self._put(widget_id, text)
-        self._color_heartbeat(values["heartbeat-card"])
         devices, detail = nic_details(snapshot, self._nic_selected)
         names = tuple(item.name for item in devices)
         if names != self._nic_tab_names:

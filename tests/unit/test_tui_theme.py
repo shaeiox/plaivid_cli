@@ -73,8 +73,6 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 assert tui.query_one("#interval-apply", Button).region.height == 1
                 assert tui.query_one("#overview-refresh", Button).region.height == 1
                 assert tui.query_one(Footer).region.height == 1
-                # The live panel shows real collection status, not an animated fake heartbeat.
-                assert "Host heartbeat" in str(tui.query_one("#heartbeat-card", Static).render())
                 field = tui.query_one("#interval-input", Input)
                 field.focus()
                 await pilot.press("2")
@@ -133,7 +131,7 @@ def test_256_and_standard_terminal_render_with_matching_widget_and_control_theme
                 assert tui.query_one("#topbar").styles.background.hex.lower() == palette.panel
                 assert tui.query_one("#overview-toolbar").styles.background.hex.lower() == palette.panel
                 if system == "256":
-                    for selector in ("#host-identity", "#heartbeat-card", "#cpu-chart", "#nic-detail"):
+                    for selector in ("#host-identity", "#running-card", "#cpu-chart", "#nic-detail"):
                         assert tui.query_one(selector).styles.background.hex.lower() == palette.background
                     assert tui.query_one("#fleet-table").styles.background.hex.lower() == palette.background
                     assert tui.query_one(".metric-card").styles.background.hex.lower() == palette.background

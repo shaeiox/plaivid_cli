@@ -56,7 +56,6 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     host_section = snapshot.section("local_host")
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
-    inventory_section = snapshot.section("inventory")
     process_section = snapshot.section("processes")
     process_rows = process_section.value if process_section is not None else None
     running = None
@@ -84,33 +83,9 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         "memory-chart": f"Memory utilization\n{sparkline(history.values['memory'])}",
         "load-chart": f"System load\n{sparkline(history.values['load'])}",
     }
-    required = {
-        "Dashboard API": (snapshot.section("dashboard"), max(18, interval)),
-        "Local host": (host_section, interval),
-        "VM inventory": (inventory_section, max(18, interval)),
-        "NIC discovery": (snapshot.section("physical_nics"), float("inf")),
-        "NIC counters": (snapshot.section("nic_samples") or snapshot.section("physical_nics"), interval),
-    }
-    statuses = {key: health(section, cadence) for key, (section, cadence) in required.items()}
-    relevant = [entry.status for entry in statuses.values() if entry.status != "N/A"]
-    nic_unverified = statuses["NIC discovery"].status == "N/A" or statuses["NIC counters"].status == "N/A"
-    overall = "OFFLINE" if "OFFLINE" in relevant else "WARNING" if "WARNING" in relevant or nic_unverified else "LOADING" if "LOADING" in relevant else "ONLINE" if relevant else "N/A"
-    successes = [section for section, _ in required.values() if section and section.succeeded_monotonic is not None]
-    latest = max(successes, key=lambda section: section.succeeded_monotonic or 0) if successes else None
-    latency = f"{latest.latency_seconds * 1000:.0f} ms" if latest and latest.latency_seconds is not None else "N/A"
-    lines = [f"{name}: {entry.status} · {entry.age:.0f}s" if entry.age is not None else f"{name}: {entry.status}" for name, entry in statuses.items()]
-    groups["heartbeat-card"] = f"Host heartbeat\n{overall}\nLast {latest.succeeded_at.astimezone().strftime('%H:%M:%S') if latest and latest.succeeded_at else 'N/A'} · {latency}"
-    groups["heartbeat-details"] = "Collection health  ·  " + "  |  ".join(lines) + "  |  VDI: N/A (unverified)"
     dashboard_section = snapshot.section("dashboard")
     dashboard = _value(dashboard_section)
     dashboard = dashboard if isinstance(dashboard, DashboardSample) else DashboardSample()
-    groups["vm-monitor"] = (
-        "Virtual machines · " + (str(running) if running is not None else "N/A") + " running\n"
-        "Count from last verified pvm-running-vms ROW; N/A if listing incomplete\n"
-        "Top CPU / RAM / Network: N/A (response fields/units unverified)\n"
-        f"Dashboard API {_label(dashboard_section, max(18, interval))}"
-    )
-    groups["vdi-monitor"] = "Virtual disk images\nN/A · no verified per-VDI inventory or capacity/usage contract"
     groups["host-identity"] = (
         f"LOCAL  {host.hostname or 'N/A'}\n"
         f"sballd uptime  {_uptime(host.pvm_uptime_seconds)}\n"
