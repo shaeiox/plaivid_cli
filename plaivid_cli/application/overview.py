@@ -51,7 +51,10 @@ def health(section: SectionSnapshot[object] | None, cadence: float, *, now: floa
 class OverviewSchedule:
     """Single demand controller. The Textual app owns one timer and one worker."""
 
-    def __init__(self, interval: float = 3.0) -> None:
+    def __init__(self, interval: float = 3.0, host_status_interval: float = 2.0) -> None:
+        if not math.isfinite(host_status_interval) or host_status_interval <= 0:
+            raise ValueError("host_status_interval must be a finite positive number")
+        self.host_status_interval = host_status_interval
         self.set_interval(interval)
         self.active = False
         self.busy = False
@@ -68,9 +71,10 @@ class OverviewSchedule:
     def enter(self) -> None:
         self.active = True
         if not self.next_due:
-            self.next_due = {"local": 0, "pvm": 0, "discovery": 0}
+            self.next_due = {"local": 0, "pvm": 0, "host": 0, "discovery": 0}
         else:
             self.next_due["local"] = 0
+            self.next_due["host"] = 0
 
     def leave(self) -> None:
         self.active = False
@@ -91,8 +95,12 @@ class OverviewSchedule:
             sections.extend(("local_host", "nic_samples"))
             self.next_due["local"] = clock + self.interval
         if clock >= self.next_due.get("pvm", float("inf")):
-            sections.extend(("inventory", "dashboard", "host_status", "host_metrics"))
+            sections.extend(("inventory", "dashboard", "host_metrics"))
             self.next_due["pvm"] = clock + max(18, self.interval)
+        # sball show is cheap, so host status keeps its own faster cadence outside the PVM batch.
+        if clock >= self.next_due.get("host", float("inf")):
+            sections.append("host_status")
+            self.next_due["host"] = clock + self.host_status_interval
         if sections:
             self.busy = True
         return tuple(sections)

@@ -28,7 +28,7 @@ def test_schedule_is_single_flight_cadenced_and_discovery_is_one_shot():
     assert not scheduler.due(now=101)
     scheduler.finished()
     assert not scheduler.due(now=101)
-    assert scheduler.due(now=103) == ("local_host", "nic_samples")
+    assert scheduler.due(now=103) == ("local_host", "nic_samples", "host_status")
     scheduler.finished()
     scheduler.leave()
     assert not scheduler.due(now=120)
@@ -171,7 +171,8 @@ def test_resize_and_repeated_navigation_do_not_duplicate_pending_collection(tmp_
             assert "wide" not in tui.query_one("#shell").classes
             gate.set()
             await pilot.pause(.2)
-            assert provider.host_calls == 1
+            # The host read has its own 2s timer, so one timer read may follow the gated one.
+            assert provider.host_calls <= 2
             assert tui._refresh_busy is False
 
     try:
@@ -328,3 +329,23 @@ def test_sparkline_spans_exact_card_width_for_any_sample_count():
         assert len(sparkline(many, width)) == width
     assert sparkline(deque([(0.0, 3.0)]), 40) == "Waiting for samples"
     assert sparkline(deque([(0.0, 2.0), (1.0, 2.0)]), 8) == "▁" * 8
+
+
+def test_host_status_has_its_own_cadence_outside_the_pvm_batch() -> None:
+    scheduler = OverviewSchedule(interval=3.0, host_status_interval=2.0)
+    scheduler.enter()
+    first = scheduler.due(now=100.0)
+    assert first.count("host_status") == 1
+    scheduler.finished()
+    # Within the host interval nothing is due for host_status.
+    assert "host_status" not in scheduler.due(now=101.0)
+    scheduler.finished()
+    # Due again after 2s, while the PVM batch (inventory/dashboard) still waits for 18s.
+    later = scheduler.due(now=102.5)
+    assert later == ("host_status",)
+    scheduler.finished()
+    assert "inventory" not in scheduler.due(now=110.0)
+    scheduler.finished()
+    batch = scheduler.due(now=119.0)
+    assert "inventory" in batch and "dashboard" in batch and "host_metrics" in batch
+    assert "host_status" in batch

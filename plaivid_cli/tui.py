@@ -273,7 +273,8 @@ class PlaividTui(App[None]):
         self._table_columns = ()
         self._render_cache: dict[str, str] = {}
         self._overview_schedule = OverviewSchedule(
-            min(60, max(1, application.settings.refresh_interval))
+            min(60, max(1, application.settings.refresh_interval)),
+            host_status_interval=application.settings.host_status_interval,
         )
         self._history = OverviewHistory()
         self._nic_selected: str | None = None

@@ -41,3 +41,11 @@ def test_credentials_are_not_allowed_by_default_and_bulk_age_is_unset() -> None:
     settings: Settings = load_settings({})
     assert settings.allow_credential_argv is False
     assert settings.max_inventory_age_seconds is None
+
+
+def test_host_status_interval_defaults_to_two_seconds_and_is_configurable() -> None:
+    assert load_settings({}).host_status_interval == 2.0
+    assert load_settings({"PLAIVID_HOST_STATUS_INTERVAL": "0.5"}).host_status_interval == 0.5
+    for bad in ("0", "-1", "nan", "inf"):
+        with pytest.raises(ConfigurationError, match="finite positive"):
+            load_settings({"PLAIVID_HOST_STATUS_INTERVAL": bad})

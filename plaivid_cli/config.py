@@ -67,6 +67,7 @@ class Settings:
     max_inventory_age_seconds: float | None
     audit_database: Path
     log_level: str
+    host_status_interval: float = 2.0
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -92,6 +93,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         process_timeout=_positive_float(env, "PLAIVID_CMD_TIMEOUT", "30"),
         max_output_bytes=max_output,
         refresh_interval=_positive_float(env, "PLAIVID_REFRESH", "3"),
+        host_status_interval=_positive_float(env, "PLAIVID_HOST_STATUS_INTERVAL", "2"),
         state_dir=state_dir,
         session_file=state_dir / "session.json",
         default_username=username,
