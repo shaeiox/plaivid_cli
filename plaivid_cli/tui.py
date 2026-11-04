@@ -1208,10 +1208,6 @@ class PlaividTui(App[None]):
         self.query_one(f"#{panel_id}", Static).update(redact_text(text))
 
 
-def _load(value: float | None) -> str:
-    return "—" if value is None else f"{value:.2f}"
-
-
 def _display(value: int | float | str | None, *, suffix: str = "") -> str:
     return "—" if value is None else f"{value}{suffix}"
 
@@ -1238,9 +1234,6 @@ def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object
     text.append("Version ")
     text.append(redact_text(status.version or "—"), style=f"bold {palette.accent}")
     text.append("\n")
-    text.append(redact_text(
-        f"Load  {_load(status.load1)}  {_load(status.load5)}  {_load(status.load15)}"
-    ))
     return text
 
 
