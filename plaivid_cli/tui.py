@@ -154,7 +154,10 @@ class PlaividTui(App[None]):
         #host-identity { height: auto; color: $p-muted; }
         #overview-grid { height: auto; grid-size: 1; grid-gutter: 1 2; grid-rows: auto; margin-top: 1; }
         .cols-2 #overview-grid { grid-size: 2; }
+        .cols-2 #col-right { column-span: 2; }
         .cols-3 #overview-grid { grid-size: 3; }
+        .card-column { height: auto; }
+        .card-column > .card { margin-bottom: 1; }
         .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
                 border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
         .card Static { height: auto; background: $p-panel; color: $p-text; }
@@ -303,41 +306,44 @@ class PlaividTui(App[None]):
                             yield Button("Refresh", id="overview-refresh")
                         yield Static("", id="interval-error", markup=False)
                         with Grid(id="overview-grid"):
-                            with Vertical(classes="card", id="system-card") as box:
-                                box.border_title = "System information"
-                                yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
-                                yield Static("Waiting for collection…", id="metrics-system", markup=False)
-                            with Vertical(classes="card", id="cpu-box") as box:
-                                box.border_title = "CPU"
-                                yield Static("Loading monitoring data…", id="cpu-card", markup=False)
-                                yield Static("Waiting for samples", id="cpu-chart", markup=False)
-                            with Vertical(classes="card", id="memory-box") as box:
-                                box.border_title = "Memory"
-                                yield Static("Loading monitoring data…", id="memory-card", markup=False)
-                            with Vertical(classes="card", id="load-box") as box:
-                                box.border_title = "Load & tasks"
-                                yield Static("Loading monitoring data…", id="load-card", markup=False)
-                                yield Static("Waiting for samples", id="load-chart", markup=False)
-                                yield Static("Running VMs…", id="running-card", markup=False)
-                            with Vertical(classes="card", id="network-box") as box:
-                                box.border_title = "Network interfaces"
-                                yield Static("Waiting for collection…", id="metrics-network", markup=False)
-                                with Horizontal(id="nic-tabs"):
-                                    pass
-                                yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
-                                yield Button("Rediscover", id="rediscover")
-                            with Vertical(classes="card", id="storage-box") as box:
-                                box.border_title = "Storage"
-                                yield Static("Waiting for collection…", id="metrics-storage", markup=False)
-                            with Vertical(classes="card", id="temperature-box") as box:
-                                box.border_title = "Temperature"
-                                yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
-                            with Vertical(classes="card", id="sessions-box") as box:
-                                box.border_title = "Sessions"
-                                yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
-                            with Vertical(classes="card", id="host-status-box") as box:
-                                box.border_title = "Host status"
-                                yield Static("Waiting for collection…", id="host-status", markup=False)
+                            with Vertical(classes="card-column", id="col-left"):
+                                with Vertical(classes="card", id="network-box") as box:
+                                    box.border_title = "Network interfaces"
+                                    yield Static("Waiting for collection…", id="metrics-network", markup=False)
+                                    with Horizontal(id="nic-tabs"):
+                                        pass
+                                    yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
+                                    yield Button("Rediscover", id="rediscover")
+                                with Vertical(classes="card", id="storage-box") as box:
+                                    box.border_title = "Storage"
+                                    yield Static("Waiting for collection…", id="metrics-storage", markup=False)
+                                with Vertical(classes="card", id="sessions-box") as box:
+                                    box.border_title = "Sessions"
+                                    yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
+                            with Vertical(classes="card-column", id="col-center"):
+                                with Vertical(classes="card", id="system-card") as box:
+                                    box.border_title = "System information"
+                                    yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
+                                    yield Static("Waiting for collection…", id="metrics-system", markup=False)
+                                with Vertical(classes="card", id="load-box") as box:
+                                    box.border_title = "Load & tasks"
+                                    yield Static("Loading monitoring data…", id="load-card", markup=False)
+                                    yield Static("Waiting for samples", id="load-chart", markup=False)
+                                    yield Static("Running VMs…", id="running-card", markup=False)
+                            with Vertical(classes="card-column", id="col-right"):
+                                with Vertical(classes="card", id="cpu-box") as box:
+                                    box.border_title = "CPU"
+                                    yield Static("Loading monitoring data…", id="cpu-card", markup=False)
+                                    yield Static("Waiting for samples", id="cpu-chart", markup=False)
+                                with Vertical(classes="card", id="memory-box") as box:
+                                    box.border_title = "Memory"
+                                    yield Static("Loading monitoring data…", id="memory-card", markup=False)
+                                with Vertical(classes="card", id="temperature-box") as box:
+                                    box.border_title = "Temperature"
+                                    yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
+                                with Vertical(classes="card", id="host-status-box") as box:
+                                    box.border_title = "Host status"
+                                    yield Static("Waiting for collection…", id="host-status", markup=False)
                         with Vertical(classes="card", id="processes-card") as box:
                             box.border_title = "Top processes by CPU"
                             with Horizontal(id="process-row"):
