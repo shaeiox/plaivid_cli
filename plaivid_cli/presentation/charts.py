@@ -140,27 +140,25 @@ def _series_dots(series: Series, t0: float, dw: int, dh: int, scale: float, max_
 def bucketed(
     points: Sequence[tuple[float, float]], t0: float, t_end: float, bucket: float
 ) -> tuple[tuple[float, float], ...]:
-    """Average real samples into fixed time buckets. Empty buckets stay empty, never zero."""
+    """Average real samples into fixed time buckets. Empty buckets stay empty, never zero.
+
+    Buckets sit on an absolute time grid (multiples of ``bucket``), not on the window edge. A new
+    sample therefore never moves an earlier bucket: completed buckets keep their values and the
+    graph only scrolls as time passes.
+    """
     if bucket <= 0:
         return tuple(points)
-    ordered = sorted((stamp, value) for stamp, value in points if math.isfinite(value))
+    groups: dict[int, list[float]] = {}
+    for stamp, value in points:
+        if not (math.isfinite(stamp) and math.isfinite(value)) or stamp < t0 or stamp > t_end:
+            continue
+        key = math.floor(stamp / bucket)
+        groups.setdefault(key, []).append(value)
     out: list[tuple[float, float]] = []
-    index = 0
-    start = t0
-    while start <= t_end:
-        end = start + bucket
-        total_t = total_v = 0.0
-        count = 0
-        while index < len(ordered) and ordered[index][0] < end:
-            stamp, value = ordered[index]
-            index += 1
-            if stamp >= start:
-                total_t += stamp
-                total_v += value
-                count += 1
-        if count:
-            out.append((total_t / count, total_v / count))
-        start = end
+    for key in sorted(groups):
+        values = groups[key]
+        centre = (key + 0.5) * bucket
+        out.append((centre, sum(values) / len(values)))
     return tuple(out)
 
 
