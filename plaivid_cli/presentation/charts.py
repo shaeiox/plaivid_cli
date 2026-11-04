@@ -73,12 +73,16 @@ def cpu_colour(percent: float | None, palette: Palette = TRUECOLOR) -> str:
     return CPU_GREEN
 
 
-def stable_top(peak: float | None, previous: float | None = None) -> float:
+# CPU scale never drops below this, so a 5% trace still shows its ups and downs.
+CPU_MIN_SCALE = 10.0
+
+
+def stable_top(peak: float | None, previous: float | None = None, floor: float = 1.0) -> float:
     """Vertical scale ceiling. Kept while it still fits the peak and is not more than 3x it."""
     if peak is None or not math.isfinite(peak):
-        needed = 1.0
+        needed = floor
     else:
-        needed = max(1.0, peak * 1.15)
+        needed = max(floor, peak * 1.15)
     if previous is not None and needed <= previous <= 3 * needed:
         return previous
     for step in _STEPS:
@@ -253,6 +257,8 @@ def render_chart(
                 for key, codes in bucket(filled).items():
                     area_cells.setdefault(key, set()).update(codes)
         grid_cells = bucket(grid)
+        # A baseline at 0 on the bottom row, so a low value is visibly above zero.
+        baseline_cells = bucket({(x, 0) for x in range(dw)})
 
         for row in range(graph_rows):
             text = Text(no_wrap=True, overflow="crop")
@@ -261,13 +267,14 @@ def render_chart(
                 lines_here = [cells.get(key, set()) for cells in line_cells]
                 area_here = area_cells.get(key, set())
                 grid_here = grid_cells.get(key, set())
-                if not any(lines_here) and not area_here and not grid_here:
+                baseline_here = baseline_cells.get(key, set())
+                if not any(lines_here) and not area_here and not grid_here and not baseline_here:
                     text.append(" ")
                     continue
                 content = bool(area_here) or any(lines_here)
                 if braille:
                     mask = 0
-                    for codes in (*lines_here, area_here, grid_here):
+                    for codes in (*lines_here, area_here, grid_here, baseline_here):
                         for code in codes:
                             dot_x, within = divmod(code, 100)
                             mask |= _BRAILLE_BIT[(dot_x, ky - 1 - within)]
@@ -275,7 +282,7 @@ def render_chart(
                 else:
                     filled_rows = set().union(*lines_here, area_here)
                     if not filled_rows:
-                        glyph = "·"
+                        glyph = "▁" if baseline_here else "·"
                     elif len(filled_rows) == ky:
                         glyph = "█"
                     elif filled_rows == set(range(len(filled_rows))):

@@ -57,6 +57,7 @@ from plaivid_cli.presentation.charts import (
     ChartView,
     Series,
     cpu_colour,
+    CPU_MIN_SCALE,
     default_chart_mode,
     stable_top,
 )
@@ -285,6 +286,7 @@ class PlaividTui(App[None]):
         self._render_cache: dict[str, str] = {}
         self._chart_mode = default_chart_mode()
         self._load_scale: float | None = None
+        self._cpu_scale: float | None = None
         self._overview_schedule = OverviewSchedule(
             min(60, max(1, application.settings.refresh_interval)),
             host_status_interval=application.settings.host_status_interval,
@@ -575,6 +577,7 @@ class PlaividTui(App[None]):
         for widget_id in ("cpu-chart", "load-chart"):
             self.query_one(f"#{widget_id}", ChartView).reset("Waiting for authenticated monitoring data…")
         self._load_scale = None
+        self._cpu_scale = None
 
     def _session_ended(self, message: str) -> None:
         self.session = None
@@ -771,11 +774,13 @@ class PlaividTui(App[None]):
             "—" if cpu_now is None else f"{cpu_now:.1f}%",
             style=f"bold {cpu_colour(cpu_now, palette)}",
         )
-        cpu_header.append("   last 60 s · scale 0–100 %", style=palette.muted)
+        cpu_peak = max((value for _, value in cpu), default=None)
+        self._cpu_scale = stable_top(cpu_peak, self._cpu_scale, floor=CPU_MIN_SCALE)
+        cpu_header.append(f"   last 60 s · scale 0–{self._cpu_scale:g} %", style=palette.muted)
         cpu_chart.set_chart(
             series=(Series("cpu", cpu_colour(cpu_now, palette), cpu),),
             t_end=newest,
-            scale_top=100.0,
+            scale_top=self._cpu_scale,
             header=cpu_header,
             max_gap=max_gap,
             min_bucket=min_bucket,

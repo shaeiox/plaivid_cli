@@ -75,7 +75,8 @@ def test_missing_samples_leave_a_gap_and_are_never_drawn_as_zero() -> None:
                         scale_top=100.0, max_gap=5.0, mode="blocks")
     graph = _graph(text)
     middle = [row[20:40] for row in graph]  # the 20 s..50 s span with no samples
-    assert all(_ink(row) == "" for row in middle)
+    assert all(_ink(row) == "" for row in middle[:-1])  # only the 0 baseline may sit on the bottom row
+    assert set(middle[-1]) <= {"▁", " "}
     assert any(row[-5:].strip() for row in graph)  # the samples after the gap still render
 
 
@@ -205,3 +206,29 @@ def test_one_second_refresh_draws_a_continuous_line_in_every_column() -> None:
     graph = _graph(text)
     for column in range(40):
         assert any(_ink(row)[:1] and row[column] not in " ·" for row in graph), column
+
+
+def test_low_cpu_trace_has_visible_peaks_and_troughs() -> None:
+    from plaivid_cli.presentation.charts import CPU_MIN_SCALE
+
+    samples = tuple((float(t), 20.0 if (t // 3) % 2 else 5.0) for t in range(0, 61, 3))
+    scale = stable_top(20.0, None, floor=CPU_MIN_SCALE)
+    assert scale >= 20.0
+    text = render_chart((Series("cpu", CPU_GREEN, samples),), width=60, height=9, t_end=60.0,
+                        scale_top=scale, mode="blocks", max_gap=4.0)
+    rows_with_ink = {index for index, row in enumerate(_graph(text)) if _ink(row)}
+    assert len(rows_with_ink) >= 3  # 5% and 20% sit on clearly different rows
+
+
+def test_zero_baseline_is_drawn_under_every_column() -> None:
+    samples = tuple((float(t), 5.0) for t in range(0, 61, 3))
+    for mode in ("blocks", "braille"):
+        text = render_chart((Series("cpu", CPU_GREEN, samples),), width=30, height=7, t_end=60.0,
+                            scale_top=12.0, mode=mode)
+        bottom = _graph(text)[-1]
+        assert all(cell != " " for cell in bottom), mode
+
+
+def test_scale_floor_keeps_low_values_readable() -> None:
+    assert stable_top(5.0, None, floor=10.0) == 12.0
+    assert stable_top(None, None, floor=10.0) == 12.0
