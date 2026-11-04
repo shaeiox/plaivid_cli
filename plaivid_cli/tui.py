@@ -57,6 +57,7 @@ from plaivid_cli.presentation.theme import (
     brand,
     palette_for,
     ALARM,
+    CAUTION,
     TRUECOLOR,
     state_text,
     styled_metric,
@@ -955,7 +956,7 @@ class PlaividTui(App[None]):
         local_sample = local.value if local is not None and local.value is not None else (local.last_good_value if local else None)
         pid_file = local_sample.sballd_pid_file if isinstance(local_sample, LocalHostSample) else None
         level, _, _ = _quorum_verdict(status_section, self._palette, pid_file)
-        logo_colour = {"ok": LOGO_COLOR, "warn": self._palette.warning, "bad": ALARM}[level]
+        logo_colour = {"ok": LOGO_COLOR, "warn": CAUTION, "bad": ALARM}[level]
         self.query_one("#host-logo", Static).update(logo_text(logo_colour))
         self.query_one("#host-status", Static).update(
             _host_status_text(status, status_section, self._palette, pid_file)
@@ -1247,8 +1248,12 @@ def _quorum_verdict(
     state = (live.sball_state or "").strip().lower()
     if state == "quorate" and section.status is CollectionStatus.CURRENT:
         return "ok", "SBALL QUORATE", palette.success
+    if state == "quorating":
+        # Cluster is forming: not yet quorate, so not red either.
+        suffix = "" if section.status is CollectionStatus.CURRENT else f" · {collection}"
+        return "warn", f"SBALL QUORATING{suffix}", CAUTION
     if state == "quorate":
-        return "warn", f"SBALL QUORATE · {collection}", palette.warning
+        return "warn", f"SBALL QUORATE · {collection}", CAUTION
     return "bad", f"SBALL NOT QUORATE · {live.sball_state or 'state unknown'}", ALARM
 
 

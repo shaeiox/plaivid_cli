@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from plaivid_cli.domain.models import CollectionStatus, HostStatus, SectionSnapshot
 from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
-from plaivid_cli.presentation.theme import ALARM, TRUECOLOR
+from plaivid_cli.presentation.theme import ALARM, CAUTION, TRUECOLOR
 from plaivid_cli.tui import _host_status_text, _quorum_verdict
 
 GOOD = HostStatus(name="node-a", ip="192.0.2.10/28", sball_state="quorate", node_state="up", version="7.2.16")
@@ -36,7 +36,7 @@ def test_failed_read_is_red_and_never_keeps_last_good_quorate_green():
 
 def test_quorate_but_partial_is_a_warning_not_green():
     level, _, colour = _quorum_verdict(section(GOOD, GOOD, CollectionStatus.PARTIAL), TRUECOLOR)
-    assert (level, colour) == ("warn", TRUECOLOR.warning)
+    assert (level, colour) == ("warn", CAUTION)
 
 
 def test_missing_section_is_not_verified():
@@ -76,3 +76,22 @@ def test_pid_file_check_reports_missing_present_and_unknown(tmp_path, monkeypatc
 
     monkeypatch.setattr(Path, "exists", denied)
     assert sballd_pid_file_present(missing) is None
+
+
+def test_quorating_is_yellow_not_red():
+    forming = HostStatus(name="spongebob", sball_state="quorating", node_state="up")
+    level, banner, colour = _quorum_verdict(section(forming, None, CollectionStatus.CURRENT), TRUECOLOR)
+    assert (level, colour) == ("warn", CAUTION)
+    assert banner == "SBALL QUORATING"
+
+
+def test_quorating_with_partial_read_says_so():
+    forming = HostStatus(name="spongebob", sball_state="quorating", node_state="up")
+    banner = _quorum_verdict(section(forming, None, CollectionStatus.PARTIAL), TRUECOLOR)[1]
+    assert banner == "SBALL QUORATING · partial"
+
+
+def test_failed_read_during_quorating_is_still_red():
+    # A failed read is never shown as a forming cluster.
+    level, _, colour = _quorum_verdict(section(None, None, CollectionStatus.UNAVAILABLE), TRUECOLOR)
+    assert (level, colour) == ("bad", ALARM)
