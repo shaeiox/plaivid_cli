@@ -52,7 +52,14 @@ from plaivid_cli.presentation import host_metrics as hm
 from plaivid_cli.domain.overview import LocalHostSample
 from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
 from plaivid_cli.presentation.overview import cards, nic_details
-from plaivid_cli.presentation.charts import CHART_HEIGHT, bar_chart, resample
+from plaivid_cli.presentation.charts import (
+    LOAD_COLOURS,
+    ChartView,
+    Series,
+    cpu_colour,
+    default_chart_mode,
+    stable_top,
+)
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
@@ -169,7 +176,7 @@ class PlaividTui(App[None]):
         .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
                 border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
         .card Static { height: auto; background: $p-panel; color: $p-text; }
-        #cpu-chart, #load-chart { width: 100%; height: 8; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
+        #cpu-chart, #load-chart { width: 100%; height: 9; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
         #running-card { color: $p-cyan; margin-top: 1; }
         #host-logo { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
         #host-banner { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
@@ -276,6 +283,8 @@ class PlaividTui(App[None]):
         self._table_content: dict[str, tuple[str, ...]] = {}
         self._table_columns = ()
         self._render_cache: dict[str, str] = {}
+        self._chart_mode = default_chart_mode()
+        self._load_scale: float | None = None
         self._overview_schedule = OverviewSchedule(
             min(60, max(1, application.settings.refresh_interval)),
             host_status_interval=application.settings.host_status_interval,
@@ -344,7 +353,7 @@ class PlaividTui(App[None]):
                                 with Vertical(classes="card", id="load-box") as box:
                                     self._group_box(box, "compute", "Load & tasks")
                                     yield Static("Loading monitoring data…", id="load-card", markup=False)
-                                    yield Static("Waiting for samples", id="load-chart", markup=False)
+                                    yield ChartView(id="load-chart", mode=self._chart_mode)
                                     yield Static("Running VMs…", id="running-card", markup=False)
                                 with Vertical(classes="card", id="host-status-box") as box:
                                     self._group_box(box, "host", "Host status")
@@ -355,7 +364,7 @@ class PlaividTui(App[None]):
                                 with Vertical(classes="card", id="cpu-box") as box:
                                     self._group_box(box, "compute", "CPU")
                                     yield Static("Loading monitoring data…", id="cpu-card", markup=False)
-                                    yield Static("Waiting for samples", id="cpu-chart", markup=False)
+                                    yield ChartView(id="cpu-chart", mode=self._chart_mode)
                                 with Vertical(classes="card", id="memory-box") as box:
                                     self._group_box(box, "compute", "Memory")
                                     yield Static("Loading monitoring data…", id="memory-card", markup=False)
@@ -560,9 +569,12 @@ class PlaividTui(App[None]):
         self._nic_selected = None
         for widget_id in (
             "running-card", "cpu-card", "memory-card", "load-card",
-            "cpu-chart", "load-chart", "nic-detail", "host-identity",
+            "nic-detail", "host-identity",
         ):
             self.query_one(f"#{widget_id}", Static).update("Waiting for authenticated monitoring data…")
+        for widget_id in ("cpu-chart", "load-chart"):
+            self.query_one(f"#{widget_id}", ChartView).reset("Waiting for authenticated monitoring data…")
+        self._load_scale = None
 
     def _session_ended(self, message: str) -> None:
         self.session = None
@@ -722,15 +734,59 @@ class PlaividTui(App[None]):
             self._render_cache[widget_id] = text
 
     def _render_charts(self) -> None:
-        """Multi-row CPU and load bars, one column per cell across the card width."""
-        for widget_id, key in (("cpu-chart", "cpu"), ("load-chart", "load")):
-            widget = self.query_one(f"#{widget_id}", Static)
-            samples = self._history.values[key]
-            if len(samples) < 2:
-                widget.update("Waiting for samples")
-                continue
-            width = widget.content_size.width or 32
-            widget.update(bar_chart(resample(samples, width), CHART_HEIGHT, self._palette))
+        """CPU and load graphs from the 60-second overview history. Only real samples are plotted."""
+        cpu = tuple(self._history.values["cpu"])
+        loads = {
+            "1m": tuple(self._history.values["load"]),
+            "5m": tuple(self._history.values["load5"]),
+            "15m": tuple(self._history.values["load15"]),
+        }
+        newest = max((points[-1][0] for points in (cpu, *loads.values()) if points), default=None)
+        cpu_chart = self.query_one("#cpu-chart", ChartView)
+        load_chart = self.query_one("#load-chart", ChartView)
+        if newest is None:
+            cpu_chart.reset("Waiting for samples")
+            load_chart.reset("Waiting for samples")
+            return
+        palette = self._palette
+        max_gap = max(2.5 * self._overview_schedule.interval, 1.0)
+
+        cpu_now = cpu[-1][1] if cpu else None
+        cpu_header = Text()
+        cpu_header.append("CPU ", style=f"bold {palette.foreground}")
+        cpu_header.append(
+            "—" if cpu_now is None else f"{cpu_now:.1f}%",
+            style=f"bold {cpu_colour(cpu_now, palette)}",
+        )
+        cpu_header.append("   last 60 s · scale 0–100 %", style=palette.muted)
+        cpu_chart.set_chart(
+            series=(Series("cpu", cpu_colour(cpu_now, palette), cpu, area=True),),
+            t_end=newest,
+            scale_top=100.0,
+            header=cpu_header,
+            max_gap=max_gap,
+        )
+
+        peak = max((value for points in loads.values() for _, value in points), default=None)
+        self._load_scale = stable_top(peak, self._load_scale)
+        load_header = Text()
+        load_header.append("Load ", style=f"bold {palette.foreground}")
+        series = []
+        for (label, points), colour in zip(loads.items(), LOAD_COLOURS):
+            latest = points[-1][1] if points else None
+            load_header.append("● ", style=f"bold {colour}")
+            load_header.append(f"{label} ", style=palette.muted)
+            load_header.append("—" if latest is None else f"{latest:.2f}", style=f"bold {palette.foreground}")
+            load_header.append("   ")
+            series.append(Series(label, colour, points))
+        load_header.append(f"last 60 s · scale 0–{self._load_scale:g}", style=palette.muted)
+        load_chart.set_chart(
+            series=tuple(series),
+            t_end=newest,
+            scale_top=self._load_scale,
+            header=load_header,
+            max_gap=max_gap,
+        )
 
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
         self._visible_snapshot = snapshot

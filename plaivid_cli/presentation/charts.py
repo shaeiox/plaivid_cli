@@ -1,85 +1,316 @@
-"""Multi-row bar charts for the Overview: columns are coloured by row height (plasma ramp).
+"""Overview graphs: single-series CPU and three-line load charts.
 
 Presentation only. Samples come from the overview history; nothing here calls a provider.
+
+Rendering works on a dot grid and maps it to terminal cells:
+- Braille (default): 2x4 dots per cell, U+2800..U+28FF.
+- Blocks (fallback for non-UTF-8 terminals): one column per dot, 8 vertical steps per cell.
+
+A missing sample is a gap in the line, never a zero. A stable vertical scale stops the
+graph from rescaling on every refresh.
 """
 
 from __future__ import annotations
 
-from collections import deque
+import locale
+import math
+import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from rich.text import Text
+from textual.widgets import Static
 
-from plaivid_cli.presentation.theme import TRUECOLOR, Palette
+from plaivid_cli.application.overview import HISTORY_WINDOW_SECONDS
+from plaivid_cli.presentation.theme import ALARM, CAUTION, TRUECOLOR, Palette
 
-# Matplotlib's "plasma" ramp, bottom (dark blue) to top (yellow). The top stop is the
-# warning yellow on purpose: this chart follows the requested plasma look.
-PLASMA_STOPS = (
-    "#0d0887", "#47039f", "#7e03a8", "#9c179e", "#bd3786",
-    "#d8576b", "#ed7953", "#fb9f3a", "#fdca26", "#f0f921",
-)
-
-# Rows per Overview chart; the card grows by this much.
-CHART_HEIGHT = 8
-
-# Partial-cell glyphs, one eighth to seven eighths of a cell, bottom-up.
+WINDOW_SECONDS = HISTORY_WINDOW_SECONDS
+# Header row + graph rows + time-axis row. Both graphs use this height so panels line up.
+CHART_HEIGHT = 9
+# Normal CPU load is green; it turns yellow and red as utilisation climbs.
+CPU_GREEN = "#5fd787"
+CPU_CAUTION_PERCENT = 75.0
+CPU_ALARM_PERCENT = 90.0
+# 1-minute, 5-minute and 15-minute load: three distinguishable, non-status hues.
+LOAD_COLOURS = ("#5fafff", "#d787d7", "#ffaf5f")
+GRID_FRACTIONS = (0.25, 0.5, 0.75)
+_STEPS = (1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512)
 _EIGHTHS = " ▁▂▃▄▅▆▇"
+# Braille dot bit for (dot column, dot row counted from the top), per the Unicode layout.
+_BRAILLE_BIT = {
+    (0, 0): 0x01, (0, 1): 0x02, (0, 2): 0x04, (0, 3): 0x40,
+    (1, 0): 0x08, (1, 1): 0x10, (1, 2): 0x20, (1, 3): 0x80,
+}
 
 
-def _rgb(colour: str) -> tuple[float, float, float]:
-    value = colour.lstrip("#")
-    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+@dataclass(frozen=True)
+class Series:
+    name: str
+    colour: str
+    points: tuple[tuple[float, float], ...]
+    area: bool = False
 
 
-def plasma(t: float) -> str:
-    """Colour at position ``t`` (0 = bottom, 1 = top) along the plasma ramp."""
-    t = min(1.0, max(0.0, t))
-    scaled = t * (len(PLASMA_STOPS) - 1)
-    index = min(int(scaled), len(PLASMA_STOPS) - 2)
-    frac = scaled - index
-    a, b = _rgb(PLASMA_STOPS[index]), _rgb(PLASMA_STOPS[index + 1])
-    return "#{:02x}{:02x}{:02x}".format(*(round(a[i] + (b[i] - a[i]) * frac) for i in range(3)))
+def default_chart_mode() -> str:
+    """Braille on UTF-8 terminals; block characters otherwise. PLAIVID_CHART=braille|blocks overrides."""
+    forced = os.environ.get("PLAIVID_CHART", "").strip().lower()
+    if forced in {"braille", "blocks"}:
+        return forced
+    encoding = (locale.getpreferredencoding(False) or "").lower()
+    return "braille" if "utf" in encoding else "blocks"
 
 
-def resample(values: deque[tuple[float, float]], width: int) -> list[float]:
-    """Exactly ``width`` columns, normalised to 0..1 across the sampled range (flat data -> 0)."""
-    numbers = [value for _, value in values]
-    width = max(2, width)
-    high, low = max(numbers), min(numbers)
-    last = len(numbers) - 1
-    columns: list[float] = []
-    for column in range(width):
-        position = column * last / (width - 1)
-        left = int(position)
-        right = min(left + 1, last)
-        fraction = position - left
-        value = numbers[left] * (1 - fraction) + numbers[right] * fraction
-        columns.append((value - low) / (high - low) if high > low else 0.0)
-    return columns
+def cpu_colour(percent: float | None, palette: Palette = TRUECOLOR) -> str:
+    """Green under normal load; yellow and red only when utilisation is high."""
+    if not palette.decorative:
+        return palette.foreground
+    if percent is None:
+        return palette.muted
+    if percent >= CPU_ALARM_PERCENT:
+        return ALARM
+    if percent >= CPU_CAUTION_PERCENT:
+        return CAUTION
+    return CPU_GREEN
 
 
-def bar_chart(columns: Sequence[float], height: int, palette: Palette = TRUECOLOR) -> Text:
-    """Render normalised columns (0..1) as ``height`` rows of block cells.
+def stable_top(peak: float | None, previous: float | None = None) -> float:
+    """Vertical scale ceiling. Kept while it still fits the peak and is not more than 3x it."""
+    if peak is None or not math.isfinite(peak):
+        needed = 1.0
+    else:
+        needed = max(1.0, peak * 1.15)
+    if previous is not None and needed <= previous <= 3 * needed:
+        return previous
+    for step in _STEPS:
+        if step >= needed:
+            return float(step)
+    return float(math.ceil(needed))
 
-    Each cell takes the plasma colour of its row, so the bottom is dark and the top bright.
-    Without colour (16-colour or NO_COLOR) every bar uses the palette foreground.
-    """
+
+def _line_dots(points: Sequence[tuple[float, float]], dw: int, dh: int) -> set[tuple[int, int]]:
+    """Connected dots for one run of samples (no gaps inside the run)."""
+    out: set[tuple[int, int]] = set()
+    if len(points) == 1:
+        x, y = points[0]
+        out.add((round(x), round(y)))
+        return out
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        xa, xb = round(x0), round(x1)
+        if xb <= xa:
+            lo, hi = sorted((round(y0), round(y1)))
+            out.update((xa, yy) for yy in range(lo, hi + 1))
+            continue
+        ys = []
+        for x in range(xa, xb + 1):
+            fraction = min(1.0, max(0.0, (x - x0) / (x1 - x0)))
+            ys.append(round(y0 + (y1 - y0) * fraction))
+        for index, x in enumerate(range(xa, xb + 1)):
+            nxt = ys[index + 1] if index + 1 < len(ys) else ys[index]
+            lo, hi = sorted((ys[index], nxt))
+            out.update((x, yy) for yy in range(lo, hi + 1))
+    return out
+
+
+def _series_dots(series: Series, t0: float, dw: int, dh: int, scale: float, max_gap: float) -> set[tuple[int, int]]:
+    """Map samples to dots. A time gap longer than ``max_gap`` breaks the line."""
+    runs: list[list[tuple[float, float]]] = [[]]
+    previous: float | None = None
+    for stamp, value in series.points:
+        if not math.isfinite(value) or stamp < t0:
+            continue
+        if previous is not None and stamp - previous > max_gap:
+            runs.append([])
+        previous = stamp
+        x = (stamp - t0) / WINDOW_SECONDS * (dw - 1)
+        y = min(max(value, 0.0), scale) / scale * (dh - 1)
+        runs[-1].append((x, y))
+    dots: set[tuple[int, int]] = set()
+    for run in runs:
+        if run:
+            dots |= _line_dots(run, dw, dh)
+    return {(x, y) for x, y in dots if 0 <= x < dw and 0 <= y < dh}
+
+
+def _axis_row(width: int) -> Text:
+    cells = [" "] * width
+    labels = [(0, "-60s")]
+    if width >= 30:
+        labels.append((width // 2 - 2, "-30s"))
+    labels.append((width - 3, "now"))
+    for start, label in labels:
+        for offset, char in enumerate(label):
+            if 0 <= start + offset < width:
+                cells[start + offset] = char
+    return Text("".join(cells), no_wrap=True, overflow="crop")
+
+
+def render_chart(
+    series: Sequence[Series],
+    *,
+    width: int,
+    height: int,
+    t_end: float,
+    scale_top: float,
+    header: Text | None = None,
+    max_gap: float = 5.0,
+    mode: str = "braille",
+    palette: Palette = TRUECOLOR,
+    empty_text: str = "Waiting for samples",
+) -> Text:
+    """Return exactly ``height`` rows, each ``width`` cells wide (rows are cropped, never wrapped)."""
+    width = max(1, width)
     height = max(1, height)
-    levels = height * 8
-    text = Text(no_wrap=True, overflow="crop")
-    for index, row in enumerate(range(height - 1, -1, -1)):  # top row first
-        row_base = row * 8  # eighths below this row
-        if index:
-            text.append("\n")
-        t = row / (height - 1) if height > 1 else 1.0
-        colour = plasma(t) if palette.decorative else palette.foreground
-        for value in columns:
-            filled = min(levels, max(0.0, value * levels))
-            remainder = min(8.0, max(0.0, filled - row_base))
-            if remainder >= 8:
-                text.append("█", style=colour)
-            elif remainder > 0:
-                text.append(_EIGHTHS[int(remainder)], style=colour)
-            else:
-                text.append(" ")
-    return text
+    header_rows = 1 if header is not None and height >= 2 else 0
+    axis_rows = 1 if height - header_rows >= 2 else 0
+    graph_rows = height - header_rows - axis_rows
+    scale_top = scale_top if scale_top > 0 else 1.0
+    braille = mode == "braille"
+    kx, ky = (2, 4) if braille else (1, 8)
+    dw, dh = width * kx, graph_rows * ky
+    t0 = t_end - WINDOW_SECONDS
+
+    lines: list[Text] = []
+    if header_rows:
+        head = header.copy()
+        head.truncate(width, overflow="crop")
+        head.pad_right(width - len(head))
+        lines.append(head)
+
+    if graph_rows <= 0:
+        pass  # header only, for a one-row chart
+    elif all(len(item.points) < 2 for item in series):
+        blank = [" " * width for _ in range(graph_rows)]
+        message = empty_text[:width]
+        blank[graph_rows // 2] = message.center(width)[:width]
+        for row in blank:
+            lines.append(Text(row, style=palette.muted, no_wrap=True, overflow="crop"))
+    else:
+        grid: set[tuple[int, int]] = set()
+        for fraction in GRID_FRACTIONS:
+            level = round(fraction * (dh - 1))
+            grid.update((x, level) for x in range(0, dw, 4 if braille else 2))
+
+        # Bucket every dot into its cell once: cell = (column, row from top) -> dot codes.
+        # A dot code is dot_x * 100 + dot_y_within_cell (bottom-up), so it fits both modes.
+        def bucket(dots: set[tuple[int, int]]) -> dict[tuple[int, int], set[int]]:
+            cells: dict[tuple[int, int], set[int]] = {}
+            for x, y in dots:
+                key = (x // kx, graph_rows - 1 - y // ky)
+                cells.setdefault(key, set()).add((x % kx) * 100 + y % ky)
+            return cells
+
+        line_cells = [bucket(_series_dots(item, t0, dw, dh, scale_top, max_gap)) for item in series]
+        area_cells: dict[tuple[int, int], set[int]] = {}
+        for item, cells in zip(series, line_cells):
+            if item.area:
+                filled: set[tuple[int, int]] = set()
+                for col_row, codes in cells.items():
+                    for code in codes:
+                        dot_x, within = divmod(code, 100)
+                        base_y = (graph_rows - 1 - col_row[1]) * ky
+                        x = col_row[0] * kx + dot_x
+                        filled.update((x, yy) for yy in range(0, base_y + within))
+                for key, codes in bucket(filled).items():
+                    area_cells.setdefault(key, set()).update(codes)
+        grid_cells = bucket(grid)
+
+        for row in range(graph_rows):
+            text = Text(no_wrap=True, overflow="crop")
+            for col in range(width):
+                key = (col, row)
+                lines_here = [cells.get(key, set()) for cells in line_cells]
+                area_here = area_cells.get(key, set())
+                grid_here = grid_cells.get(key, set())
+                if not any(lines_here) and not area_here and not grid_here:
+                    text.append(" ")
+                    continue
+                content = bool(area_here) or any(lines_here)
+                if braille:
+                    mask = 0
+                    for codes in (*lines_here, area_here, grid_here):
+                        for code in codes:
+                            dot_x, within = divmod(code, 100)
+                            mask |= _BRAILLE_BIT[(dot_x, ky - 1 - within)]
+                    glyph = chr(0x2800 + mask)
+                else:
+                    filled_rows = set().union(*lines_here, area_here)
+                    if not filled_rows:
+                        glyph = "·"
+                    elif len(filled_rows) == ky:
+                        glyph = "█"
+                    elif filled_rows == set(range(len(filled_rows))):
+                        glyph = _EIGHTHS[len(filled_rows)]
+                    else:
+                        glyph = "▄" if min(filled_rows) < ky // 2 else "▀"
+                if not content:
+                    colour = palette.muted
+                elif not palette.decorative:
+                    colour = palette.foreground
+                else:
+                    # Line colour wins over area colour; area uses its series colour, dimmed.
+                    colour = next(
+                        (item.colour for item, codes in zip(series, lines_here) if codes),
+                        next((item.colour for item in series if item.area), palette.muted),
+                    )
+                text.append(glyph, style=colour)
+            lines.append(text)
+
+    if axis_rows:
+        axis = _axis_row(width)
+        axis.stylize(palette.muted)
+        lines.append(axis)
+    return Text("\n").join(lines)
+
+
+class ChartView(Static):
+    """A graph widget that redraws only when its data or its size changes."""
+
+    def __init__(self, *, id: str, mode: str = "braille") -> None:
+        super().__init__("", id=id, markup=False)
+        self._mode = mode
+        self._spec: tuple | None = None
+        self._last: tuple | None = None
+        self.rendered: Text | None = None
+
+    def set_chart(
+        self,
+        *,
+        series: Sequence[Series],
+        t_end: float,
+        scale_top: float,
+        header: Text | None,
+        max_gap: float,
+    ) -> None:
+        self._spec = (tuple(series), t_end, scale_top, header, max_gap)
+        self._draw()
+
+    def reset(self, message: str) -> None:
+        self._spec = None
+        self._last = None
+        self.update(message)
+
+    def on_resize(self) -> None:
+        self._draw()
+
+    def _draw(self) -> None:
+        if self._spec is None:
+            return
+        width, height = self.content_size.width, self.content_size.height
+        if width < 4 or height < 2:
+            return
+        series, t_end, scale_top, header, max_gap = self._spec
+        key = (width, height, self._spec)
+        if key == self._last:
+            return
+        self._last = key
+        self.rendered = render_chart(
+                series,
+                width=width,
+                height=height,
+                t_end=t_end,
+                scale_top=scale_top,
+                header=header,
+                max_gap=max_gap,
+                mode=self._mode,
+            )
+        self.update(self.rendered)

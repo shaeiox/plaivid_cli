@@ -112,10 +112,16 @@ class OverviewSchedule:
         self.next_due["discovery"] = 0
 
 
+# Length of the Overview graph history. Samples older than this are dropped.
+HISTORY_WINDOW_SECONDS = 60.0
+
+
 class OverviewHistory:
-    def __init__(self, limit: int = 32) -> None:
+    """Timestamped local samples for the Overview graphs. Missing samples are never stored as zero."""
+
+    def __init__(self, limit: int = 1024) -> None:
         self.values: dict[str, deque[tuple[float, float]]] = {
-            name: deque(maxlen=limit) for name in ("cpu", "memory", "load")
+            name: deque(maxlen=limit) for name in ("cpu", "memory", "load", "load5", "load15")
         }
         self._last_generation: int | None = None
         self.last_verified_running: int | None = None
@@ -134,10 +140,16 @@ class OverviewHistory:
             "cpu": sample.cpu_percent,
             "memory": 100 * sample.memory_used / sample.memory_total if sample.memory_used is not None and sample.memory_total else None,
             "load": sample.load1,
+            "load5": sample.load5,
+            "load15": sample.load15,
         }
+        stamp = section.succeeded_monotonic
         for key, value in metrics.items():
             if value is not None and math.isfinite(value):
-                self.values[key].append((section.succeeded_monotonic, value))
+                series = self.values[key]
+                series.append((stamp, value))
+                while series and series[0][0] < stamp - HISTORY_WINDOW_SECONDS:
+                    series.popleft()
 
 
 def sparkline(values: deque[tuple[float, float]], width: int = 32) -> str:
