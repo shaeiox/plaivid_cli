@@ -161,11 +161,16 @@ class PlaividTui(App[None]):
         .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
                 border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
         .card Static { height: auto; background: $p-panel; color: $p-text; }
-        #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; }
+        #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
         #running-card { color: $p-cyan; margin-top: 1; }
         #host-status { color: $p-text; }
         #nic-tabs { height: auto; }
-        .nic-tab { width: auto; min-width: 10; margin-right: 1; }
+        #nic-tabs .nic-tab { width: auto; min-width: 0; height: 1; margin-right: 2; padding: 0 1;
+                             border: none; background: $p-surface; color: $p-muted; }
+        #nic-tabs .nic-tab:hover { background: $p-panel; color: $p-text; }
+        #nic-tabs .nic-tab:focus { text-style: underline; }
+        #nic-tabs .nic-tab.-primary, #nic-tabs .nic-tab.-primary:hover, #nic-tabs .nic-tab.-primary:focus {
+            background: $p-blue; color: $p-bg; text-style: bold; }
         #nic-detail { height: auto; color: $p-muted; margin-top: 1; }
         #rediscover { margin: 1 0 0 0; }
         #processes-card { margin-top: 1; }
@@ -698,8 +703,8 @@ class PlaividTui(App[None]):
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
         self._visible_snapshot = snapshot
         self._history.add(snapshot)
-        chart_width = self.query_one("#cpu-chart", Static).content_size.width or 32
-        values = cards(snapshot, self._history, self._overview_schedule.interval, chart_width)
+        chart_widths = {cid: self.query_one(f"#{cid}", Static).content_size.width or 32 for cid in ("cpu-chart", "load-chart")}
+        values = cards(snapshot, self._history, self._overview_schedule.interval, chart_widths)
         for widget_id, text in values.items():
             self._put(widget_id, text)
         devices, detail = nic_details(snapshot, self._nic_selected)
