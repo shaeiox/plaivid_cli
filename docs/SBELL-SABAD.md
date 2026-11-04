@@ -258,13 +258,15 @@ path for "what's running" and for **automatic UUID discovery** by name.
 ### Host status - `sball/show`
 
 Returns `<description><sball-config><cluster><node>...`. Under
-`node/resource-usage`:
+`node/resource_usage`:
 
 - `release_info/version`, `host_time`, `uptime`
 - `cpus/cpu` - a list of per-core usage percentages (average them for total)
 - `ram/used`, `ram/total` (bytes)
-- `load-average/_1_minute`
-- `main-storage/total_size`, `main-storage/available_size` (bytes)
+- `system_information/load_average_1m|5m|15m`, `total_memory`, `free_memory` (bytes)
+- `root/total`, `root/free` (bytes)
+
+Verified against a real response: the element is `resource_usage` (underscore), not `resource-usage`. A node without it is reported as partial, never as current.
 
 `monitoring/system` adds host identity (hostname, OS, platform, kernel) and
 `monitoring/metrics` adds detailed per-core / memory metrics - both under

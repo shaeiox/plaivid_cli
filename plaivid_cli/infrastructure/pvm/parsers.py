@@ -67,8 +67,10 @@ def _float(value: str | None) -> float | None:
     return parsed if parsed >= 0 else None
 
 
-def _average_cpu(node: ET.Element) -> tuple[float | None, int | None]:
-    values = [_float(cpu.text) for cpu in node.findall("resource-usage/cpus/cpu")]
+def _average_cpu(usage: ET.Element | None) -> tuple[float | None, int | None]:
+    if usage is None:
+        return None, None
+    values = [_float(cpu.text) for cpu in usage.findall("cpus/cpu")]
     valid = [value for value in values if value is not None]
     return (sum(valid) / len(valid), len(values)) if valid else (None, len(values) or None)
 
@@ -198,33 +200,33 @@ def parse_sball_status(root: ET.Element) -> ParseResult[HostStatus | None]:
     node = root.find(".//cluster/node")
     if node is None:
         return ParseResult(None, CollectionStatus.UNAVAILABLE, source="sball/show", quality_issues=("node status unavailable",))
-    usage = node.find("resource-usage")
-    cpu_pct, cpu_count = _average_cpu(node)
-    used = _int(usage.findtext("ram/used")) if usage is not None else None
-    total = _int(usage.findtext("ram/total")) if usage is not None else None
-    storage_total = storage_available = None
-    if usage is not None:
-        storage = usage.find("main-storage")
-        if storage is not None:
-            storage_total = _int(storage.findtext("total_size"))
-            storage_available = _int(storage.findtext("available_size"))
+    # Real sball/show uses underscores: node/resource_usage/...
+    usage = node.find("resource_usage")
+    info = usage.find("system_information") if usage is not None else None
+    root_fs = usage.find("root") if usage is not None else None
+    cpu_pct, cpu_count = _average_cpu(usage)
+    total = _int(info.findtext("total_memory")) if info is not None else None
+    free = _int(info.findtext("free_memory")) if info is not None else None
     status = HostStatus(
         name=node.findtext("name"),
         ip=node.findtext("ip"),
         sball_state=node.findtext("sball-state"),
         node_state=node.findtext("node-state"),
         version=usage.findtext("release_info/version") if usage is not None else None,
-        host_time=usage.findtext("host_time") if usage is not None else None,
+        host_time=usage.findtext("host_time/unix_time") if usage is not None else None,
         cpu_pct=cpu_pct,
         cpu_count=cpu_count,
-        ram_used_bytes=used,
+        ram_used_bytes=total - free if total is not None and free is not None else None,
         ram_total_bytes=total,
-        load1=_float(usage.findtext("load-average/_1_minute")) if usage is not None else None,
-        load5=_float(usage.findtext("load-average/_5_minutes")) if usage is not None else None,
-        load15=_float(usage.findtext("load-average/_15_minutes")) if usage is not None else None,
-        storage_total_bytes=storage_total,
-        storage_available_bytes=storage_available,
+        load1=_float(info.findtext("load_average_1m")) if info is not None else None,
+        load5=_float(info.findtext("load_average_5m")) if info is not None else None,
+        load15=_float(info.findtext("load_average_15m")) if info is not None else None,
+        storage_total_bytes=_int(root_fs.findtext("total")) if root_fs is not None else None,
+        storage_available_bytes=_int(root_fs.findtext("free")) if root_fs is not None else None,
     )
+    if usage is None:
+        # Never report "current" for a node whose resource block is absent.
+        return ParseResult(status, CollectionStatus.PARTIAL, source="sball/show", quality_issues=("resource usage unavailable",))
     return ParseResult(status, CollectionStatus.CURRENT, source="sball/show")
 
 

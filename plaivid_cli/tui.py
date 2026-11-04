@@ -49,11 +49,13 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation import host_metrics as hm
+from plaivid_cli.presentation.logo import logo_text
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
     palette_for,
+    TRUECOLOR,
     state_text,
     styled_metric,
 )
@@ -163,6 +165,7 @@ class PlaividTui(App[None]):
         .card Static { height: auto; background: $p-panel; color: $p-text; }
         #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
         #running-card { color: $p-cyan; margin-top: 1; }
+        #host-logo { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
         #host-status { color: $p-text; }
         #nic-tabs { height: auto; }
         #nic-tabs .nic-tab { width: auto; min-width: 0; height: 1; margin-right: 2; padding: 0 1;
@@ -335,6 +338,10 @@ class PlaividTui(App[None]):
                                     yield Static("Loading monitoring data…", id="load-card", markup=False)
                                     yield Static("Waiting for samples", id="load-chart", markup=False)
                                     yield Static("Running VMs…", id="running-card", markup=False)
+                                with Vertical(classes="card", id="host-status-box") as box:
+                                    box.border_title = "Host status"
+                                    yield Static("", id="host-logo", markup=False)
+                                    yield Static("Waiting for collection…", id="host-status")
                             with Vertical(classes="card-column", id="col-right"):
                                 with Vertical(classes="card", id="cpu-box") as box:
                                     box.border_title = "CPU"
@@ -346,9 +353,6 @@ class PlaividTui(App[None]):
                                 with Vertical(classes="card", id="temperature-box") as box:
                                     box.border_title = "Temperature"
                                     yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
-                                with Vertical(classes="card", id="host-status-box") as box:
-                                    box.border_title = "Host status"
-                                    yield Static("Waiting for collection…", id="host-status", markup=False)
                         with Vertical(classes="card", id="processes-card") as box:
                             box.border_title = "Top processes by CPU"
                             with Horizontal(id="process-row"):
@@ -945,7 +949,8 @@ class PlaividTui(App[None]):
         metric_section = snapshot.section("host_metrics")
         status = as_host_status(status_section) if status_section else None
         metrics = as_host_metrics(metric_section) if metric_section else None
-        self.query_one("#host-status", Static).update(_host_status_text(status, status_section))
+        self.query_one("#host-logo", Static).update(logo_text())
+        self.query_one("#host-status", Static).update(_host_status_text(status, status_section, self._palette))
         self._render_metric_panels(metrics, metric_section)
 
     def _render_metric_panels(self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> None:
@@ -1203,6 +1208,10 @@ class PlaividTui(App[None]):
         self.query_one(f"#{panel_id}", Static).update(redact_text(text))
 
 
+def _load(value: float | None) -> str:
+    return "—" if value is None else f"{value:.2f}"
+
+
 def _display(value: int | float | str | None, *, suffix: str = "") -> str:
     return "—" if value is None else f"{value}{suffix}"
 
@@ -1213,31 +1222,25 @@ def _section_status(section: SectionSnapshot[object] | None) -> str:
     return section.status.value.replace("_", " ")
 
 
-def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object] | None) -> str:
-    lines = ["HOST STATUS", f"Collection  {_section_status(section)}"]
+def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object] | None, palette=TRUECOLOR) -> Text:
+    collection = f"Collection  {_section_status(section)}"
     if status is None:
-        lines.append("No current host-status values.")
-        return redact_text("\n".join(lines))
-    lines.extend(
-        [
-            f"Node  {status.name or '—'}  ·  IP  {status.ip or '—'}",
-            f"Sball  {status.sball_state or '—'}  ·  node  {status.node_state or '—'}",
-            f"Version  {status.version or '—'}",
-            f"CPU  {_display(status.cpu_pct, suffix='%')}  ·  cores  {_display(status.cpu_count)}",
-            f"RAM  {_bytes(status.ram_used_bytes)} / {_bytes(status.ram_total_bytes)}",
-            f"Load  {_display(status.load1)}  {_display(status.load5)}  {_display(status.load15)}",
-            f"Storage  {_bytes(status.storage_available_bytes)} free / {_bytes(status.storage_total_bytes)}",
-        ]
-    )
-    return redact_text("\n".join(lines))
+        return Text(redact_text("HOST STATUS\n" + collection + "\nNo current host-status values."))
+    text = Text()
+    text.append("HOST STATUS\n", style=f"bold {palette.foreground}")
+    text.append(redact_text(collection) + "\n")
+    text.append(redact_text(f"Node  {status.name or '—'}  ·  IP  {status.ip or '—'}") + "\n")
+    text.append("Sball ")
+    text.append_text(state_text(redact_text(status.sball_state or "—"), palette))
+    text.append("  ·  node ")
+    text.append_text(state_text(redact_text(status.node_state or "—"), palette))
+    text.append("\n")
+    text.append("Version ")
+    text.append(redact_text(status.version or "—"), style=f"bold {palette.accent}")
+    text.append("\n")
+    text.append(redact_text(
+        f"Load  {_load(status.load1)}  {_load(status.load5)}  {_load(status.load15)}"
+    ))
+    return text
 
 
-def _bytes(value: int | None) -> str:
-    if value is None:
-        return "—"
-    amount = float(value)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024 or unit == "TiB":
-            return f"{amount:.1f} {unit}"
-        amount /= 1024
-    return f"{amount:.1f} TiB"

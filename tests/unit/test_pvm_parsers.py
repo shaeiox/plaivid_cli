@@ -65,19 +65,36 @@ def test_missing_process_evidence_does_not_overwrite_or_invent_state() -> None:
     assert started_unavailable.state_disagreed is False
 
 
-def test_sball_parser_preserves_quorate_without_health_claims() -> None:
+def test_sball_parser_reads_real_resource_usage_shape() -> None:
+    from pathlib import Path
+
+    root = ET.parse(Path(__file__).parents[1] / "fixtures" / "sball-show.xml").getroot()
+    result = parse_sball_status(root)
+    assert result.status is CollectionStatus.CURRENT
+    assert result.value is not None
+    assert result.value.sball_state == "quorate"
+    assert result.value.node_state == "up"
+    assert result.value.version == "7.2.16"
+    assert result.value.load1 == 1.080566
+    assert result.value.load15 == 0.932617
+    assert result.value.cpu_count == 24
+    assert result.value.ram_total_bytes == 33392357376
+    assert result.value.ram_used_bytes == 33392357376 - 25488154624
+    assert result.value.storage_total_bytes == 31525343232
+
+
+def test_sball_parser_is_partial_when_resource_usage_is_missing() -> None:
     root = ET.fromstring(
         "<description><sball-config><cluster><node><name>node-a</name>"
-        "<sball-state>quorate</sball-state><node-state>online</node-state>"
-        "<resource-usage><cpus><cpu>20</cpu><cpu>40</cpu></cpus>"
-        "<ram><used>1024</used><total>2048</total></ram></resource-usage>"
+        "<sball-state>quorate</sball-state><node-state>up</node-state>"
+        "<resource_usage_typo><cpus><cpu>20</cpu></cpus></resource_usage_typo>"
         "</node></cluster></sball-config></description>"
     )
     result = parse_sball_status(root)
-    assert result.value is not None
+    assert result.status is CollectionStatus.PARTIAL
     assert result.value.sball_state == "quorate"
-    assert result.value.cpu_pct == 30
-    assert result.value.ram_total_bytes == 2048
+    assert result.value.version is None
+    assert "resource usage unavailable" in result.quality_issues
 
 
 def test_metrics_parser_does_not_default_missing_values_to_zero() -> None:

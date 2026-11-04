@@ -116,7 +116,7 @@ def styled_metric(value: str, *, heading: bool = False, palette: Palette = TRUEC
 
 # Object and cluster states, grouped by what an operator should do about them.
 # Matching is exact and case-insensitive; anything unrecognized stays muted.
-_HEALTHY_STATES = frozenset({"started", "running", "active", "up", "online", "ok"})
+_HEALTHY_STATES = frozenset({"started", "running", "active", "up", "online", "ok", "quorate"})
 _STOPPED_STATES = frozenset({"stopped", "shutdown", "off", "offline", "down", "failed", "error", "crashed"})
 _TRANSIENT_STATES = frozenset({
     "starting", "stopping", "paused", "suspended", "migrating", "pending", "rebooting", "restarting", "degraded",
