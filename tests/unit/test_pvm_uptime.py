@@ -91,6 +91,7 @@ def test_host_card_shows_pvm_uptime_and_drops_api_warning_and_proc_disclaimer():
     )
     snapshot = ApplicationSnapshot(generation=1, created_at=datetime.now(UTC), sections=(local, dashboard))
     lines = cards(snapshot, OverviewHistory(), 3).get("host-identity", "").splitlines()
-    assert lines[0].startswith("LOCAL  spongebob")
-    assert lines[1] == "PVM Uptime  0w 0d 1h 2m 5s"
-    assert len(lines) == 2
+    assert lines[0] == "LOCAL  spongebob"
+    assert lines[1] == "sballd uptime  0w 0d 1h 2m 5s"
+    assert lines[2] == "Server uptime  N/A"
+    assert len(lines) == 3

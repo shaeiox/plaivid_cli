@@ -112,9 +112,9 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     )
     groups["vdi-monitor"] = "Virtual disk images\nN/A · no verified per-VDI inventory or capacity/usage contract"
     groups["host-identity"] = (
-        f"LOCAL  {host.hostname or 'N/A'}   /   PVM  {dashboard.host_name or 'N/A'}"
-        f" · ID {dashboard.host_id or 'N/A'}\n"
-        f"PVM Uptime  {_uptime(host.pvm_uptime_seconds)}"
+        f"LOCAL  {host.hostname or 'N/A'}\n"
+        f"sballd uptime  {_uptime(host.pvm_uptime_seconds)}\n"
+        f"Server uptime  {_uptime(host.uptime_seconds)}"
     )
     return {key: redact_text(value) for key, value in groups.items()}
 
