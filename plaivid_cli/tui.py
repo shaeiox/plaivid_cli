@@ -749,7 +749,10 @@ class PlaividTui(App[None]):
             load_chart.reset("Waiting for samples")
             return
         palette = self._palette
-        max_gap = max(2.5 * self._overview_schedule.interval, 1.0)
+        interval = self._overview_schedule.interval
+        # Samples are averaged over at least two refresh intervals so a 1s refresh stays readable.
+        max_gap = max(3.0 * interval, 1.0)
+        min_bucket = 2.0 * interval
 
         cpu_now = cpu[-1][1] if cpu else None
         cpu_header = Text()
@@ -765,6 +768,7 @@ class PlaividTui(App[None]):
             scale_top=100.0,
             header=cpu_header,
             max_gap=max_gap,
+            min_bucket=min_bucket,
         )
 
         peak = max((value for points in loads.values() for _, value in points), default=None)
@@ -786,6 +790,7 @@ class PlaividTui(App[None]):
             scale_top=self._load_scale,
             header=load_header,
             max_gap=max_gap,
+            min_bucket=min_bucket,
         )
 
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:

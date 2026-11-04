@@ -178,3 +178,30 @@ def test_chart_view_redraws_when_the_terminal_is_resized() -> None:
 
     before, after = asyncio.run(run())
     assert after > before
+
+
+def test_fast_refresh_samples_are_averaged_into_buckets() -> None:
+    from plaivid_cli.presentation.charts import bucketed
+
+    jitter = tuple((float(t), 0.0 if t % 2 else 0.5) for t in range(0, 60))  # 1 s refresh, quantised
+    points = bucketed(jitter, 0.0, 60.0, 2.0)
+    assert 25 <= len(points) <= 31
+    assert all(abs(value - 0.25) < 1e-9 for _, value in points)
+
+
+def test_empty_buckets_are_skipped_not_drawn_as_zero() -> None:
+    from plaivid_cli.presentation.charts import bucketed
+
+    samples = tuple([(float(t), 40.0) for t in range(0, 11)] + [(float(t), 40.0) for t in range(40, 61)])
+    points = bucketed(samples, 0.0, 60.0, 2.0)
+    assert not any(20 < stamp < 38 for stamp, _ in points)
+    assert all(value == 40.0 for _, value in points)
+
+
+def test_one_second_refresh_draws_a_continuous_line_in_every_column() -> None:
+    samples = tuple((float(t), 50.0 if t % 2 == 0 else 0.0) for t in range(0, 61))
+    text = render_chart((Series("cpu", CPU_GREEN, samples),), width=40, height=9, t_end=60.0,
+                        scale_top=100.0, mode="blocks", min_bucket=2.0, max_gap=3.0)
+    graph = _graph(text)
+    for column in range(40):
+        assert any(_ink(row)[:1] and row[column] not in " ·" for row in graph), column

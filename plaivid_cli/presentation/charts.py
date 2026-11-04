@@ -128,7 +128,36 @@ def _series_dots(series: Series, t0: float, dw: int, dh: int, scale: float, max_
     for run in runs:
         if run:
             dots |= _line_dots(run, dw, dh)
+    # Two dots thick, so a line reads as a line rather than a dotted trail.
+    dots |= {(x, y + 1) for x, y in dots}
     return {(x, y) for x, y in dots if 0 <= x < dw and 0 <= y < dh}
+
+
+def bucketed(
+    points: Sequence[tuple[float, float]], t0: float, t_end: float, bucket: float
+) -> tuple[tuple[float, float], ...]:
+    """Average real samples into fixed time buckets. Empty buckets stay empty, never zero."""
+    if bucket <= 0:
+        return tuple(points)
+    ordered = sorted((stamp, value) for stamp, value in points if math.isfinite(value))
+    out: list[tuple[float, float]] = []
+    index = 0
+    start = t0
+    while start <= t_end:
+        end = start + bucket
+        total_t = total_v = 0.0
+        count = 0
+        while index < len(ordered) and ordered[index][0] < end:
+            stamp, value = ordered[index]
+            index += 1
+            if stamp >= start:
+                total_t += stamp
+                total_v += value
+                count += 1
+        if count:
+            out.append((total_t / count, total_v / count))
+        start = end
+    return tuple(out)
 
 
 def _axis_row(width: int) -> Text:
@@ -156,10 +185,21 @@ def render_chart(
     mode: str = "braille",
     palette: Palette = TRUECOLOR,
     empty_text: str = "Waiting for samples",
+    min_bucket: float = 0.0,
 ) -> Text:
-    """Return exactly ``height`` rows, each ``width`` cells wide (rows are cropped, never wrapped)."""
+    """Return exactly ``height`` rows, each ``width`` cells wide (rows are cropped, never wrapped).
+
+    Samples are averaged into time buckets of at least ``min_bucket`` seconds, so a fast refresh
+    draws a smooth trend instead of per-read jitter.
+    """
     width = max(1, width)
     height = max(1, height)
+    bucket = max(WINDOW_SECONDS / width, min_bucket)
+    max_gap = max(max_gap, 2.5 * bucket)
+    series = tuple(
+        Series(item.name, item.colour, bucketed(item.points, t_end - WINDOW_SECONDS, t_end, bucket), item.area)
+        for item in series
+    )
     header_rows = 1 if header is not None and height >= 2 else 0
     axis_rows = 1 if height - header_rows >= 2 else 0
     graph_rows = height - header_rows - axis_rows
@@ -280,8 +320,9 @@ class ChartView(Static):
         scale_top: float,
         header: Text | None,
         max_gap: float,
+        min_bucket: float = 0.0,
     ) -> None:
-        self._spec = (tuple(series), t_end, scale_top, header, max_gap)
+        self._spec = (tuple(series), t_end, scale_top, header, max_gap, min_bucket)
         self._draw()
 
     def reset(self, message: str) -> None:
@@ -298,7 +339,7 @@ class ChartView(Static):
         width, height = self.content_size.width, self.content_size.height
         if width < 4 or height < 2:
             return
-        series, t_end, scale_top, header, max_gap = self._spec
+        series, t_end, scale_top, header, max_gap, min_bucket = self._spec
         key = (width, height, self._spec)
         if key == self._last:
             return
@@ -312,5 +353,6 @@ class ChartView(Static):
                 header=header,
                 max_gap=max_gap,
                 mode=self._mode,
+                min_bucket=min_bucket,
             )
         self.update(self.rendered)
