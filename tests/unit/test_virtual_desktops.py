@@ -103,7 +103,7 @@ def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
     def list_desktops(token):
         provider.desktop_calls += 1
         return SourceResult((VirtualDesktop(UUID_A, "alpha", enabled="yes"),
-                             VirtualDesktop(UUID_B, "beta", cluster_status="started")),
+                             VirtualDesktop(UUID_B, "beta", cluster_status=" Started ")),
                             CollectionStatus.CURRENT, "user/objects/desktops")
 
     provider.list_desktops = list_desktops
@@ -124,6 +124,7 @@ def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
             assert tui.query_one("#desktop-list", Vertical).styles.height == tui.query_one("#vm-list", Vertical).styles.height
             assert [node.id for node in tui.query_one("#desktop-toolbar", Horizontal).children][:3] == ["desktop-actions", "desktop-all", "desktop-audit-toggle"]
             assert str(tui.query_one("#desktop-count", Static).render()) == "2"
+            assert str(tui.query_one("#desktop-started-count", Static).render()) == "1"
             table = tui.query_one("#desktop-table", DataTable)
             assert table.row_count == 2
             table.move_cursor(row=1)
@@ -152,6 +153,7 @@ def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
             assert provider.desktop_calls > calls_before_refresh and tui._desktop_selected == UUID_B
             tui._session_ended("test logout")
             assert table.row_count == 0 and tui._desktop_section is None
+            assert str(tui.query_one("#desktop-started-count", Static).render()) == "—"
 
     try:
         asyncio.run(exercise())

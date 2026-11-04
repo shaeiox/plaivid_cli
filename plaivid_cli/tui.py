@@ -358,6 +358,9 @@ class PlaividTui(App[None]):
                             yield Static("Defined Desktops", classes="metric-title")
                             yield Static("—", id="desktop-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
+                            yield Static("Started Desktops", classes="metric-title")
+                            yield Static("—", id="desktop-started-count", classes="metric-value")
+                        with Vertical(classes="metric-card"):
                             yield Static("Selected", classes="metric-title")
                             yield Static("—", id="desktop-selected-label", classes="metric-value")
                         with Vertical(classes="metric-card"):
@@ -471,6 +474,7 @@ class PlaividTui(App[None]):
         self.query_one("#desktop-all", Checkbox).value = False
         self.query_one("#desktop-quality", Static).update("Not collected")
         self.query_one("#desktop-count", Static).update("—")
+        self.query_one("#desktop-started-count", Static).update("—")
         self.query_one("#desktop-selected-label", Static).update("—")
         self.query_one("#desktop-detail", Static).update("Select a Desktop to inspect its details.")
         self.query_one("#desktop-action-status", Static).update("No operation submitted.")
@@ -779,6 +783,13 @@ class PlaividTui(App[None]):
             self._palette.success if section.status is CollectionStatus.CURRENT else self._palette.warning
         )
         self.query_one("#desktop-count", Static).update(str(len(self._desktops)) if section.has_value else "—")
+        started_count = sum(
+            (item.cluster_status or "").strip().casefold() == "started"
+            for item in self._desktops.values()
+        )
+        self.query_one("#desktop-started-count", Static).update(
+            str(started_count) if section.has_value else "—"
+        )
         self._filter_desktops()
 
     @on(Input.Changed, "#desktop-search")
