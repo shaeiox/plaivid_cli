@@ -52,6 +52,7 @@ from plaivid_cli.presentation import host_metrics as hm
 from plaivid_cli.domain.overview import LocalHostSample
 from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
 from plaivid_cli.presentation.overview import cards, nic_details
+from plaivid_cli.presentation.charts import CHART_HEIGHT, bar_chart, resample
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
@@ -168,7 +169,7 @@ class PlaividTui(App[None]):
         .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
                 border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
         .card Static { height: auto; background: $p-panel; color: $p-text; }
-        #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
+        #cpu-chart, #load-chart { width: 100%; height: 8; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
         #running-card { color: $p-cyan; margin-top: 1; }
         #host-logo { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
         #host-banner { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
@@ -720,13 +721,24 @@ class PlaividTui(App[None]):
             self.query_one(f"#{widget_id}", Static).update(styled_metric(text, palette=self._palette))
             self._render_cache[widget_id] = text
 
+    def _render_charts(self) -> None:
+        """Multi-row CPU and load bars, one column per cell across the card width."""
+        for widget_id, key in (("cpu-chart", "cpu"), ("load-chart", "load")):
+            widget = self.query_one(f"#{widget_id}", Static)
+            samples = self._history.values[key]
+            if len(samples) < 2:
+                widget.update("Waiting for samples")
+                continue
+            width = widget.content_size.width or 32
+            widget.update(bar_chart(resample(samples, width), CHART_HEIGHT, self._palette))
+
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
         self._visible_snapshot = snapshot
         self._history.add(snapshot)
-        chart_widths = {cid: self.query_one(f"#{cid}", Static).content_size.width or 32 for cid in ("cpu-chart", "load-chart")}
-        values = cards(snapshot, self._history, self._overview_schedule.interval, chart_widths)
+        values = cards(snapshot, self._history, self._overview_schedule.interval)
         for widget_id, text in values.items():
             self._put(widget_id, text)
+        self._render_charts()
         devices, detail = nic_details(snapshot, self._nic_selected)
         names = tuple(item.name for item in devices)
         if names != self._nic_tab_names:

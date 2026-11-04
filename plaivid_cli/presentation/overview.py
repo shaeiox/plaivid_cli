@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 
-from plaivid_cli.application.overview import OverviewHistory, health, sparkline
+from plaivid_cli.application.overview import OverviewHistory, health
 from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, HostMetrics, ProcessObservation
 from plaivid_cli.domain.overview import LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
@@ -52,9 +51,7 @@ def cards(
     snapshot: ApplicationSnapshot,
     history: OverviewHistory,
     interval: float,
-    chart_widths: Mapping[str, int] | None = None,
 ) -> dict[str, str]:
-    widths = {"cpu-chart": 32, "load-chart": 32, **(chart_widths or {})}
     host_section = snapshot.section("local_host")
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
@@ -101,8 +98,6 @@ def cards(
             ],
             host_status,
         ),
-        "cpu-chart": sparkline(history.values["cpu"], widths["cpu-chart"]),
-        "load-chart": sparkline(history.values["load"], widths["load-chart"]),
         "metrics-system": finish(system_body(metrics), _section_label(snapshot, "host_metrics", interval)),
     }
     groups["host-identity"] = redact_text(
