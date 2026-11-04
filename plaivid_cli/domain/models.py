@@ -241,6 +241,36 @@ class VMDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class UserSession:
+    user: str
+    terminal: str | None = None
+    host: str | None = None
+    started: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TemperatureReading:
+    sensor: str
+    celsius: float
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessSample:
+    # ``full_command`` is intentionally not modelled: it can carry sbell argv, including tokens.
+    pid: int
+    ppid: int | None = None
+    username: str | None = None
+    cpu_pct: float | None = None
+    memory_pct: float | None = None
+    threads: int | None = None
+    state: str | None = None
+    command: str | None = None
+    exe: str | None = None
+    started: str | None = None
+    uptime: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class HostMetrics:
     cpu_pct: float | None = None
     logical_cores: int | None = None
@@ -254,6 +284,36 @@ class HostMetrics:
     os_version: str | None = None
     interfaces: tuple[NetworkInterface, ...] = ()
     storage: tuple[StoragePartition, ...] = ()
+    # system_info identity and kernel facts
+    host_id: str | None = None
+    platform_family: str | None = None
+    kernel_version: str | None = None
+    virtualization: str | None = None
+    boot_time: str | None = None
+    uptime_seconds: int | None = None
+    # load_stats
+    cpu_count: int | None = None
+    # cpu_info/cpu_detail (first core): model name and current clock in Hz
+    cpu_model: str | None = None
+    cpu_current_hz: float | None = None
+    run_queue: int | None = None
+    blocked_tasks: int | None = None
+    blocked_percent: float | None = None
+    total_tasks: int | None = None
+    # process_stats / system_stats
+    num_processes: int | None = None
+    num_threads: int | None = None
+    open_fds: int | None = None
+    context_switches: int | None = None
+    interrupts: int | None = None
+    forks: int | None = None
+    # lists
+    temperatures: tuple[TemperatureReading, ...] = ()
+    users: tuple[UserSession, ...] = ()
+    processes: tuple[ProcessSample, ...] = ()
+    process_total: int | None = None
+    # (command name, count) over every process, most common first; not limited to the top rows.
+    command_summary: tuple[tuple[str, int], ...] = ()
 
 
 T = TypeVar("T")

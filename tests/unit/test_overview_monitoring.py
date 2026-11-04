@@ -304,14 +304,27 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
 
     history = OverviewHistory()
     complete = cards(snapshot(CollectionStatus.CURRENT, result.value, 1), history, 3)
-    assert "Running VMs\n6\n" in complete["running-card"]
-    assert "Virtual machines · 6 running" in complete["vm-monitor"]
+    assert "Running VMs  6\n" in complete["running-card"]
 
     # Neither a partial result nor header-only output proves zero or six.
     for rows in (result.value, ()):
         partial = cards(snapshot(CollectionStatus.PARTIAL, rows, 2), history, 3)
-        assert "Running VMs\nN/A\n" in partial["running-card"]
+        assert "Running VMs  N/A\n" in partial["running-card"]
     empty = cards(snapshot(CollectionStatus.CURRENT, (), 3), history, 3)
-    assert "Running VMs\nN/A\n" in empty["running-card"]
+    assert "Running VMs  N/A\n" in empty["running-card"]
     stale = cards(snapshot(CollectionStatus.STALE, None, 4), history, 3)
-    assert "Running VMs\n6\n" in stale["running-card"]
+    assert "Running VMs  6\n" in stale["running-card"]
+
+
+def test_sparkline_spans_exact_card_width_for_any_sample_count():
+    from collections import deque
+
+    from plaivid_cli.application.overview import sparkline
+
+    few = deque([(0.0, 1.0), (1.0, 5.0)])
+    many = deque((float(i), float(i % 7)) for i in range(32))
+    for width in (10, 40, 90):
+        assert len(sparkline(few, width)) == width
+        assert len(sparkline(many, width)) == width
+    assert sparkline(deque([(0.0, 3.0)]), 40) == "Waiting for samples"
+    assert sparkline(deque([(0.0, 2.0), (1.0, 2.0)]), 8) == "▁" * 8

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from plaivid_cli.application.overview import OverviewHistory, health, sparkline
-from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, ProcessObservation
-from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
+from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, HostMetrics, ProcessObservation
+from plaivid_cli.domain.overview import LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.host_metrics import bar, finish, memory_body, pct_of, row, size, system_body, tasks_body, cpu_body
 
 
 def _value(section):
@@ -19,13 +22,6 @@ def _label(section, cadence: float) -> str:
     return f"{state.status} · {state.age:.0f}s ago"
 
 
-def _bar(value: float | None) -> str:
-    if value is None:
-        return "N/A"
-    ratio = max(0, min(10, round(value / 10)))
-    return "━" * ratio + "╺" * (10 - ratio)
-
-
 def _size(value: int | float | None) -> str:
     if value is None:
         return "N/A"
@@ -37,15 +33,34 @@ def _size(value: int | float | None) -> str:
     return "N/A"
 
 
+def _uptime(seconds: float | None) -> str:
+    if seconds is None:
+        return "N/A"
+    total = int(seconds)
+    weeks, rest = divmod(total, 604800)
+    days, rest = divmod(rest, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{weeks}w {days}d {hours}h {minutes}m {secs}s"
+
+
 def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
 
 
-def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: float) -> dict[str, str]:
+def cards(
+    snapshot: ApplicationSnapshot,
+    history: OverviewHistory,
+    interval: float,
+    chart_widths: Mapping[str, int] | None = None,
+) -> dict[str, str]:
+    widths = {"cpu-chart": 32, "load-chart": 32, **(chart_widths or {})}
     host_section = snapshot.section("local_host")
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
-    inventory_section = snapshot.section("inventory")
+    metrics_section = snapshot.section("host_metrics")
+    metrics = _value(metrics_section)
+    metrics = metrics if isinstance(metrics, HostMetrics) else None
     process_section = snapshot.section("processes")
     process_rows = process_section.value if process_section is not None else None
     running = None
@@ -63,57 +78,47 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         history.last_verified_running = running
     elif process_section is not None and process_section.status is CollectionStatus.STALE:
         running = history.last_verified_running
-    memory_pct = 100 * host.memory_used / host.memory_total if host.memory_used is not None and host.memory_total else None
+    memory_pct = pct_of(host.memory_used, host.memory_total)
+    host_status = _label(host_section, interval)
     groups = {
-        "running-card": f"Running VMs\n{running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
-        "cpu-card": f"Host CPU\n{_pct(host.cpu_percent)}\n{_bar(host.cpu_percent)}  {_label(host_section, interval)}",
-        "memory-card": f"Host memory\n{_size(host.memory_used)} / {_size(host.memory_total)}\n{_bar(memory_pct)}  {_label(host_section, interval)}",
-        "load-card": f"System load\n{host.load1 if host.load1 is not None else 'N/A'}\n5m / 15m: {host.load5 if host.load5 is not None else 'N/A'} / {host.load15 if host.load15 is not None else 'N/A'} · {_label(host_section, interval)}",
-        "cpu-chart": f"CPU utilization\n{sparkline(history.values['cpu'])}",
-        "memory-chart": f"Memory utilization\n{sparkline(history.values['memory'])}",
-        "load-chart": f"System load\n{sparkline(history.values['load'])}",
+        "running-card": f"Running VMs  {running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
+        "cpu-card": finish(
+            [row("Usage", f"{_pct(host.cpu_percent)}  {bar(host.cpu_percent)}"), *cpu_body(metrics)],
+            host_status,
+        ),
+        "memory-card": finish(
+            [
+                row("RAM", f"{size(host.memory_used)} / {size(host.memory_total)}  {_pct(memory_pct)}"),
+                bar(memory_pct),
+                *memory_body(metrics),
+            ],
+            host_status,
+        ),
+        "load-card": finish(
+            [
+                row("Load avg", f"{_load(host.load1)} · {_load(host.load5)} · {_load(host.load15)}  (1m · 5m · 15m)"),
+                *tasks_body(metrics),
+            ],
+            host_status,
+        ),
+        "cpu-chart": sparkline(history.values["cpu"], widths["cpu-chart"]),
+        "load-chart": sparkline(history.values["load"], widths["load-chart"]),
+        "metrics-system": finish(system_body(metrics), _section_label(snapshot, "host_metrics", interval)),
     }
-    required = {
-        "Dashboard API": (snapshot.section("dashboard"), max(18, interval)),
-        "Local host": (host_section, interval),
-        "VM inventory": (inventory_section, max(18, interval)),
-        "NIC discovery": (snapshot.section("physical_nics"), float("inf")),
-        "NIC counters": (snapshot.section("nic_samples") or snapshot.section("physical_nics"), interval),
-    }
-    statuses = {key: health(section, cadence) for key, (section, cadence) in required.items()}
-    relevant = [entry.status for entry in statuses.values() if entry.status != "N/A"]
-    nic_unverified = statuses["NIC discovery"].status == "N/A" or statuses["NIC counters"].status == "N/A"
-    overall = "OFFLINE" if "OFFLINE" in relevant else "WARNING" if "WARNING" in relevant or nic_unverified else "LOADING" if "LOADING" in relevant else "ONLINE" if relevant else "N/A"
-    successes = [section for section, _ in required.values() if section and section.succeeded_monotonic is not None]
-    latest = max(successes, key=lambda section: section.succeeded_monotonic or 0) if successes else None
-    latency = f"{latest.latency_seconds * 1000:.0f} ms" if latest and latest.latency_seconds is not None else "N/A"
-    lines = [f"{name}: {entry.status} · {entry.age:.0f}s" if entry.age is not None else f"{name}: {entry.status}" for name, entry in statuses.items()]
-    groups["heartbeat-card"] = f"Host heartbeat\n{overall}\nLast {latest.succeeded_at.astimezone().strftime('%H:%M:%S') if latest and latest.succeeded_at else 'N/A'} · {latency}"
-    groups["heartbeat-details"] = "Collection health  ·  " + "  |  ".join(lines) + "  |  VDI: N/A (unverified)"
-    dashboard_section = snapshot.section("dashboard")
-    dashboard = _value(dashboard_section)
-    dashboard = dashboard if isinstance(dashboard, DashboardSample) else DashboardSample()
-    groups["vm-monitor"] = (
-        "Virtual machines · " + (str(running) if running is not None else "N/A") + " running\n"
-        "Count from last verified pvm-running-vms ROW; N/A if listing incomplete\n"
-        "Top CPU / RAM / Network: N/A (response fields/units unverified)\n"
-        f"Dashboard API {_label(dashboard_section, max(18, interval))}"
-    )
-    groups["vdi-monitor"] = "Virtual disk images\nN/A · no verified per-VDI inventory or capacity/usage contract"
-    pvm_resources = (
-        f"CPU entries {len(dashboard.cpu_info)} · RAM used/free/total (API raw units) "
-        f"{dashboard.ram_used_raw or 'N/A'} / {dashboard.ram_free_raw or 'N/A'} / "
-        f"{dashboard.ram_total_raw or 'N/A'}"
-        if dashboard.cpu_info or any((dashboard.ram_used_raw, dashboard.ram_free_raw, dashboard.ram_total_raw))
-        else "CPU/RAM details N/A"
-    )
-    groups["host-identity"] = (
-        f"LOCAL  {host.hostname or 'N/A'}   /   PVM  {dashboard.host_name or 'N/A'}"
-        f" · ID {dashboard.host_id or 'N/A'}\n"
-        f"API {_label(dashboard_section, max(18, interval))} · PVM {pvm_resources}\n"
-        "Local /proc values are not verified as PVM-host values."
+    groups["host-identity"] = redact_text(
+        f"LOCAL  {host.hostname or 'N/A'}\n"
+        f"sballd uptime  {_uptime(host.pvm_uptime_seconds)}\n"
+        f"Server uptime  {_uptime(host.uptime_seconds)}"
     )
     return {key: redact_text(value) for key, value in groups.items()}
+
+
+def _load(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.2f}"
+
+
+def _section_label(snapshot: ApplicationSnapshot, name: str, interval: float) -> str:
+    return _label(snapshot.section(name), max(18, interval))
 
 
 def nic_details(snapshot: ApplicationSnapshot, selected: str | None) -> tuple[tuple[PhysicalNic, ...], str]:

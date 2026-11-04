@@ -48,11 +48,13 @@ from plaivid_cli.domain.models import (
     VMRecord,
 )
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation import host_metrics as hm
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
     palette_for,
+    state_text,
     styled_metric,
 )
 
@@ -71,6 +73,11 @@ BULK_ACTIONS: tuple[Action, ...] = (
 def _action_label(action: Action) -> str:
     return action.value.title()
 
+
+_METRIC_PANELS = (
+    "metrics-system", "metrics-network", "metrics-storage", "metrics-temperature",
+    "metrics-sessions", "metrics-processes", "metrics-commands",
+)
 
 class PlaividTui(App[None]):
     """Operator dashboard; all I/O is delegated to application coordinators."""
@@ -144,34 +151,37 @@ class PlaividTui(App[None]):
                                    color: $p-cyan; text-style: bold; }
         #overview-toolbar Button:focus { background: $p-surface; color: $p-blue; text-style: bold underline; }
         #interval-error { height: 1; color: $p-rose; }
-        #host-identity { height: auto; color: $p-muted; background: $p-panel;
-                         border-left: solid $p-border; padding: 1; margin-top: 1; }
-        .dashboard-heading { height: 2; color: $p-text; text-style: bold;
-                             padding: 0 1; margin-top: 1; }
-        #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
-        #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
-        .wide #summary-grid { grid-size: 4; }
-        .wide #chart-grid { grid-size: 3; }
-        .dashboard-card { height: 6; padding: 0 1; border-left: solid $p-border;
-                          background: $p-surface; color: $p-text; }
-        #heartbeat-card { height: 5; border-left: solid $p-border;
-                          background: $p-panel; margin-top: 1; }
-        #heartbeat-details { height: auto; padding: 0 1; color: $p-muted;
-                             background: $p-panel; border-left: solid $p-border; }
-        .chart-card { height: 4; padding: 0 1; border-left: solid $p-border;
-                      background: $p-panel; }
+        #host-identity { height: auto; color: $p-muted; }
+        #overview-grid { height: auto; grid-size: 1; grid-gutter: 1 2; grid-rows: auto; margin-top: 1; }
+        .cols-2 #overview-grid { grid-size: 2; }
+        .cols-2 #col-right { column-span: 2; }
+        .cols-3 #overview-grid { grid-size: 3; }
+        .card-column { height: auto; }
+        .card-column > .card { margin-bottom: 1; }
+        .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
+                border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
+        .card Static { height: auto; background: $p-panel; color: $p-text; }
+        #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
+        #running-card { color: $p-cyan; margin-top: 1; }
+        #host-status { color: $p-text; }
         #nic-tabs { height: auto; }
-        .nic-tab { width: auto; min-width: 10; margin-right: 1; }
-        #nic-detail, #vm-monitor, #vdi-monitor { height: auto; min-height: 5;
-                                                 padding: 1; border: round $p-border;
-                                                 background: $p-panel; }
-        #rediscover { margin: 1 0; }
-        #host-grid { height: auto; }
-        #host-status, #host-metrics { width: 1fr; height: auto; min-height: 6;
-                                      border: round $p-border; background: $p-panel;
-                                      padding: 1; }
-        #host-status { margin-right: 1; }
-
+        #nic-tabs .nic-tab { width: auto; min-width: 0; height: 1; margin-right: 2; padding: 0 1;
+                             border: none; background: $p-surface; color: $p-muted; }
+        #nic-tabs .nic-tab:hover { background: $p-panel; color: $p-text; }
+        #nic-tabs .nic-tab:focus { text-style: underline; }
+        #nic-tabs .nic-tab.-primary, #nic-tabs .nic-tab.-primary:hover, #nic-tabs .nic-tab.-primary:focus {
+            background: $p-blue; color: $p-bg; text-style: bold; }
+        #nic-detail { height: auto; color: $p-muted; margin-top: 1; }
+        #rediscover { margin: 1 0 0 0; }
+        #processes-card { margin-top: 1; }
+        #process-row { height: auto; }
+        #metrics-processes { width: 1fr; }
+        #metrics-commands { width: 36; border-left: solid $p-border; padding-left: 1; color: $p-cyan; }
+        .cols-1 #process-row, .cols-2 #process-row { layout: vertical; }
+        .cols-1 #metrics-processes, .cols-2 #metrics-processes { width: 100%; }
+        .cols-1 #metrics-commands, .cols-2 #metrics-commands { width: 100%; border-left: none;
+                                                              border-top: solid $p-border;
+                                                              padding: 1 0 0 0; margin-top: 1; }
         #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
         .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
                        border-left: solid $p-border; background: $p-surface; }
@@ -256,7 +266,6 @@ class PlaividTui(App[None]):
         self._table_content: dict[str, tuple[str, ...]] = {}
         self._table_columns = ()
         self._render_cache: dict[str, str] = {}
-        self._heartbeat_color: str | None = None
         self._overview_schedule = OverviewSchedule(
             min(60, max(1, application.settings.refresh_interval))
         )
@@ -301,29 +310,50 @@ class PlaividTui(App[None]):
                             yield Button("Apply", id="interval-apply")
                             yield Button("Refresh", id="overview-refresh")
                         yield Static("", id="interval-error", markup=False)
-                        yield Static("LOCAL HOST  N/A · PVM HOST  N/A", id="host-identity", markup=False)
-                        yield Static("Host readings", classes="dashboard-heading")
-                        with Grid(id="summary-grid"):
-                            for card in ("running-card", "cpu-card", "memory-card", "load-card"):
-                                yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
-                        yield Static("Host heartbeat\nLOADING", id="heartbeat-card", classes="dashboard-card", markup=False)
-                        yield Static("Awaiting collector responses", id="heartbeat-details", markup=False)
-                        yield Static("Resource history", classes="dashboard-heading")
-                        with Grid(id="chart-grid"):
-                            for chart in ("cpu-chart", "memory-chart", "load-chart"):
-                                yield Static("Waiting for samples", id=chart, classes="chart-card", markup=False)
-                        yield Static("Physical network", classes="dashboard-heading")
-                        with Horizontal(id="nic-tabs"):
-                            pass
-                        yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
-                        yield Button("Rediscover", id="rediscover")
-                        yield Static("Virtual machines", classes="dashboard-heading")
-                        yield Static("Waiting for VM monitoring…", id="vm-monitor", markup=False)
-                        yield Static("Virtual disk images", classes="dashboard-heading")
-                        yield Static("VDI inventory not verified", id="vdi-monitor", markup=False)
-                        with Horizontal(id="host-grid"):
-                            yield Static("Host status\nWaiting for collection…", id="host-status", markup=False)
-                            yield Static("Host metrics\nWaiting for collection…", id="host-metrics", markup=False)
+                        with Grid(id="overview-grid"):
+                            with Vertical(classes="card-column", id="col-left"):
+                                with Vertical(classes="card", id="network-box") as box:
+                                    box.border_title = "Network interfaces"
+                                    yield Static("Waiting for collection…", id="metrics-network", markup=False)
+                                    with Horizontal(id="nic-tabs"):
+                                        pass
+                                    yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
+                                    yield Button("Rediscover", id="rediscover")
+                                with Vertical(classes="card", id="storage-box") as box:
+                                    box.border_title = "Storage"
+                                    yield Static("Waiting for collection…", id="metrics-storage", markup=False)
+                                with Vertical(classes="card", id="sessions-box") as box:
+                                    box.border_title = "Sessions"
+                                    yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
+                            with Vertical(classes="card-column", id="col-center"):
+                                with Vertical(classes="card", id="system-card") as box:
+                                    box.border_title = "System information"
+                                    yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
+                                    yield Static("Waiting for collection…", id="metrics-system", markup=False)
+                                with Vertical(classes="card", id="load-box") as box:
+                                    box.border_title = "Load & tasks"
+                                    yield Static("Loading monitoring data…", id="load-card", markup=False)
+                                    yield Static("Waiting for samples", id="load-chart", markup=False)
+                                    yield Static("Running VMs…", id="running-card", markup=False)
+                            with Vertical(classes="card-column", id="col-right"):
+                                with Vertical(classes="card", id="cpu-box") as box:
+                                    box.border_title = "CPU"
+                                    yield Static("Loading monitoring data…", id="cpu-card", markup=False)
+                                    yield Static("Waiting for samples", id="cpu-chart", markup=False)
+                                with Vertical(classes="card", id="memory-box") as box:
+                                    box.border_title = "Memory"
+                                    yield Static("Loading monitoring data…", id="memory-card", markup=False)
+                                with Vertical(classes="card", id="temperature-box") as box:
+                                    box.border_title = "Temperature"
+                                    yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
+                                with Vertical(classes="card", id="host-status-box") as box:
+                                    box.border_title = "Host status"
+                                    yield Static("Waiting for collection…", id="host-status", markup=False)
+                        with Vertical(classes="card", id="processes-card") as box:
+                            box.border_title = "Top processes by CPU"
+                            with Horizontal(id="process-row"):
+                                yield Static("Waiting for collection…", id="metrics-processes", markup=False)
+                                yield Static("", id="metrics-commands", markup=False)
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
@@ -405,7 +435,12 @@ class PlaividTui(App[None]):
         self._set_width_class(event.size.width)
 
     def _set_width_class(self, width: int | None = None) -> None:
-        self.query_one("#shell", Vertical).set_class((width if width is not None else self.size.width) >= 110, "wide")
+        available = width if width is not None else self.size.width
+        self.query_one("#shell", Vertical).set_class(available >= 110, "wide")
+        scroll = self.query_one("#overview-scroll", VerticalScroll)
+        scroll.set_class(available >= 130, "cols-3")
+        scroll.set_class(90 <= available < 130, "cols-2")
+        scroll.set_class(available < 90, "cols-1")
 
     def action_overview_page(self) -> None:
         if self.session is not None:
@@ -498,18 +533,17 @@ class PlaividTui(App[None]):
         self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#audit-panel", Static).display = False
         self.query_one("#host-status", Static).update("Host status\nWaiting for collection…")
-        self.query_one("#host-metrics", Static).update("Host metrics\nWaiting for collection…")
+        for panel in _METRIC_PANELS:
+            self.query_one(f"#{panel}", Static).update("Waiting for collection…")
         self._visible_snapshot = None
         self._history = OverviewHistory()
         self._render_cache.clear()
-        self._heartbeat_color = None
         self.query_one("#nic-tabs", Horizontal).remove_children()
         self._nic_tab_names = ()
         self._nic_selected = None
         for widget_id in (
-            "running-card", "cpu-card", "memory-card", "load-card", "heartbeat-card",
-            "cpu-chart", "memory-chart", "load-chart", "heartbeat-details", "nic-detail",
-            "vm-monitor", "vdi-monitor", "host-identity",
+            "running-card", "cpu-card", "memory-card", "load-card",
+            "cpu-chart", "load-chart", "nic-detail", "host-identity",
         ):
             self.query_one(f"#{widget_id}", Static).update("Waiting for authenticated monitoring data…")
 
@@ -603,15 +637,11 @@ class PlaividTui(App[None]):
         if self.session is None:
             return
         if self._refresh_busy:
-            if self.query_one("#tabs", TabbedContent).active == "overview":
-                self._render_heartbeat_age()
             return
         if self.query_one("#tabs", TabbedContent).active == "overview":
             sections = self._overview_schedule.due()
             if sections:
                 self._start_refresh(sections)
-            else:
-                self._render_heartbeat_age()
         else:
             import time
 
@@ -669,23 +699,6 @@ class PlaividTui(App[None]):
         if self.session is not None and epoch == self._session_epoch:
             self._publish_snapshot(snapshot)
 
-    def _render_heartbeat_age(self) -> None:
-        # Low-cost UI clock: no PVM calls; render only if the text changed.
-        snapshot = self._visible_snapshot
-        if snapshot is None:
-            return
-        values = cards(snapshot, self._history, self._overview_schedule.interval)
-        self._put("heartbeat-card", values["heartbeat-card"])
-        self._color_heartbeat(values["heartbeat-card"])
-        details = values["heartbeat-details"]
-        self._put("heartbeat-details", details)
-
-    def _color_heartbeat(self, text: str) -> None:
-        color = (self._palette.error if "OFFLINE" in text else self._palette.warning if "WARNING" in text else self._palette.border)
-        if color != self._heartbeat_color:
-            self.query_one("#heartbeat-card", Static).styles.border_left = ("solid", color)
-            self._heartbeat_color = color
-
     def _put(self, widget_id: str, text: str) -> None:
         if self._render_cache.get(widget_id) != text:
             self.query_one(f"#{widget_id}", Static).update(styled_metric(text, palette=self._palette))
@@ -694,10 +707,10 @@ class PlaividTui(App[None]):
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
         self._visible_snapshot = snapshot
         self._history.add(snapshot)
-        values = cards(snapshot, self._history, self._overview_schedule.interval)
+        chart_widths = {cid: self.query_one(f"#{cid}", Static).content_size.width or 32 for cid in ("cpu-chart", "load-chart")}
+        values = cards(snapshot, self._history, self._overview_schedule.interval, chart_widths)
         for widget_id, text in values.items():
             self._put(widget_id, text)
-        self._color_heartbeat(values["heartbeat-card"])
         devices, detail = nic_details(snapshot, self._nic_selected)
         names = tuple(item.name for item in devices)
         if names != self._nic_tab_names:
@@ -819,13 +832,13 @@ class PlaividTui(App[None]):
         if order != self._desktop_rows:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(Text(cell) for cell in cells), key=uuid)
+                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._desktop_cells.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._desktop_columns[column], Text(cell), update_width=True)
+                        table.update_cell(uuid, self._desktop_columns[column], self._cell_text(column, cell), update_width=True)
         self._desktop_rows, self._desktop_cells = order, rows
         if self._desktop_selected not in rows:
             self._desktop_selected = order[0] if order else None
@@ -944,7 +957,24 @@ class PlaividTui(App[None]):
         status = as_host_status(status_section) if status_section else None
         metrics = as_host_metrics(metric_section) if metric_section else None
         self.query_one("#host-status", Static).update(_host_status_text(status, status_section))
-        self.query_one("#host-metrics", Static).update(_host_metrics_text(metrics, metric_section))
+        self._render_metric_panels(metrics, metric_section)
+
+    def _render_metric_panels(self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> None:
+        status = _section_status(section)
+        texts = {
+            "metrics-network": hm.finish(hm.network_body(metrics), status),
+            "metrics-storage": hm.finish(hm.storage_body(metrics), status),
+            "metrics-temperature": hm.finish(hm.temperature_body(metrics), status),
+            "metrics-sessions": hm.finish(hm.sessions_body(metrics), status),
+            "metrics-processes": hm.finish(hm.processes_body(metrics), status),
+            "metrics-commands": redact_text("\n".join(hm.commands_body(metrics))),
+        }
+        for panel, text in texts.items():
+            self.query_one(f"#{panel}", Static).update(text)
+        total = metrics.process_total if metrics is not None else None
+        self.query_one("#processes-card").border_title = (
+            "Top processes by CPU" if total is None else f"Top processes by CPU · {total:,} total"
+        )
 
     @on(Checkbox.Changed, "#select-all")
     def vm_scope_changed(self) -> None:
@@ -954,6 +984,10 @@ class PlaividTui(App[None]):
     def vm_search_changed(self) -> None:
         # Search is strictly local: changing the input never starts collection.
         self._filter_vms()
+
+    def _cell_text(self, column: int, cell: str) -> Text:
+        # Column 2 is the object state (VM page) or cluster status (Virtual Desktops page).
+        return state_text(cell, self._palette) if column == 2 else Text(cell)
 
     def _filter_vms(self) -> None:
         query = self.query_one("#vm-search", Input).value.strip().casefold()
@@ -974,13 +1008,13 @@ class PlaividTui(App[None]):
         if order != self._table_order:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(Text(cell) for cell in cells), key=uuid)
+                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._table_content.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._table_columns[column], Text(cell), update_width=True)
+                        table.update_cell(uuid, self._table_columns[column], self._cell_text(column, cell), update_width=True)
         self._table_order, self._table_content = order, rows
         all_targets = self.query_one("#select-all", Checkbox).value
         count = len(self._records) if all_targets else int(bool(order))
@@ -1204,24 +1238,6 @@ def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object
             f"RAM  {_bytes(status.ram_used_bytes)} / {_bytes(status.ram_total_bytes)}",
             f"Load  {_display(status.load1)}  {_display(status.load5)}  {_display(status.load15)}",
             f"Storage  {_bytes(status.storage_available_bytes)} free / {_bytes(status.storage_total_bytes)}",
-        ]
-    )
-    return redact_text("\n".join(lines))
-
-
-def _host_metrics_text(metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> str:
-    lines = ["HOST METRICS", f"Collection  {_section_status(section)}"]
-    if metrics is None:
-        lines.append("No current monitoring values.")
-        return redact_text("\n".join(lines))
-    lines.extend(
-        [
-            f"System  {metrics.hostname or '—'}  ·  {metrics.os_version or '—'}",
-            f"CPU  {_display(metrics.cpu_pct, suffix='%')}  ·  logical cores  {_display(metrics.logical_cores)}",
-            f"Memory  {_bytes(metrics.memory_used_bytes)} / {_bytes(metrics.memory_total_bytes)}",
-            f"Swap  {_bytes(metrics.swap_used_bytes)} / {_bytes(metrics.swap_total_bytes)}",
-            f"Uptime  {metrics.uptime or '—'}",
-            f"Interfaces  {len(metrics.interfaces)}  ·  storage mounts  {len(metrics.storage)}",
         ]
     )
     return redact_text("\n".join(lines))
