@@ -314,3 +314,17 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
     assert "Running VMs  N/A\n" in empty["running-card"]
     stale = cards(snapshot(CollectionStatus.STALE, None, 4), history, 3)
     assert "Running VMs  6\n" in stale["running-card"]
+
+
+def test_sparkline_spans_exact_card_width_for_any_sample_count():
+    from collections import deque
+
+    from plaivid_cli.application.overview import sparkline
+
+    few = deque([(0.0, 1.0), (1.0, 5.0)])
+    many = deque((float(i), float(i % 7)) for i in range(32))
+    for width in (10, 40, 90):
+        assert len(sparkline(few, width)) == width
+        assert len(sparkline(many, width)) == width
+    assert sparkline(deque([(0.0, 3.0)]), 40) == "Waiting for samples"
+    assert sparkline(deque([(0.0, 2.0), (1.0, 2.0)]), 8) == "▁" * 8

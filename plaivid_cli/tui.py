@@ -161,7 +161,7 @@ class PlaividTui(App[None]):
         .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
                 border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
         .card Static { height: auto; background: $p-panel; color: $p-text; }
-        #cpu-chart, #load-chart { color: $p-cyan; margin-top: 1; }
+        #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; }
         #running-card { color: $p-cyan; margin-top: 1; }
         #host-status { color: $p-text; }
         #nic-tabs { height: auto; }
@@ -698,7 +698,8 @@ class PlaividTui(App[None]):
     def _render_overview(self, snapshot: ApplicationSnapshot) -> None:
         self._visible_snapshot = snapshot
         self._history.add(snapshot)
-        values = cards(snapshot, self._history, self._overview_schedule.interval)
+        chart_width = self.query_one("#cpu-chart", Static).content_size.width or 32
+        values = cards(snapshot, self._history, self._overview_schedule.interval, chart_width)
         for widget_id, text in values.items():
             self._put(widget_id, text)
         devices, detail = nic_details(snapshot, self._nic_selected)

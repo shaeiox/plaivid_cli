@@ -46,7 +46,7 @@ def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.1f}%"
 
 
-def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: float) -> dict[str, str]:
+def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: float, chart_width: int = 32) -> dict[str, str]:
     host_section = snapshot.section("local_host")
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
@@ -93,8 +93,8 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
             ],
             host_status,
         ),
-        "cpu-chart": sparkline(history.values["cpu"]),
-        "load-chart": sparkline(history.values["load"]),
+        "cpu-chart": sparkline(history.values["cpu"], chart_width),
+        "load-chart": sparkline(history.values["load"], chart_width),
         "metrics-system": finish(system_body(metrics), _section_label(snapshot, "host_metrics", interval)),
     }
     groups["host-identity"] = redact_text(

@@ -132,11 +132,21 @@ class OverviewHistory:
                 self.values[key].append((section.succeeded_monotonic, value))
 
 
-def sparkline(values: deque[tuple[float, float]]) -> str:
+def sparkline(values: deque[tuple[float, float]], width: int = 32) -> str:
+    """Exactly ``width`` cells: samples are linearly resampled so the line spans the whole card."""
     if len(values) < 2:
         return "Waiting for samples"
     marks = "▁▂▃▄▅▆▇█"
     numbers = [value for _, value in values]
     high = max(numbers)
     low = min(numbers)
-    return "".join(marks[min(7, int(7 * (value - low) / (high - low)))] if high > low else marks[0] for value in numbers)
+    width = max(2, width)
+    last = len(numbers) - 1
+    cells: list[float] = []
+    for column in range(width):
+        position = column * last / (width - 1)
+        left = int(position)
+        right = min(left + 1, last)
+        fraction = position - left
+        cells.append(numbers[left] * (1 - fraction) + numbers[right] * fraction)
+    return "".join(marks[min(7, int(7 * (value - low) / (high - low)))] if high > low else marks[0] for value in cells)
