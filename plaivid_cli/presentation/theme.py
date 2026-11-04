@@ -1,7 +1,8 @@
 """Plaivid's Gemini-inspired terminal palette and presentation-only rich text.
 
-The palette is intentionally static: monitoring freshness comes from collection
-results, not a fast spinner or a decorative animation.
+Colors are static: each card or panel group has a fixed gradient so related items
+are recognisable at a glance. There is no animation; freshness comes from collection
+results. Red, yellow and green are reserved for alarm, warning and OK status.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ class Palette:
     success: str
     warning: str
     error: str
+    # False for 16-colour and NO_COLOR output: group gradients collapse to plain text there.
+    decorative: bool = True
 
     def css_tokens(self) -> str:
         names = {
@@ -70,10 +73,57 @@ ANSI256 = Palette(
 ANSI16 = Palette(
     "#000000", "#000000", "#000000", "#ffffff", "#aaaaaa", "#777777",
     "#ffffff", "#ffffff", "#ffffff", "#00ff00", "#ffff00", "#ff0000",
+    decorative=False,
 )
 
 # NO_COLOR asks for no color at all; state words still carry the meaning.
-NO_COLOR = replace(ANSI16, success="#ffffff", warning="#ffffff", error="#ffffff")
+NO_COLOR = replace(ANSI16, success="#ffffff", warning="#ffffff", error="#ffffff", decorative=False)
+
+# Card and panel groups, each with a start and end colour. Hues are kept away from
+# red, yellow and green so no group can be mistaken for an alarm, warning or OK state.
+GROUP_STOPS: dict[str, tuple[str, str]] = {
+    "host": ("#8787ff", "#d7afff"),  # violet: System information, Host status
+    "compute": ("#5fafff", "#87d7ff"),  # sky: CPU, Memory, Load & tasks, Top processes
+    "io": ("#ff875f", "#ffaf5f"),  # orange: Storage, Network interfaces
+    "environment": ("#5fd7d7", "#afffff"),  # turquoise: Temperature, Sessions
+    "vms": ("#ff87d7", "#ffafff"),  # pink: Virtual Machines and Desktops pages
+}
+
+
+def _rgb(colour: str) -> tuple[int, int, int]:
+    value = colour.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def _hex(rgb: tuple[float, float, float]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*(round(channel) for channel in rgb))
+
+
+def group_color(group: str, palette: Palette = TRUECOLOR) -> str | None:
+    """The group's start colour, or None when colour is disabled."""
+    if not palette.decorative:
+        return None
+    return GROUP_STOPS[group][0]
+
+
+def gradient_text(value: str, start: str, end: str, *, bold: bool = True) -> Text:
+    """Colour each visible character along a start-to-end gradient."""
+    text = Text()
+    a, b = _rgb(start), _rgb(end)
+    count = max(1, len(value) - 1)
+    for index, char in enumerate(value):
+        t = index / count
+        colour = _hex(tuple(a[i] + (b[i] - a[i]) * t for i in range(3)))
+        text.append(char, style=f"bold {colour}" if bold else colour)
+    return text
+
+
+def group_title(group: str, title: str, palette: Palette = TRUECOLOR) -> Text:
+    """A card or panel title in its group's gradient; plain text when colour is disabled."""
+    if not palette.decorative:
+        return Text(title, style=f"bold {palette.primary}")
+    start, end = GROUP_STOPS[group]
+    return gradient_text(title, start, end)
 
 
 def palette_for(color_system: str | None, *, no_color: bool = False) -> Palette:

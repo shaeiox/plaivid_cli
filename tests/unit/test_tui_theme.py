@@ -82,7 +82,9 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 tui.action_vms_page()
                 await pilot.pause(.1)
                 assert tui.query_one("#tabs", TabbedContent).active == "fleet"
-                assert "VM list" in str(tui.query_one("#vm-list").border_title)
+                from rich.text import Text as RichText
+
+                assert "VM list" in RichText.from_markup(str(tui.query_one("#vm-list").border_title)).plain
                 assert tui.query_one("#fleet-summary").region.height == 5
                 assert tui.query_one("#vm-toolbar").region.height == 3
                 for selector, widget in (

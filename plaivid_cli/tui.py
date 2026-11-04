@@ -55,6 +55,8 @@ from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
+    group_color,
+    group_title,
     palette_for,
     ALARM,
     CAUTION,
@@ -321,59 +323,59 @@ class PlaividTui(App[None]):
                         with Grid(id="overview-grid"):
                             with Vertical(classes="card-column", id="col-left"):
                                 with Vertical(classes="card", id="network-box") as box:
-                                    box.border_title = "Network interfaces"
+                                    self._group_box(box, "io", "Network interfaces")
                                     yield Static("Waiting for collection…", id="metrics-network", markup=False)
                                     with Horizontal(id="nic-tabs"):
                                         pass
                                     yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
                                     yield Button("Rediscover", id="rediscover")
                                 with Vertical(classes="card", id="storage-box") as box:
-                                    box.border_title = "Storage"
+                                    self._group_box(box, "io", "Storage")
                                     yield Static("Waiting for collection…", id="metrics-storage", markup=False)
                                 with Vertical(classes="card", id="sessions-box") as box:
-                                    box.border_title = "Sessions"
+                                    self._group_box(box, "environment", "Sessions")
                                     yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
                             with Vertical(classes="card-column", id="col-center"):
                                 with Vertical(classes="card", id="system-card") as box:
-                                    box.border_title = "System information"
+                                    self._group_box(box, "host", "System information")
                                     yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
                                     yield Static("Waiting for collection…", id="metrics-system", markup=False)
                                 with Vertical(classes="card", id="load-box") as box:
-                                    box.border_title = "Load & tasks"
+                                    self._group_box(box, "compute", "Load & tasks")
                                     yield Static("Loading monitoring data…", id="load-card", markup=False)
                                     yield Static("Waiting for samples", id="load-chart", markup=False)
                                     yield Static("Running VMs…", id="running-card", markup=False)
                                 with Vertical(classes="card", id="host-status-box") as box:
-                                    box.border_title = "Host status"
+                                    self._group_box(box, "host", "Host status")
                                     yield Static("", id="host-logo", markup=False)
                                     yield Static("", id="host-banner", markup=False)
                                     yield Static("Waiting for collection…", id="host-status", markup=False)
                             with Vertical(classes="card-column", id="col-right"):
                                 with Vertical(classes="card", id="cpu-box") as box:
-                                    box.border_title = "CPU"
+                                    self._group_box(box, "compute", "CPU")
                                     yield Static("Loading monitoring data…", id="cpu-card", markup=False)
                                     yield Static("Waiting for samples", id="cpu-chart", markup=False)
                                 with Vertical(classes="card", id="memory-box") as box:
-                                    box.border_title = "Memory"
+                                    self._group_box(box, "compute", "Memory")
                                     yield Static("Loading monitoring data…", id="memory-card", markup=False)
                                 with Vertical(classes="card", id="temperature-box") as box:
-                                    box.border_title = "Temperature"
+                                    self._group_box(box, "environment", "Temperature")
                                     yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
                         with Vertical(classes="card", id="processes-card") as box:
-                            box.border_title = "Top processes by CPU"
+                            self._group_box(box, "compute", "Top processes by CPU")
                             with Horizontal(id="process-row"):
                                 yield Static("Waiting for collection…", id="metrics-processes", markup=False)
                                 yield Static("", id="metrics-commands", markup=False)
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
-                            yield Static("Defined VMs", classes="metric-title")
+                            yield Static(group_title("vms", "Defined VMs", self._palette), classes="metric-title")
                             yield Static("—", id="vm-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("Processes seen", classes="metric-title")
+                            yield Static(group_title("vms", "Processes seen", self._palette), classes="metric-title")
                             yield Static("—", id="process-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("Inventory", classes="metric-title")
+                            yield Static(group_title("vms", "Inventory", self._palette), classes="metric-title")
                             yield Static("Not collected", id="inventory-quality", classes="metric-value")
                         yield Button("Refresh", id="refresh-button", variant="primary")
                     with Vertical(id="vm-list"):
@@ -395,13 +397,13 @@ class PlaividTui(App[None]):
                 with TabPane("Virtual Desktops", id="desktops"):
                     with Horizontal(id="desktop-summary"):
                         with Vertical(classes="metric-card"):
-                            yield Static("Defined Desktops", classes="metric-title")
+                            yield Static(group_title("vms", "Defined Desktops", self._palette), classes="metric-title")
                             yield Static("—", id="desktop-count", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("Selected", classes="metric-title")
+                            yield Static(group_title("vms", "Selected", self._palette), classes="metric-title")
                             yield Static("—", id="desktop-selected-label", classes="metric-value")
                         with Vertical(classes="metric-card"):
-                            yield Static("Inventory", classes="metric-title")
+                            yield Static(group_title("vms", "Inventory", self._palette), classes="metric-title")
                             yield Static("Not collected", id="desktop-quality", classes="metric-value")
                         yield Button("Refresh", id="desktop-refresh", variant="primary")
                     with Vertical(id="desktop-list"):
@@ -422,11 +424,18 @@ class PlaividTui(App[None]):
             yield Static("1 Overview · 2 Virtual Machines · 3 Virtual Desktops · R refresh · Q quit", id="notice")
             yield Footer()
 
+    def _group_box(self, box, group: str, title: str) -> None:
+        """Title and border of a card, coloured by its group (plain when colour is off)."""
+        box.border_title = group_title(group, title, self._palette)
+        colour = group_color(group, self._palette)
+        if colour is not None:
+            box.styles.border = ("round", colour)
+
     def on_mount(self) -> None:
         apply_theme(self, self._palette)
         self.query_one("#logout", Button).tooltip = "Logout"
-        self.query_one("#vm-list", Vertical).border_title = "VM list"
-        self.query_one("#desktop-list", Vertical).border_title = "Desktop list"
+        self._group_box(self.query_one("#vm-list", Vertical), "vms", "VM list")
+        self._group_box(self.query_one("#desktop-list", Vertical), "vms", "Desktop list")
         table = self.query_one("#fleet-table", DataTable)
         self._table_columns = table.add_columns("#", "VM name", "Object state", "Process", "vCPU", "Memory")
         self._desktop_columns = self.query_one("#desktop-table", DataTable).add_columns(
@@ -966,7 +975,7 @@ class PlaividTui(App[None]):
             _host_banner_text(status_section, self._palette, pid_file)
         )
         self.query_one("#host-status", Static).update(
-            _host_status_text(status, status_section, self._palette, pid_file)
+            _host_status_text(status, status_section, self._palette, pid_file, group_color("host", self._palette))
         )
         self._render_metric_panels(metrics, metric_section)
 
@@ -983,9 +992,8 @@ class PlaividTui(App[None]):
         for panel, text in texts.items():
             self.query_one(f"#{panel}", Static).update(text)
         total = metrics.process_total if metrics is not None else None
-        self.query_one("#processes-card").border_title = (
-            "Top processes by CPU" if total is None else f"Top processes by CPU · {total:,} total"
-        )
+        title = "Top processes by CPU" if total is None else f"Top processes by CPU · {total:,} total"
+        self.query_one("#processes-card").border_title = group_title("compute", title, self._palette)
 
     @on(Checkbox.Changed, "#select-all")
     def vm_scope_changed(self) -> None:
@@ -1279,6 +1287,7 @@ def _host_status_text(
     section: SectionSnapshot[object] | None,
     palette=TRUECOLOR,
     pid_file: bool | None = None,
+    label_colour: str | None = None,
 ) -> Text:
     """Aligned ``label : value`` rows under the banner. Live values only are coloured as status."""
     live = section.value if isinstance(section.value, HostStatus) else None
@@ -1292,7 +1301,7 @@ def _host_status_text(
         ("Version", status.version or "—"),
     )
     for label, value in rows:
-        text.append(f"{label:<8} : ", style=palette.muted)
+        text.append(f"{label:<8} : ", style=f"bold {label_colour}" if label_colour else palette.muted)
         text.append(redact_text(value), style=f"bold {palette.accent}" if label == "Version" and live else None)
         text.append("\n")
     if live is None:
