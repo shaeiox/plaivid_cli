@@ -3,7 +3,7 @@
 <process_info_item><pid>202</pid><ppid>2</ppid><username><![CDATA[root]]></username><cpu>5.42</cpu><memory>0.23</memory><threads>6</threads><exe><![CDATA[/home/shaiya/plaivid/plaivid]]></exe><command><![CDATA[plaivid]]></command><full_command><![CDATA[./plaivid]]></full_command><start_time_human><![CDATA[2026-11-04T08:25:40Z]]></start_time_human><uptime_human><![CDATA[0 days, 00:06:10]]></uptime_human><status_list><item><![CDATA[sleep]]></item></status_list></process_info_item>
 </item_list></process></process_info>
 <cpu_info><cpu_usage><total_usage>12.5</total_usage></cpu_usage><logical_cores>24</logical_cores><physical_cores>12</physical_cores>
-<cpu_detail>
+<cpu_detail_list><cpu_detail>
                   <cpu>3</cpu>
                   <vendor_id><![CDATA[GenuineIntel]]></vendor_id>
                   <family><![CDATA[6]]></family>
@@ -24,6 +24,6 @@
                     <l3>15728640</l3>
                     <l4>0</l4>
                   </cache_size>
-                </cpu_detail></cpu_info>
+                </cpu_detail></cpu_detail_list></cpu_info>
 <system_info><host_id><![CDATA[00000000-0000-5355-4534-303452313457]]></host_id><host_name><![CDATA[spongebob]]></host_name><uptime>6874</uptime><uptime_human><![CDATA[0 days, 01:54:34]]></uptime_human><boot_time_human><![CDATA[2026-11-04T06:37:16Z]]></boot_time_human><os><![CDATA[linux]]></os><platform><![CDATA[rocky]]></platform><platform_family><![CDATA[rhel]]></platform_family><platform_version><![CDATA[9.8]]></platform_version><kernel_version><![CDATA[5.14.0-687.58.1.el9_8.x86_64]]></kernel_version><virtualization_system><![CDATA[kvm]]></virtualization_system><virtualization_role><![CDATA[host]]></virtualization_role><system_stats><context_switches>33282361</context_switches><interrupts>20618322</interrupts><forks>47863</forks></system_stats><load_stats><run_queue>14</run_queue><cpus>24</cpus><blocked>0</blocked><total_tasks>791</total_tasks><blocked_percent>0.000000</blocked_percent></load_stats><process_stats><num_processes>529</num_processes><num_threads>791</num_threads><open_fds>2060</open_fds></process_stats><temperature_stat_list><temperature_stat><sensor_key><![CDATA[acpitz]]></sensor_key><temperature>8.3</temperature></temperature_stat><temperature_stat><sensor_key><![CDATA[coretemp_package_id_0]]></sensor_key><temperature>43.0</temperature></temperature_stat><temperature_stat><sensor_key><![CDATA[tg3]]></sensor_key><temperature>51.0</temperature></temperature_stat></temperature_stat_list><user_list><user_stat><user><![CDATA[root]]></user><terminal><![CDATA[tty1]]></terminal><host><![CDATA[]]></host><started_human><![CDATA[2026/11/04 10:09:38]]></started_human></user_stat><user_stat><user><![CDATA[shaiya]]></user><terminal><![CDATA[pts/0]]></terminal><host><![CDATA[172.16.40.243]]></host><started_human><![CDATA[2026/11/04 11:12:45]]></started_human></user_stat></user_list></system_info>
 </metrics></node_metrics></node_metrics_list></cluster_metrics></description></response>
