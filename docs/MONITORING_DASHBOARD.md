@@ -31,6 +31,8 @@ Local verification: fake PVM/OS fixtures, Textual Pilot, pytest, Ruff, Pyright. 
 
 ## Host monitoring panels (`sbell monitoring metrics`)
 
-The Overview's **Host monitoring** section is built from one `monitoring/metrics` response per refresh cycle. Panels: SYSTEM (host, host ID, platform, kernel, virtualization, boot time, uptime), CPU (usage, cores, scheduler count, run queue, blocked tasks, context switches, interrupts, forks), MEMORY (RAM and swap), LOAD & TASKS (task, process, thread and open-fd counts), NETWORK INTERFACES, STORAGE (real filesystems only), TEMPERATURE, SESSIONS (logged-in users), and TOP PROCESSES BY CPU (top 10 shown; top 50 kept).
+The Overview's **Host monitoring** section is built from one `monitoring/metrics` response per refresh cycle. Cards: System information (host, host ID, platform, kernel, virtualization, boot time, sballd and server uptime), CPU (usage, cores, run queue, blocked tasks, context switches, interrupts, forks), Memory (RAM and swap), Load & tasks (load averages, task, process, thread and open-fd counts), Network interfaces, Storage (real filesystems only), Temperature, Sessions (logged-in users), and Host status. Top processes by CPU is a full-width card: the top 8 are shown from the 50 kept, with a **Command summary** beside them that counts every process by command name.
+
+Responsive layout: the card grid has 3 columns at 130 or more terminal columns, 2 columns at 90 to 129, and 1 column below 90. The process table and command summary sit side by side only at 3 columns; below that they stack. No card uses glow.
 
 Rules: a missing value is shown as `—`, never as zero. The process `full_command` field is never read or displayed, because it can contain sbell argv and session tokens. Units for the per-process memory percentage are taken as reported and are not independently verified on the target host. Synthetic test fixtures live in `tests/fixtures/monitoring-metrics.xml`.

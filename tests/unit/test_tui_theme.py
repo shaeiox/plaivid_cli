@@ -136,7 +136,7 @@ def test_256_and_standard_terminal_render_with_matching_widget_and_control_theme
                     assert tui.query_one("#fleet-table").styles.background.hex.lower() == palette.background
                     assert tui.query_one(".metric-card").styles.background.hex.lower() == palette.background
                 assert tui.query_one("#tabs", TabbedContent).active == "overview"
-                assert "Host CPU" in str(tui.query_one("#cpu-card", Static).render())
+                assert "Usage" in str(tui.query_one("#cpu-card", Static).render())
         finally:
             collection.close()
 

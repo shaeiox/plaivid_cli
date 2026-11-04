@@ -304,13 +304,13 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
 
     history = OverviewHistory()
     complete = cards(snapshot(CollectionStatus.CURRENT, result.value, 1), history, 3)
-    assert "Running VMs\n6\n" in complete["running-card"]
+    assert "Running VMs  6\n" in complete["running-card"]
 
     # Neither a partial result nor header-only output proves zero or six.
     for rows in (result.value, ()):
         partial = cards(snapshot(CollectionStatus.PARTIAL, rows, 2), history, 3)
-        assert "Running VMs\nN/A\n" in partial["running-card"]
+        assert "Running VMs  N/A\n" in partial["running-card"]
     empty = cards(snapshot(CollectionStatus.CURRENT, (), 3), history, 3)
-    assert "Running VMs\nN/A\n" in empty["running-card"]
+    assert "Running VMs  N/A\n" in empty["running-card"]
     stale = cards(snapshot(CollectionStatus.STALE, None, 4), history, 3)
-    assert "Running VMs\n6\n" in stale["running-card"]
+    assert "Running VMs  6\n" in stale["running-card"]

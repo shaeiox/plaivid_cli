@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from plaivid_cli.application.overview import OverviewHistory, health, sparkline
-from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, ProcessObservation
-from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
+from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, HostMetrics, ProcessObservation
+from plaivid_cli.domain.overview import LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.host_metrics import bar, finish, memory_body, pct_of, row, size, system_body, tasks_body, cpu_body
 
 
 def _value(section):
@@ -17,13 +18,6 @@ def _label(section, cadence: float) -> str:
     if state.age is None:
         return state.status
     return f"{state.status} · {state.age:.0f}s ago"
-
-
-def _bar(value: float | None) -> str:
-    if value is None:
-        return "N/A"
-    ratio = max(0, min(10, round(value / 10)))
-    return "━" * ratio + "╺" * (10 - ratio)
 
 
 def _size(value: int | float | None) -> str:
@@ -56,6 +50,9 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
     host_section = snapshot.section("local_host")
     host = _value(host_section)
     host = host if isinstance(host, LocalHostSample) else LocalHostSample()
+    metrics_section = snapshot.section("host_metrics")
+    metrics = _value(metrics_section)
+    metrics = metrics if isinstance(metrics, HostMetrics) else None
     process_section = snapshot.section("processes")
     process_rows = process_section.value if process_section is not None else None
     running = None
@@ -73,25 +70,47 @@ def cards(snapshot: ApplicationSnapshot, history: OverviewHistory, interval: flo
         history.last_verified_running = running
     elif process_section is not None and process_section.status is CollectionStatus.STALE:
         running = history.last_verified_running
-    memory_pct = 100 * host.memory_used / host.memory_total if host.memory_used is not None and host.memory_total else None
+    memory_pct = pct_of(host.memory_used, host.memory_total)
+    host_status = _label(host_section, interval)
     groups = {
-        "running-card": f"Running VMs\n{running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
-        "cpu-card": f"Host CPU\n{_pct(host.cpu_percent)}\n{_bar(host.cpu_percent)}  {_label(host_section, interval)}",
-        "memory-card": f"Host memory\n{_size(host.memory_used)} / {_size(host.memory_total)}\n{_bar(memory_pct)}  {_label(host_section, interval)}",
-        "load-card": f"System load\n{host.load1 if host.load1 is not None else 'N/A'}\n5m / 15m: {host.load5 if host.load5 is not None else 'N/A'} / {host.load15 if host.load15 is not None else 'N/A'} · {_label(host_section, interval)}",
-        "cpu-chart": f"CPU utilization\n{sparkline(history.values['cpu'])}",
-        "memory-chart": f"Memory utilization\n{sparkline(history.values['memory'])}",
-        "load-chart": f"System load\n{sparkline(history.values['load'])}",
+        "running-card": f"Running VMs  {running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
+        "cpu-card": finish(
+            [row("Usage", f"{_pct(host.cpu_percent)}  {bar(host.cpu_percent)}"), *cpu_body(metrics)],
+            host_status,
+        ),
+        "memory-card": finish(
+            [
+                row("RAM", f"{size(host.memory_used)} / {size(host.memory_total)}  {_pct(memory_pct)}"),
+                bar(memory_pct),
+                *memory_body(metrics),
+            ],
+            host_status,
+        ),
+        "load-card": finish(
+            [
+                row("Load avg", f"{_load(host.load1)} · {_load(host.load5)} · {_load(host.load15)}  (1m · 5m · 15m)"),
+                *tasks_body(metrics),
+            ],
+            host_status,
+        ),
+        "cpu-chart": sparkline(history.values["cpu"]),
+        "load-chart": sparkline(history.values["load"]),
+        "metrics-system": finish(system_body(metrics), _section_label(snapshot, "host_metrics", interval)),
     }
-    dashboard_section = snapshot.section("dashboard")
-    dashboard = _value(dashboard_section)
-    dashboard = dashboard if isinstance(dashboard, DashboardSample) else DashboardSample()
-    groups["host-identity"] = (
+    groups["host-identity"] = redact_text(
         f"LOCAL  {host.hostname or 'N/A'}\n"
         f"sballd uptime  {_uptime(host.pvm_uptime_seconds)}\n"
         f"Server uptime  {_uptime(host.uptime_seconds)}"
     )
     return {key: redact_text(value) for key, value in groups.items()}
+
+
+def _load(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.2f}"
+
+
+def _section_label(snapshot: ApplicationSnapshot, name: str, interval: float) -> str:
+    return _label(snapshot.section(name), max(18, interval))
 
 
 def nic_details(snapshot: ApplicationSnapshot, selected: str | None) -> tuple[tuple[PhysicalNic, ...], str]:

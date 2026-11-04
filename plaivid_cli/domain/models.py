@@ -309,6 +309,8 @@ class HostMetrics:
     users: tuple[UserSession, ...] = ()
     processes: tuple[ProcessSample, ...] = ()
     process_total: int | None = None
+    # (command name, count) over every process, most common first; not limited to the top rows.
+    command_summary: tuple[tuple[str, int], ...] = ()
 
 
 T = TypeVar("T")

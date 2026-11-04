@@ -56,3 +56,8 @@ def test_processes_sorted_by_cpu_and_full_command_is_never_stored():
 def test_missing_blocks_stay_none():
     result = parse_metrics(ET.fromstring("<description><metrics/></description>"))
     assert result.value.total_tasks is None and result.value.processes == ()
+
+
+def test_command_summary_counts_every_process_with_most_common_first():
+    m = _metrics()
+    assert m.command_summary == (("bash", 1), ("plaivid", 1))

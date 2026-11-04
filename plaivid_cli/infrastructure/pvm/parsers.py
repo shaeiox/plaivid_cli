@@ -280,6 +280,7 @@ def _host_facts(metrics: ET.Element, system: ET.Element | None) -> dict[str, obj
             started=_text(item, "start_time_human"),
             uptime=_text(item, "uptime_human"),
         ))
+    commands = Counter((row.command or (row.exe or "").rsplit("/", 1)[-1] or "?") for row in rows)
     rows.sort(key=lambda row: (-(row.cpu_pct or 0.0), row.pid))
     total = _int(procs.findtext("num_processes")) if procs is not None else None
     return {
@@ -306,6 +307,7 @@ def _host_facts(metrics: ET.Element, system: ET.Element | None) -> dict[str, obj
         "users": users,
         "processes": tuple(rows[:_PROCESS_LIMIT]),
         "process_total": total if total is not None else (len(rows) or None),
+        "command_summary": tuple(commands.most_common(8)),
     }
 
 

@@ -73,10 +73,9 @@ def _action_label(action: Action) -> str:
     return action.value.title()
 
 
-# Grid panels first; the process table is last and rendered full-width below the grid.
 _METRIC_PANELS = (
-    "metrics-system", "metrics-cpu", "metrics-memory", "metrics-tasks", "metrics-network",
-    "metrics-storage", "metrics-temperature", "metrics-sessions", "metrics-processes",
+    "metrics-system", "metrics-network", "metrics-storage", "metrics-temperature",
+    "metrics-sessions", "metrics-processes", "metrics-commands",
 )
 
 class PlaividTui(App[None]):
@@ -151,33 +150,29 @@ class PlaividTui(App[None]):
                                    color: $p-cyan; text-style: bold; }
         #overview-toolbar Button:focus { background: $p-surface; color: $p-blue; text-style: bold underline; }
         #interval-error { height: 1; color: $p-rose; }
-        #host-identity { height: auto; color: $p-muted; background: $p-panel;
-                         border-left: solid $p-border; padding: 1; margin-top: 1; }
-        .dashboard-heading { height: 2; color: $p-text; text-style: bold;
-                             padding: 0 1; margin-top: 1; }
-        #summary-grid { grid-size: 2; grid-gutter: 1; height: auto; }
-        #chart-grid { grid-size: 1; grid-gutter: 1; height: auto; }
-        .wide #summary-grid { grid-size: 4; }
-        .wide #chart-grid { grid-size: 3; }
-        .dashboard-card { height: 6; padding: 0 1; border-left: solid $p-border;
-                          background: $p-surface; color: $p-text; }
-        .chart-card { height: 4; padding: 0 1; border-left: solid $p-border;
-                      background: $p-panel; }
+        #host-identity { height: auto; color: $p-muted; }
+        #overview-grid { height: auto; grid-size: 1; grid-gutter: 1 2; grid-rows: auto; margin-top: 1; }
+        .cols-2 #overview-grid { grid-size: 2; }
+        .cols-3 #overview-grid { grid-size: 3; }
+        .card { height: auto; background: $p-panel; border: round $p-border; padding: 0 1;
+                border-title-color: $p-blue; border-title-style: bold; color: $p-text; }
+        .card Static { height: auto; background: $p-panel; color: $p-text; }
+        #cpu-chart, #load-chart { color: $p-cyan; margin-top: 1; }
+        #running-card { color: $p-cyan; margin-top: 1; }
+        #host-status { color: $p-text; }
         #nic-tabs { height: auto; }
         .nic-tab { width: auto; min-width: 10; margin-right: 1; }
-        #nic-detail { height: auto; min-height: 5;
-                                                 padding: 1; border: round $p-border;
-                                                 background: $p-panel; }
-        #rediscover { margin: 1 0; }
-        #host-grid { height: auto; }
-        #host-status { width: 1fr; height: auto; min-height: 6; border: round $p-border;
-                       background: $p-panel; padding: 1; }
-        #metrics-grid { grid-size: 2; grid-gutter: 1; height: auto; }
-        .wide #metrics-grid { grid-size: 3; }
-        .metric-panel { height: auto; min-height: 6; border: round $p-border;
-                        background: $p-panel; padding: 0 1; color: $p-text; }
-        #metrics-processes { margin-top: 1; }
-
+        #nic-detail { height: auto; color: $p-muted; margin-top: 1; }
+        #rediscover { margin: 1 0 0 0; }
+        #processes-card { margin-top: 1; }
+        #process-row { height: auto; }
+        #metrics-processes { width: 1fr; }
+        #metrics-commands { width: 36; border-left: solid $p-border; padding-left: 1; color: $p-cyan; }
+        .cols-1 #process-row, .cols-2 #process-row { layout: vertical; }
+        .cols-1 #metrics-processes, .cols-2 #metrics-processes { width: 100%; }
+        .cols-1 #metrics-commands, .cols-2 #metrics-commands { width: 100%; border-left: none;
+                                                              border-top: solid $p-border;
+                                                              padding: 1 0 0 0; margin-top: 1; }
         #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
         .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
                        border-left: solid $p-border; background: $p-surface; }
@@ -306,27 +301,47 @@ class PlaividTui(App[None]):
                             yield Button("Apply", id="interval-apply")
                             yield Button("Refresh", id="overview-refresh")
                         yield Static("", id="interval-error", markup=False)
-                        yield Static("LOCAL HOST  N/A · PVM HOST  N/A", id="host-identity", markup=False)
-                        yield Static("Host readings", classes="dashboard-heading")
-                        with Grid(id="summary-grid"):
-                            for card in ("running-card", "cpu-card", "memory-card", "load-card"):
-                                yield Static("Loading monitoring data…", id=card, classes="dashboard-card", markup=False)
-                        yield Static("Resource history", classes="dashboard-heading")
-                        with Grid(id="chart-grid"):
-                            for chart in ("cpu-chart", "memory-chart", "load-chart"):
-                                yield Static("Waiting for samples", id=chart, classes="chart-card", markup=False)
-                        yield Static("Physical network", classes="dashboard-heading")
-                        with Horizontal(id="nic-tabs"):
-                            pass
-                        yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
-                        yield Button("Rediscover", id="rediscover")
-                        with Horizontal(id="host-grid"):
-                            yield Static("Host status\nWaiting for collection…", id="host-status", markup=False)
-                        yield Static("Host monitoring", classes="dashboard-heading")
-                        with Grid(id="metrics-grid"):
-                            for panel in _METRIC_PANELS[:-1]:
-                                yield Static("Waiting for collection…", id=panel, classes="metric-panel", markup=False)
-                        yield Static("Waiting for collection…", id="metrics-processes", classes="metric-panel", markup=False)
+                        with Grid(id="overview-grid"):
+                            with Vertical(classes="card", id="system-card") as box:
+                                box.border_title = "System information"
+                                yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
+                                yield Static("Waiting for collection…", id="metrics-system", markup=False)
+                            with Vertical(classes="card", id="cpu-box") as box:
+                                box.border_title = "CPU"
+                                yield Static("Loading monitoring data…", id="cpu-card", markup=False)
+                                yield Static("Waiting for samples", id="cpu-chart", markup=False)
+                            with Vertical(classes="card", id="memory-box") as box:
+                                box.border_title = "Memory"
+                                yield Static("Loading monitoring data…", id="memory-card", markup=False)
+                            with Vertical(classes="card", id="load-box") as box:
+                                box.border_title = "Load & tasks"
+                                yield Static("Loading monitoring data…", id="load-card", markup=False)
+                                yield Static("Waiting for samples", id="load-chart", markup=False)
+                                yield Static("Running VMs…", id="running-card", markup=False)
+                            with Vertical(classes="card", id="network-box") as box:
+                                box.border_title = "Network interfaces"
+                                yield Static("Waiting for collection…", id="metrics-network", markup=False)
+                                with Horizontal(id="nic-tabs"):
+                                    pass
+                                yield Static("Discovering physical interfaces…", id="nic-detail", markup=False)
+                                yield Button("Rediscover", id="rediscover")
+                            with Vertical(classes="card", id="storage-box") as box:
+                                box.border_title = "Storage"
+                                yield Static("Waiting for collection…", id="metrics-storage", markup=False)
+                            with Vertical(classes="card", id="temperature-box") as box:
+                                box.border_title = "Temperature"
+                                yield Static("Waiting for collection…", id="metrics-temperature", markup=False)
+                            with Vertical(classes="card", id="sessions-box") as box:
+                                box.border_title = "Sessions"
+                                yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
+                            with Vertical(classes="card", id="host-status-box") as box:
+                                box.border_title = "Host status"
+                                yield Static("Waiting for collection…", id="host-status", markup=False)
+                        with Vertical(classes="card", id="processes-card") as box:
+                            box.border_title = "Top processes by CPU"
+                            with Horizontal(id="process-row"):
+                                yield Static("Waiting for collection…", id="metrics-processes", markup=False)
+                                yield Static("", id="metrics-commands", markup=False)
                 with TabPane("Virtual Machines", id="fleet"):
                     with Horizontal(id="fleet-summary"):
                         with Vertical(classes="metric-card"):
@@ -405,7 +420,12 @@ class PlaividTui(App[None]):
         self._set_width_class(event.size.width)
 
     def _set_width_class(self, width: int | None = None) -> None:
-        self.query_one("#shell", Vertical).set_class((width if width is not None else self.size.width) >= 110, "wide")
+        available = width if width is not None else self.size.width
+        self.query_one("#shell", Vertical).set_class(available >= 110, "wide")
+        scroll = self.query_one("#overview-scroll", VerticalScroll)
+        scroll.set_class(available >= 130, "cols-3")
+        scroll.set_class(90 <= available < 130, "cols-2")
+        scroll.set_class(available < 90, "cols-1")
 
     def action_overview_page(self) -> None:
         if self.session is not None:
@@ -507,8 +527,7 @@ class PlaividTui(App[None]):
         self._nic_selected = None
         for widget_id in (
             "running-card", "cpu-card", "memory-card", "load-card",
-            "cpu-chart", "memory-chart", "load-chart", "nic-detail",
-            "host-identity",
+            "cpu-chart", "load-chart", "nic-detail", "host-identity",
         ):
             self.query_one(f"#{widget_id}", Static).update("Waiting for authenticated monitoring data…")
 
@@ -919,18 +938,19 @@ class PlaividTui(App[None]):
     def _render_metric_panels(self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None) -> None:
         status = _section_status(section)
         texts = {
-            "metrics-system": hm.system_panel(metrics, status),
-            "metrics-cpu": hm.cpu_panel(metrics),
-            "metrics-memory": hm.memory_panel(metrics),
-            "metrics-tasks": hm.tasks_panel(metrics),
-            "metrics-network": hm.network_panel(metrics),
-            "metrics-storage": hm.storage_panel(metrics),
-            "metrics-temperature": hm.temperature_panel(metrics),
-            "metrics-sessions": hm.sessions_panel(metrics),
-            "metrics-processes": hm.processes_panel(metrics),
+            "metrics-network": hm.finish(hm.network_body(metrics), status),
+            "metrics-storage": hm.finish(hm.storage_body(metrics), status),
+            "metrics-temperature": hm.finish(hm.temperature_body(metrics), status),
+            "metrics-sessions": hm.finish(hm.sessions_body(metrics), status),
+            "metrics-processes": hm.finish(hm.processes_body(metrics), status),
+            "metrics-commands": redact_text("\n".join(hm.commands_body(metrics))),
         }
         for panel, text in texts.items():
             self.query_one(f"#{panel}", Static).update(text)
+        total = metrics.process_total if metrics is not None else None
+        self.query_one("#processes-card").border_title = (
+            "Top processes by CPU" if total is None else f"Top processes by CPU · {total:,} total"
+        )
 
     @on(Checkbox.Changed, "#select-all")
     def vm_scope_changed(self) -> None:
