@@ -5,10 +5,25 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from plaivid_cli.application.overview import OverviewHistory, health, sparkline
-from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, HostMetrics, ProcessObservation
+from plaivid_cli.domain.models import (
+    ApplicationSnapshot,
+    CollectionStatus,
+    HostMetrics,
+    ProcessObservation,
+)
 from plaivid_cli.domain.overview import LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
-from plaivid_cli.presentation.host_metrics import bar, finish, memory_body, pct_of, row, size, system_body, tasks_body, cpu_body
+from plaivid_cli.presentation.host_metrics import (
+    bar,
+    cpu_body,
+    finish,
+    memory_body,
+    pct_of,
+    row,
+    size,
+    system_body,
+    tasks_body,
+)
 
 
 def _value(section):

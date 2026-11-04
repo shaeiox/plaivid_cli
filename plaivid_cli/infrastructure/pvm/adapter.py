@@ -28,7 +28,6 @@ from plaivid_cli.infrastructure.diagnostics import redact_text
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
 from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
-from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
 from plaivid_cli.infrastructure.pvm.parsers import (
     parse_metrics,
     parse_object_inventory,
@@ -38,6 +37,7 @@ from plaivid_cli.infrastructure.pvm.parsers import (
     parse_vm_detail,
 )
 from plaivid_cli.infrastructure.pvm.sbell import SbellClient, SbellResponse
+from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
 
 DASHBOARD_QUERY = (
     "<params><query_path>/plaivid/overview/pvm_overview_dashboard</query_path>"
