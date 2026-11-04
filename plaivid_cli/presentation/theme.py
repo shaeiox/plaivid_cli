@@ -114,6 +114,9 @@ def styled_metric(value: str, *, heading: bool = False, palette: Palette = TRUEC
     return text
 
 
+# Red for "not quorate or not verifiable". Truecolor red, so it does not look like the rose error token.
+ALARM = "#e53935"
+
 # Object and cluster states, grouped by what an operator should do about them.
 # Matching is exact and case-insensitive; anything unrecognized stays muted.
 _HEALTHY_STATES = frozenset({"started", "running", "active", "up", "online", "ok", "quorate"})

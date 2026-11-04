@@ -49,12 +49,13 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation import host_metrics as hm
-from plaivid_cli.presentation.logo import logo_text
+from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
 from plaivid_cli.presentation.overview import cards, nic_details
 from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
     palette_for,
+    ALARM,
     TRUECOLOR,
     state_text,
     styled_metric,
@@ -949,7 +950,9 @@ class PlaividTui(App[None]):
         metric_section = snapshot.section("host_metrics")
         status = as_host_status(status_section) if status_section else None
         metrics = as_host_metrics(metric_section) if metric_section else None
-        self.query_one("#host-logo", Static).update(logo_text())
+        level, _, _ = _quorum_verdict(status_section, self._palette)
+        logo_colour = {"ok": LOGO_COLOR, "warn": self._palette.warning, "bad": ALARM}[level]
+        self.query_one("#host-logo", Static).update(logo_text(logo_colour))
         self.query_one("#host-status", Static).update(_host_status_text(status, status_section, self._palette))
         self._render_metric_panels(metrics, metric_section)
 
@@ -1218,22 +1221,55 @@ def _section_status(section: SectionSnapshot[object] | None) -> str:
     return section.status.value.replace("_", " ")
 
 
+def _quorum_verdict(section: SectionSnapshot[object] | None, palette=TRUECOLOR) -> tuple[str, str, str]:
+    """Quorum verdict from the *live* read only: (level, banner, colour).
+
+    level is ``ok`` (current and quorate), ``warn`` (quorate but partial or stale) or ``bad``
+    (not quorate, or not verifiable). A failed read never keeps the last good value as current.
+    """
+    if section is None:
+        return "bad", "SBALL NOT VERIFIED · no status", ALARM
+    live = section.value if isinstance(section.value, HostStatus) else None
+    collection = section.status.value.replace("_", " ")
+    if live is None:
+        return "bad", f"SBALL NOT VERIFIED · {collection}", ALARM
+    state = (live.sball_state or "").strip().lower()
+    if state == "quorate" and section.status is CollectionStatus.CURRENT:
+        return "ok", "SBALL QUORATE", palette.success
+    if state == "quorate":
+        return "warn", f"SBALL QUORATE · {collection}", palette.warning
+    return "bad", f"SBALL NOT QUORATE · {live.sball_state or 'state unknown'}", ALARM
+
+
 def _host_status_text(status: HostStatus | None, section: SectionSnapshot[object] | None, palette=TRUECOLOR) -> Text:
+    _, banner, colour = _quorum_verdict(section, palette)
+    live = section.value if isinstance(section.value, HostStatus) else None
+    text = Text()
+    text.append(redact_text(banner) + "\n", style=f"bold {colour}")
     collection = f"Collection  {_section_status(section)}"
     if status is None:
-        return Text(redact_text("HOST STATUS\n" + collection + "\nNo current host-status values."))
-    text = Text()
+        text.append(redact_text(collection + "\nNo current host-status values."))
+        return text
     text.append("HOST STATUS\n", style=f"bold {palette.foreground}")
     text.append(redact_text(collection) + "\n")
     text.append(redact_text(f"Node  {status.name or '—'}  ·  IP  {status.ip or '—'}") + "\n")
-    text.append("Sball ")
-    text.append_text(state_text(redact_text(status.sball_state or "—"), palette))
-    text.append("  ·  node ")
-    text.append_text(state_text(redact_text(status.node_state or "—"), palette))
-    text.append("\n")
-    text.append("Version ")
-    text.append(redact_text(status.version or "—"), style=f"bold {palette.accent}")
-    text.append("\n")
+    if live is not None:
+        text.append("Sball ")
+        text.append_text(state_text(redact_text(status.sball_state or "—"), palette))
+        text.append("  ·  node ")
+        text.append_text(state_text(redact_text(status.node_state or "—"), palette))
+        text.append("\n")
+        text.append("Version ")
+        text.append(redact_text(status.version or "—"), style=f"bold {palette.accent}")
+    else:
+        # Last known values are labelled as such and never coloured as live status.
+        text.append(
+            redact_text(
+                f"Sball {status.sball_state or '—'}  ·  node {status.node_state or '—'}  (last known)\n"
+                f"Version {status.version or '—'}"
+            ),
+            style=palette.muted,
+        )
     return text
 
 

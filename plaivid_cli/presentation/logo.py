@@ -34,6 +34,6 @@ LOGO_ROWS: tuple[str, ...] = (
 )
 
 
-def logo_text() -> Text:
-    """The logo as Rich text in its own colour, one line per terminal row."""
-    return Text("\n".join(LOGO_ROWS), style=f"bold {LOGO_COLOR}")
+def logo_text(color: str = LOGO_COLOR) -> Text:
+    """The logo as Rich text, one line per terminal row; green normally, red when Sball is not quorate."""
+    return Text("\n".join(LOGO_ROWS), style=f"bold {color}")
