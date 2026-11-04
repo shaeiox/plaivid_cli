@@ -346,6 +346,11 @@ class PlaividTui(App[None]):
                                     self._group_box(box, "environment", "Sessions")
                                     yield Static("Waiting for collection…", id="metrics-sessions", markup=False)
                             with Vertical(classes="card-column", id="col-center"):
+                                with Vertical(classes="card", id="host-status-box") as box:
+                                    self._group_box(box, "host", "Host status")
+                                    yield Static("", id="host-logo", markup=False)
+                                    yield Static("", id="host-banner", markup=False)
+                                    yield Static("Waiting for collection…", id="host-status", markup=False)
                                 with Vertical(classes="card", id="system-card") as box:
                                     self._group_box(box, "host", "System information")
                                     yield Static("LOCAL HOST  N/A", id="host-identity", markup=False)
@@ -355,11 +360,6 @@ class PlaividTui(App[None]):
                                     yield Static("Loading monitoring data…", id="load-card", markup=False)
                                     yield ChartView(id="load-chart", mode=self._chart_mode)
                                     yield Static("Running VMs…", id="running-card", markup=False)
-                                with Vertical(classes="card", id="host-status-box") as box:
-                                    self._group_box(box, "host", "Host status")
-                                    yield Static("", id="host-logo", markup=False)
-                                    yield Static("", id="host-banner", markup=False)
-                                    yield Static("Waiting for collection…", id="host-status", markup=False)
                             with Vertical(classes="card-column", id="col-right"):
                                 with Vertical(classes="card", id="cpu-box") as box:
                                     self._group_box(box, "compute", "CPU")
