@@ -169,7 +169,8 @@ class PlaividTui(App[None]):
         #cpu-chart, #load-chart { width: 100%; color: $p-cyan; margin-top: 1; text-wrap: nowrap; text-overflow: clip; }
         #running-card { color: $p-cyan; margin-top: 1; }
         #host-logo { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
-        #host-status { color: $p-text; }
+        #host-banner { width: 100%; height: auto; text-align: center; margin-bottom: 1; }
+        #host-status { color: $p-text; padding: 0 0 0 2; }
         #nic-tabs { height: auto; }
         #nic-tabs .nic-tab { width: auto; min-width: 0; height: 1; margin-right: 2; padding: 0 1;
                              border: none; background: $p-surface; color: $p-muted; }
@@ -345,7 +346,8 @@ class PlaividTui(App[None]):
                                 with Vertical(classes="card", id="host-status-box") as box:
                                     box.border_title = "Host status"
                                     yield Static("", id="host-logo", markup=False)
-                                    yield Static("Waiting for collection…", id="host-status")
+                                    yield Static("", id="host-banner", markup=False)
+                                    yield Static("Waiting for collection…", id="host-status", markup=False)
                             with Vertical(classes="card-column", id="col-right"):
                                 with Vertical(classes="card", id="cpu-box") as box:
                                     box.border_title = "CPU"
@@ -536,7 +538,8 @@ class PlaividTui(App[None]):
         self.query_one("#action-status", Static).update("No operation submitted.")
         self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#audit-panel", Static).display = False
-        self.query_one("#host-status", Static).update("Host status\nWaiting for collection…")
+        self.query_one("#host-banner", Static).update("")
+        self.query_one("#host-status", Static).update("Waiting for collection…")
         for panel in _METRIC_PANELS:
             self.query_one(f"#{panel}", Static).update("Waiting for collection…")
         self._visible_snapshot = None
@@ -959,6 +962,9 @@ class PlaividTui(App[None]):
         level, _, _ = _quorum_verdict(status_section, self._palette, pid_file)
         logo_colour = {"ok": LOGO_COLOR, "warn": CAUTION, "bad": ALARM}[level]
         self.query_one("#host-logo", Static).update(logo_text(logo_colour))
+        self.query_one("#host-banner", Static).update(
+            _host_banner_text(status_section, self._palette, pid_file)
+        )
         self.query_one("#host-status", Static).update(
             _host_status_text(status, status_section, self._palette, pid_file)
         )
@@ -1258,40 +1264,40 @@ def _quorum_verdict(
     return "bad", f"SBALL NOT QUORATE · {live.sball_state or 'state unknown'}", ALARM
 
 
+def _host_banner_text(
+    section: SectionSnapshot[object] | None,
+    palette=TRUECOLOR,
+    pid_file: bool | None = None,
+) -> Text:
+    """Centered quorum banner under the logo; colour comes from the live verdict."""
+    _, banner, colour = _quorum_verdict(section, palette, pid_file)
+    return Text(redact_text(banner), style=f"bold {colour}")
+
+
 def _host_status_text(
     status: HostStatus | None,
     section: SectionSnapshot[object] | None,
     palette=TRUECOLOR,
     pid_file: bool | None = None,
 ) -> Text:
-    _, banner, colour = _quorum_verdict(section, palette, pid_file)
+    """Aligned ``label : value`` rows under the banner. Live values only are coloured as status."""
     live = section.value if isinstance(section.value, HostStatus) else None
     text = Text()
-    text.append(redact_text(banner) + "\n", style=f"bold {colour}")
-    collection = f"Collection  {_section_status(section)}"
     if status is None:
-        text.append(redact_text(collection + "\nNo current host-status values."))
+        text.append(redact_text("No current host-status values."), style=palette.muted)
         return text
-    text.append("HOST STATUS\n", style=f"bold {palette.foreground}")
-    text.append(redact_text(collection) + "\n")
-    text.append(redact_text(f"Node  {status.name or '—'}  ·  IP  {status.ip or '—'}") + "\n")
-    if live is not None:
-        text.append("Sball ")
-        text.append_text(state_text(redact_text(status.sball_state or "—"), palette))
-        text.append("  ·  node ")
-        text.append_text(state_text(redact_text(status.node_state or "—"), palette))
+    rows = (
+        ("Node", status.name or "—"),
+        ("IP", status.ip or "—"),
+        ("Version", status.version or "—"),
+    )
+    for label, value in rows:
+        text.append(f"{label:<8} : ", style=palette.muted)
+        text.append(redact_text(value), style=f"bold {palette.accent}" if label == "Version" and live else None)
         text.append("\n")
-        text.append("Version ")
-        text.append(redact_text(status.version or "—"), style=f"bold {palette.accent}")
-    else:
+    if live is None:
         # Last known values are labelled as such and never coloured as live status.
-        text.append(
-            redact_text(
-                f"Sball {status.sball_state or '—'}  ·  node {status.node_state or '—'}  (last known)\n"
-                f"Version {status.version or '—'}"
-            ),
-            style=palette.muted,
-        )
+        text.append(redact_text("(last known)"), style=palette.muted)
     return text
 
 
