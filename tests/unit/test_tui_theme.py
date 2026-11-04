@@ -20,6 +20,7 @@ from plaivid_cli.domain.models import ObjectVM
 from plaivid_cli.presentation.theme import (
     ACCENT,
     ANSI16,
+    NO_COLOR,
     ANSI256,
     BACKGROUND,
     ERROR,
@@ -109,7 +110,7 @@ def test_terminal_palettes_do_not_quantize_dark_surfaces_to_navy():
     assert palette_for("256") is ANSI256
     assert palette_for("standard") is ANSI16
     assert palette_for(None) is ANSI16
-    assert palette_for("truecolor", no_color=True) is ANSI16
+    assert palette_for("truecolor", no_color=True) is NO_COLOR
     assert Color.parse(TRUECOLOR.surface).downgrade(ColorSystem.EIGHT_BIT).number == 17
     for layer in (ANSI256.background, ANSI256.panel, ANSI256.surface):
         assert Color.parse(layer).downgrade(ColorSystem.EIGHT_BIT).number == 233
@@ -155,7 +156,7 @@ def test_no_color_takes_precedence_even_when_truecolor_is_advertised(tmp_path, m
     try:
         tui = PlaividTui(application, operations, sessions)
         assert tui.console.color_system == "truecolor"
-        assert tui._palette is ANSI16
+        assert tui._palette is NO_COLOR
         assert "#000000" in tui.CSS
     finally:
         collection.close()
@@ -220,3 +221,19 @@ def test_search_focus_and_live_resize_preserve_keyboard_access(tmp_path, monkeyp
             collection.close()
 
     asyncio.run(exercise())
+
+
+def test_object_and_cluster_states_are_colored_by_meaning():
+    from plaivid_cli.presentation.theme import TRUECOLOR, state_text
+
+    palette = TRUECOLOR
+    expected = {
+        "started": palette.success, "Running": palette.success,
+        "stopped": palette.error, "failed": palette.error,
+        "paused": palette.warning, "starting": palette.warning,
+        "unknown": palette.muted, "N/A": palette.muted,
+    }
+    for value, color in expected.items():
+        text = state_text(value, palette)
+        assert text.plain == value
+        assert text.style == f"bold {color}", value

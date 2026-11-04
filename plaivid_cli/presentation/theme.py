@@ -6,7 +6,7 @@ results, not a fast spinner or a decorative animation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rich.text import Text
 from textual.app import App
@@ -69,14 +69,17 @@ ANSI256 = Palette(
 # and rely on textual status labels rather than decorative color alone.
 ANSI16 = Palette(
     "#000000", "#000000", "#000000", "#ffffff", "#aaaaaa", "#777777",
-    "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff",
+    "#ffffff", "#ffffff", "#ffffff", "#00ff00", "#ffff00", "#ff0000",
 )
+
+# NO_COLOR asks for no color at all; state words still carry the meaning.
+NO_COLOR = replace(ANSI16, success="#ffffff", warning="#ffffff", error="#ffffff")
 
 
 def palette_for(color_system: str | None, *, no_color: bool = False) -> Palette:
     """Select a palette for the *detected* output, never claim truecolor blindly."""
     if no_color:
-        return ANSI16
+        return NO_COLOR
     if color_system == "truecolor":
         return TRUECOLOR
     if color_system == "256":
@@ -109,6 +112,29 @@ def styled_metric(value: str, *, heading: bool = False, palette: Palette = TRUEC
     ):
         text.highlight_regex(rf"\b{word}\b", style=f"bold {color}")
     return text
+
+
+# Object and cluster states, grouped by what an operator should do about them.
+# Matching is exact and case-insensitive; anything unrecognized stays muted.
+_HEALTHY_STATES = frozenset({"started", "running", "active", "up", "online", "ok"})
+_STOPPED_STATES = frozenset({"stopped", "shutdown", "off", "offline", "down", "failed", "error", "crashed"})
+_TRANSIENT_STATES = frozenset({
+    "starting", "stopping", "paused", "suspended", "migrating", "pending", "rebooting", "restarting", "degraded",
+})
+
+
+def state_text(value: str, palette: Palette = TRUECOLOR) -> Text:
+    """Color an object or cluster state: started/running green, stopped red, transitional yellow."""
+    key = value.strip().lower()
+    if key in _HEALTHY_STATES:
+        color = palette.success
+    elif key in _STOPPED_STATES:
+        color = palette.error
+    elif key in _TRANSIENT_STATES:
+        color = palette.warning
+    else:
+        color = palette.muted
+    return Text(value, style=f"bold {color}")
 
 
 def apply_theme(app: App, palette: Palette = TRUECOLOR) -> None:

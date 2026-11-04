@@ -54,6 +54,7 @@ from plaivid_cli.presentation.theme import (
     apply_theme,
     brand,
     palette_for,
+    state_text,
     styled_metric,
 )
 
@@ -808,13 +809,13 @@ class PlaividTui(App[None]):
         if order != self._desktop_rows:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(Text(cell) for cell in cells), key=uuid)
+                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._desktop_cells.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._desktop_columns[column], Text(cell), update_width=True)
+                        table.update_cell(uuid, self._desktop_columns[column], self._cell_text(column, cell), update_width=True)
         self._desktop_rows, self._desktop_cells = order, rows
         if self._desktop_selected not in rows:
             self._desktop_selected = order[0] if order else None
@@ -961,6 +962,10 @@ class PlaividTui(App[None]):
         # Search is strictly local: changing the input never starts collection.
         self._filter_vms()
 
+    def _cell_text(self, column: int, cell: str) -> Text:
+        # Column 2 is the object state (VM page) or cluster status (Virtual Desktops page).
+        return state_text(cell, self._palette) if column == 2 else Text(cell)
+
     def _filter_vms(self) -> None:
         query = self.query_one("#vm-search", Input).value.strip().casefold()
         records = sorted(
@@ -980,13 +985,13 @@ class PlaividTui(App[None]):
         if order != self._table_order:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(Text(cell) for cell in cells), key=uuid)
+                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._table_content.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._table_columns[column], Text(cell), update_width=True)
+                        table.update_cell(uuid, self._table_columns[column], self._cell_text(column, cell), update_width=True)
         self._table_order, self._table_content = order, rows
         all_targets = self.query_one("#select-all", Checkbox).value
         count = len(self._records) if all_targets else int(bool(order))
