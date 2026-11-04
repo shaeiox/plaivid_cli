@@ -8,6 +8,8 @@ from rich.text import Text
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.message import Message
+from textual.widgets._data_table import CellDoesNotExist
 from textual.widgets import (
     Button,
     Checkbox,
@@ -94,6 +96,27 @@ _METRIC_PANELS = (
     "metrics-system", "metrics-network", "metrics-storage", "metrics-temperature",
     "metrics-sessions", "metrics-processes", "metrics-commands",
 )
+
+class CheckableTable(DataTable):
+    """Row table whose first column is a selection checkbox. Clicking it posts ``CheckRequested``."""
+
+    class CheckRequested(Message):
+        def __init__(self, table: CheckableTable, key: str) -> None:
+            super().__init__()
+            self.table = table
+            self.key = key
+
+    async def _on_click(self, event: events.Click) -> None:
+        meta = event.style.meta
+        if meta.get("column") == 0 and "row" in meta and not meta.get("out_of_bounds", False):
+            rows = self.ordered_rows
+            index = meta["row"]
+            if 0 <= index < len(rows):
+                key = rows[index].key
+                self.post_message(self.CheckRequested(self, str(getattr(key, "value", key))))
+            return
+        await super()._on_click(event)
+
 
 class PlaividTui(App[None]):
     """Operator dashboard; all I/O is delegated to application coordinators."""
@@ -246,6 +269,8 @@ class PlaividTui(App[None]):
                        border: round $p-border; background: $p-panel; padding: 1; }
         """
     BINDINGS = [
+        ("space", "toggle_check", "Select row"),
+        ("a", "toggle_all", "Select all shown"),
         ("r", "refresh", "Refresh"),
         ("enter", "details", "Details"),
         ("q", "quit", "Quit"),
@@ -298,6 +323,8 @@ class PlaividTui(App[None]):
         self._visible_snapshot: ApplicationSnapshot | None = None
         self._desktops: dict[str, VirtualDesktop] = {}
         self._desktop_selected: str | None = None
+        self._vm_checked: set[str] = set()
+        self._desktop_checked: set[str] = set()
         self._desktop_section: SectionSnapshot[object] | None = None
         self._desktop_generation: int | None = None
         self._desktop_min_generation = application.collection.snapshot.generation
@@ -401,7 +428,7 @@ class PlaividTui(App[None]):
                             yield Checkbox("Apply to all VMs", id="select-all")
                             yield Button("Audit", id="audit-toggle")
                             yield Input(placeholder="Search VM name", id="vm-search")
-                        yield DataTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
+                        yield CheckableTable(id="fleet-table", cursor_type="row", zebra_stripes=True)
                         yield Static("No operation submitted.", id="action-status", markup=False)
                     yield Static("Selected VM · 0 target(s)", id="vm-scope", markup=False)
                     yield Static("Select a VM to inspect its details.", id="detail-box", markup=False)
@@ -427,7 +454,7 @@ class PlaividTui(App[None]):
                             yield Checkbox("Apply to all Desktops", id="desktop-all")
                             yield Button("Audit", id="desktop-audit-toggle")
                             yield Input(placeholder="Search Desktop name", id="desktop-search")
-                        yield DataTable(id="desktop-table", cursor_type="row", zebra_stripes=True)
+                        yield CheckableTable(id="desktop-table", cursor_type="row", zebra_stripes=True)
                         yield Static("No operation submitted.", id="desktop-action-status", markup=False)
                     yield Static("Selected Desktop · 0 target(s)", id="desktop-scope", markup=False)
                     with VerticalScroll(id="desktop-detail-scroll"):
@@ -449,9 +476,9 @@ class PlaividTui(App[None]):
         self._group_box(self.query_one("#vm-list", Vertical), "vms", "VM list")
         self._group_box(self.query_one("#desktop-list", Vertical), "vms", "Desktop list")
         table = self.query_one("#fleet-table", DataTable)
-        self._table_columns = table.add_columns("#", "VM name", "Object state", "Process", "vCPU", "Memory")
+        self._table_columns = table.add_columns("✓", "#", "VM name", "Object state", "Process", "vCPU", "Memory")
         self._desktop_columns = self.query_one("#desktop-table", DataTable).add_columns(
-            "Desktop", "UUID", "Cluster status", "OS", "vCPU"
+            "✓", "Desktop", "UUID", "Cluster status", "OS", "vCPU"
         )
         self.query_one("#tabs", TabbedContent).display = False
         self.query_one("#login-box", VerticalScroll).display = True
@@ -530,6 +557,7 @@ class PlaividTui(App[None]):
         self._desktop_min_generation = self.application.collection.snapshot.generation
         self._desktops.clear()
         self._desktop_selected = None
+        self._desktop_checked.clear()
         self._desktop_rows = ()
         self._desktop_cells.clear()
         self.query_one("#desktop-table", DataTable).clear(columns=False)
@@ -549,6 +577,7 @@ class PlaividTui(App[None]):
         self.query_one("#vm-search", Input).value = ""
         self.query_one("#select-all", Checkbox).value = False
         self._selected_uuid = None
+        self._vm_checked.clear()
         self._table_order = ()
         self._table_content.clear()
         self.query_one("#fleet-table", DataTable).clear(columns=False)
@@ -786,18 +815,18 @@ class PlaividTui(App[None]):
             min_bucket=min_bucket,
         )
 
-        peak = max((value for points in loads.values() for _, value in points), default=None)
-        self._load_scale = stable_top(peak, self._load_scale)
+        one_minute = loads["1m"]
+        self._load_scale = stable_top(max((value for _, value in one_minute), default=None), self._load_scale)
         load_header = Text()
         load_header.append("Load ", style=f"bold {palette.foreground}")
-        series = []
-        for (label, points), colour in zip(loads.items(), LOAD_COLOURS):
+        for label, points in loads.items():
             latest = points[-1][1] if points else None
-            load_header.append("● ", style=f"bold {colour}")
+            if label == "1m":
+                load_header.append("● ", style=f"bold {LOAD_COLOURS[0]}")
             load_header.append(f"{label} ", style=palette.muted)
             load_header.append("—" if latest is None else f"{latest:.2f}", style=f"bold {palette.foreground}")
             load_header.append("   ")
-            series.append(Series(label, colour, points))
+        series = [Series("1m", LOAD_COLOURS[0], one_minute)]
         load_header.append(f"last 60 s · scale 0–{self._load_scale:g}", style=palette.muted)
         load_chart.set_chart(
             series=tuple(series),
@@ -929,13 +958,14 @@ class PlaividTui(App[None]):
         if order != self._desktop_rows:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
+                table.add_row(self._check_cell(uuid in self._desktop_checked),
+                              *(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._desktop_cells.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._desktop_columns[column], self._cell_text(column, cell), update_width=True)
+                        table.update_cell(uuid, self._desktop_columns[column + 1], self._cell_text(column, cell), update_width=True)
         self._desktop_rows, self._desktop_cells = order, rows
         if self._desktop_selected not in rows:
             self._desktop_selected = order[0] if order else None
@@ -957,7 +987,8 @@ class PlaividTui(App[None]):
             return
         all_targets = self.query_one("#desktop-all", Checkbox).value
         uuids = tuple(sorted(self._desktops)) if all_targets else ((self._desktop_selected,) if self._desktop_selected else ())
-        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s)"
+        checked = len(self._desktop_checked & set(self._desktops))
+        scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · {checked} checked"
         self.query_one("#desktop-selected-label", Static).update((self._desktop_selected or "—")[:8])
         self.query_one("#desktop-scope", Static).update(scope)
         record = self._desktops.get(self._desktop_selected or "")
@@ -1092,6 +1123,61 @@ class PlaividTui(App[None]):
         # Search is strictly local: changing the input never starts collection.
         self._filter_vms()
 
+    def _check_cell(self, checked: bool) -> Text:
+        if checked:
+            return Text("☑", style=f"bold {self._palette.foreground}")
+        return Text("☐", style=self._palette.muted)
+
+    def _checked_group(self, table_id: str) -> set[str]:
+        return self._vm_checked if table_id == "fleet-table" else self._desktop_checked
+
+    def _set_check(self, table_id: str, uuid: str, checked: bool) -> None:
+        group = self._checked_group(table_id)
+        if checked:
+            group.add(uuid)
+        else:
+            group.discard(uuid)
+        table = self.query_one(f"#{table_id}", CheckableTable)
+        columns = self._table_columns if table_id == "fleet-table" else self._desktop_columns
+        try:
+            table.update_cell(uuid, columns[0], self._check_cell(checked))
+        except CellDoesNotExist:
+            pass  # Row is hidden by the search filter; the state is applied when it reappears.
+        if table_id == "fleet-table":
+            self._filter_vms()  # refreshes the checked count; only changed cells are redrawn
+        else:
+            self._render_desktop_detail()
+
+    @on(CheckableTable.CheckRequested)
+    def check_requested(self, event: CheckableTable.CheckRequested) -> None:
+        self._set_check(event.table.id or "", event.key, event.key not in self._checked_group(event.table.id or ""))
+
+    def _focused_checkable(self) -> CheckableTable | None:
+        focused = self.focused
+        if isinstance(focused, CheckableTable) and focused.id in ("fleet-table", "desktop-table"):
+            return focused
+        return None
+
+    def action_toggle_check(self) -> None:
+        table = self._focused_checkable()
+        if table is None or table.cursor_row is None or not table.ordered_rows:
+            return
+        if not 0 <= table.cursor_row < len(table.ordered_rows):
+            return
+        key = table.ordered_rows[table.cursor_row].key
+        uuid = str(getattr(key, "value", key))
+        self._set_check(table.id or "", uuid, uuid not in self._checked_group(table.id or ""))
+
+    def action_toggle_all(self) -> None:
+        table = self._focused_checkable()
+        if table is None:
+            return
+        shown = self._table_order if table.id == "fleet-table" else self._desktop_rows
+        group = self._checked_group(table.id or "")
+        everything = bool(shown) and all(uuid in group for uuid in shown)
+        for uuid in shown:
+            self._set_check(table.id or "", uuid, not everything)
+
     def _cell_text(self, column: int, cell: str) -> Text:
         # Column 2 is the object state (VM page) or cluster status (Virtual Desktops page).
         return state_text(cell, self._palette) if column == 2 else Text(cell)
@@ -1115,19 +1201,20 @@ class PlaividTui(App[None]):
         if order != self._table_order:
             table.clear(columns=False)
             for uuid, cells in rows.items():
-                table.add_row(*(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
+                table.add_row(self._check_cell(uuid in self._vm_checked),
+                              *(self._cell_text(index, cell) for index, cell in enumerate(cells)), key=uuid)
         else:
             for uuid, cells in rows.items():
                 old = self._table_content.get(uuid, ())
                 for column, cell in enumerate(cells):
                     if column >= len(old) or cell != old[column]:
-                        table.update_cell(uuid, self._table_columns[column], self._cell_text(column, cell), update_width=True)
+                        table.update_cell(uuid, self._table_columns[column + 1], self._cell_text(column, cell), update_width=True)
         self._table_order, self._table_content = order, rows
         all_targets = self.query_one("#select-all", Checkbox).value
         count = len(self._records) if all_targets else int(bool(order))
         self.query_one("#vm-scope", Static).update(
             f"{'All unfiltered VMs' if all_targets else 'Selected VM'} · {count} target(s)"
-            f" · {len(order)} shown"
+            f" · {len(order)} shown · {len(self._vm_checked & set(self._records))} checked"
         )
         if self._selected_uuid not in rows:
             self._selected_uuid = order[0] if order else None

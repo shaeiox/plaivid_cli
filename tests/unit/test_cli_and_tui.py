@@ -243,8 +243,8 @@ def test_tui_redacts_sensitive_pvm_names_and_descriptions(tmp_path):
             assert "synthetic-description-secret" not in visible + detail
             assert "[REDACTED]" in detail
             row = tui.query_one("#fleet-table").get_row(UUID_A)
-            assert "synthetic-tui-secret" not in str(row[1])
-            assert "[REDACTED]" in str(row[1])
+            assert "synthetic-tui-secret" not in str(row[2])  # column 0 is the checkbox, 1 is the index
+            assert "[REDACTED]" in str(row[2])
 
     try:
         asyncio.run(exercise())
