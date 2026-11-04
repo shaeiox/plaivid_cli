@@ -293,6 +293,9 @@ class HostMetrics:
     uptime_seconds: int | None = None
     # load_stats
     cpu_count: int | None = None
+    # cpu_info/cpu_detail (first core): model name and current clock in Hz
+    cpu_model: str | None = None
+    cpu_current_hz: float | None = None
     run_queue: int | None = None
     blocked_tasks: int | None = None
     blocked_percent: float | None = None

@@ -50,6 +50,13 @@ def _int(value: str | None) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def _detail_text(cpu: ET.Element | None, tag: str) -> str | None:
+    """Text of ``cpu_info/cpu_detail/<tag>`` (first core), or None when absent or blank."""
+    if cpu is None:
+        return None
+    return (cpu.findtext(f"cpu_detail/{tag}") or "").strip() or None
+
+
 def _float(value: str | None) -> float | None:
     if value is None:
         return None
@@ -362,6 +369,8 @@ def parse_metrics(root: ET.Element) -> ParseResult[HostMetrics | None]:
         cpu_pct=_float(cpu.findtext("cpu_usage/total_usage")) if cpu is not None else None,
         logical_cores=_int(cpu.findtext("logical_cores")) if cpu is not None else None,
         physical_cores=_int(cpu.findtext("physical_cores")) if cpu is not None else None,
+        cpu_model=_detail_text(cpu, "model_name"),
+        cpu_current_hz=_float(cpu.findtext("cpu_detail/frequency/current_hz")) if cpu is not None else None,
         memory_used_bytes=_int(memory.findtext("used")) if memory is not None else None,
         memory_total_bytes=_int(memory.findtext("total")) if memory is not None else None,
         swap_used_bytes=_int(swap.findtext("used")) if swap is not None else None,

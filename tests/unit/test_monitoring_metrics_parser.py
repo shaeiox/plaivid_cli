@@ -61,3 +61,14 @@ def test_missing_blocks_stay_none():
 def test_command_summary_counts_every_process_with_most_common_first():
     m = _metrics()
     assert m.command_summary == (("bash", 1), ("plaivid", 1))
+
+
+def test_cpu_detail_model_and_current_clock_are_parsed_from_cpu_info():
+    from plaivid_cli.presentation.host_metrics import cpu_body
+
+    metrics = parse_metrics(ET.parse(FIXTURE).getroot()).value
+    assert metrics.cpu_model == "Intel(R) Xeon(R) CPU E5-2620 v2 @ 2.10GHz"
+    assert metrics.cpu_current_hz == 2_600_000_000.0
+    lines = cpu_body(metrics)
+    assert lines[0].startswith("Model") and "E5-2620 v2" in lines[0]
+    assert lines[1].startswith("Clock") and "2.60 GHz" in lines[1]
