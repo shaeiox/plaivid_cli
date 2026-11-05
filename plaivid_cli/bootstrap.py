@@ -11,7 +11,7 @@ from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
 from plaivid_cli.application.services import PlaividApplication
 from plaivid_cli.application.session import SessionManager, SessionStore
-from plaivid_cli.cli import build_parser, configuration_command, run_command
+from plaivid_cli.presentation.cli import build_parser, configuration_command, run_command
 from plaivid_cli.config import ConfigurationError, Settings, load_settings
 from plaivid_cli.infrastructure.audit import ReadOnlyAuditAdapter
 from plaivid_cli.infrastructure.diagnostics import configure_logging

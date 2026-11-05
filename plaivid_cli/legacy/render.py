@@ -10,7 +10,7 @@ import shutil
 
 from . import theme
 from .theme import BOX
-from .version import __version__
+from plaivid_cli.version import __version__
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")
 

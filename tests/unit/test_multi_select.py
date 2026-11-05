@@ -7,7 +7,7 @@ from textual.widgets import DataTable, Input
 
 from plaivid_cli.domain.models import PvmSession
 from plaivid_cli.presentation.charts import LOAD_COLOURS, ChartView
-from plaivid_cli.tui import CheckableTable, PlaividTui
+from plaivid_cli.presentation.tui import CheckableTable, PlaividTui
 from test_cli_and_tui import UUID_A, UUID_B, runtime
 
 

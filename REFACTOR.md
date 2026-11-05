@@ -1,5 +1,7 @@
 # Refactor: command registry (plugin-ize the TUI verbs)
 
+> Historical design note: this retired implementation now lives under `plaivid_cli/legacy/` and is not part of the supported runtime or release package.
+
 Goal: adding a feature = **drop one file** in `commands/` (a TUI verb) or
 `actions/` (a per-VM operation). Dispatch, Tab completion and help are all
 derived from the two registries - the orchestrator never needs editing to add

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from plaivid_cli.domain.models import CollectionStatus, HostStatus, SectionSnapshot
 from plaivid_cli.presentation.logo import LOGO_COLOR, logo_text
 from plaivid_cli.presentation.theme import ALARM, CAUTION, TRUECOLOR
-from plaivid_cli.tui import _host_status_text, _quorum_verdict
+from plaivid_cli.presentation.tui import _host_status_text, _quorum_verdict
 
 GOOD = HostStatus(name="node-a", ip="192.0.2.10/28", sball_state="quorate", node_state="up", version="7.2.16")
 

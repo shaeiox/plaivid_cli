@@ -15,7 +15,7 @@ def _lj(s, n):
 
 
 def run(ctx, args):
-    import plaivid_cli.commands as commands  # avoid import cycle at module load
+    import plaivid_cli.legacy.commands as commands  # avoid import cycle at module load
 
     lines = [theme.bold("Commands")]
     for c in commands.all_commands():

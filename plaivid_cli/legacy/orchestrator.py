@@ -15,9 +15,9 @@ try:
 except ImportError:
     readline = None
 
-from . import (actions, commands, config, monitoring, render, session, theme,
-               transport, vms)
-from .version import __version__
+from plaivid_cli import config
+from plaivid_cli.version import __version__
+from . import actions, commands, monitoring, render, session, theme, transport, vms
 
 
 class Context(object):

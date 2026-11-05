@@ -5,7 +5,7 @@ Method: [Unslop](../.agents/skills/unslop/SKILL.md) by Damir Sokolovsky, CC BY 4
 ## Audit (current screen)
 
 - The static blue→purple→rose wordmark in `presentation/theme.py` makes the header compete with the data; use a solid mark and one accent.
-- `tui.py` uses many rounded boxes and accent-colored borders, so hierarchy relies on decoration rather than source freshness. Keep the cards that group genuine metrics, quiet the chrome, and reserve semantic borders for real warning/error states.
+- `presentation/tui.py` uses many rounded boxes and accent-colored borders, so hierarchy relies on decoration rather than source freshness. Keep the cards that group genuine metrics, quiet the chrome, and reserve semantic borders for real warning/error states.
 - `presentation/overview.py` decorates every metric with unrelated glyphs (`◆`, `◉`, `▣`, `⌁`, `♥`) and all-caps titles. Keep the actual measured values and status, remove decorative glyphs and normalize sentence-case copy.
 - Refresh, action and audit controls are repeated with small alignment differences. Use one spacing/width rhythm for both fleet pages.
 - Login warning and host provenance need legible secondary copy; warning text cannot depend on color alone.

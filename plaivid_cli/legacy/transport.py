@@ -9,7 +9,7 @@ without changing any caller.
 import subprocess
 import xml.etree.ElementTree as ET
 
-from . import config
+from plaivid_cli import config
 
 # Human-readable meanings for the common sballd error numbers.
 ERRNO_HINT = {

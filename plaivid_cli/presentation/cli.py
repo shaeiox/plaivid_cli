@@ -87,7 +87,7 @@ def run_command(
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             print("The Textual dashboard requires an interactive TTY; use a one-shot command.", file=sys.stderr)
             return EXIT_REJECTED
-        from plaivid_cli.tui import PlaividTui
+        from plaivid_cli.presentation.tui import PlaividTui
 
         PlaividTui(application, operations, sessions).run()
         return EXIT_OK

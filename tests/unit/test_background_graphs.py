@@ -3,7 +3,7 @@ from pathlib import Path
 
 from plaivid_cli.application.overview import OverviewSchedule
 from plaivid_cli.domain.models import PvmSession
-from plaivid_cli.tui import PlaividTui
+from plaivid_cli.presentation.tui import PlaividTui
 from test_cli_and_tui import runtime
 
 

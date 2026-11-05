@@ -5,7 +5,7 @@ import time
 
 from .base import CONTINUE
 from .. import monitoring, render, theme, transport, vms
-from ..version import __version__
+from plaivid_cli.version import __version__
 
 NAME = "overview"
 ALIASES = ["mon", "monitor", "live"]

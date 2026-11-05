@@ -1,6 +1,6 @@
 # Overview monitoring dashboard: validation status
 
-This is the **active Textual** Overview, not the excluded legacy `commands/overview.py` / `render.py` renderer. It is a local Linux client, not an SSH client. No remote monitoring agent or production-host software is installed.
+This is the **active Textual** Overview, not the excluded legacy `legacy/commands/overview.py` / `legacy/render.py` renderer. It is a local Linux client, not an SSH client. No remote monitoring agent or production-host software is installed.
 
 ## Visual system
 

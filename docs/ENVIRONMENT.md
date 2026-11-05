@@ -58,11 +58,11 @@ A shell such as PowerShell is not itself a guarantee of color depth; the termina
 
 ## Checkout-only legacy code and opt-in smoke test
 
-These settings are mentioned so existing repository references are not mistaken for supported installed configuration. `setup.py` excludes the retired root modules and `plaivid_cli.commands` package from distribution artifacts; do not use them as the current production entry point.
+These settings are mentioned so existing repository references are not mistaken for supported installed configuration. `setup.py` excludes the retired `plaivid_cli/legacy/` package from distribution artifacts; do not use it as the current production entry point.
 
 | Variable | Where it appears | Important distinction |
 | --- | --- | --- |
-| `PLAIVID_ASCII` | Retired `plaivid_cli/theme.py` | Presence switches old glyphs to ASCII; **does not** control the current Textual dashboard. That legacy theme also observes `NO_COLOR`. |
+| `PLAIVID_ASCII` | Retired `plaivid_cli/legacy/theme.py` | Presence switches old glyphs to ASCII; **does not** control the current Textual dashboard. That legacy theme also observes `NO_COLOR`. |
 | `PLAIVID_PASS` | `tests/smoke.py` only | Password for an opt-in legacy real-host smoke test; **not** read by the current CLI login. The smoke test invokes legacy modules against a real PVM host and should not be run without authorization. Avoid storing passwords in a repository file, shell history, or process-visible environment. |
 | `PLAIVID_REFRESH`, `PLAIVID_USER`, `PLAIVID_LOG_DB` | Retired modules / smoke test as well as current runtime | The current definitions are in the main table above. The legacy overview reads refresh independently, and the retired log module reads the audit path at import time; these are not additional runtime settings. |
 

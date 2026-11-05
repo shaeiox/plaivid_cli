@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plaivid_cli import actions, monitoring, session, vms  # noqa: E402
+from plaivid_cli.legacy import actions, monitoring, session, vms  # noqa: E402
 
 
 def main():

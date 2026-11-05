@@ -4,7 +4,7 @@ import sys
 
 from .base import CONTINUE
 from .. import render
-from ..version import __version__
+from plaivid_cli.version import __version__
 
 NAME = "version"
 ALIASES = ["ver"]

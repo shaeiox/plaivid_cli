@@ -10,7 +10,8 @@ import json
 import os
 import time
 
-from . import config, transport
+from plaivid_cli import config
+from . import transport
 
 
 def _xml_escape(s):

@@ -19,11 +19,24 @@ def _imports(path: Path) -> set[str]:
 
 def _forbidden(layer: str) -> set[str]:
     if layer == "domain":
-        return {"plaivid_cli.application", "plaivid_cli.infrastructure", "plaivid_cli.tui", "plaivid_cli.cli", "plaivid_cli.bootstrap"}
+        return {
+            "plaivid_cli.application",
+            "plaivid_cli.infrastructure",
+            "plaivid_cli.presentation",
+            "plaivid_cli.bootstrap",
+        }
     if layer == "application":
-        return {"plaivid_cli.infrastructure", "plaivid_cli.tui", "plaivid_cli.cli", "plaivid_cli.bootstrap"}
+        return {
+            "plaivid_cli.infrastructure",
+            "plaivid_cli.presentation",
+            "plaivid_cli.bootstrap",
+        }
     if layer == "infrastructure":
-        return {"plaivid_cli.application", "plaivid_cli.tui", "plaivid_cli.cli", "plaivid_cli.bootstrap"}
+        return {
+            "plaivid_cli.application",
+            "plaivid_cli.presentation",
+            "plaivid_cli.bootstrap",
+        }
     if layer in {"cli", "tui"}:
         return {"plaivid_cli.infrastructure", "plaivid_cli.bootstrap"}
     raise AssertionError(layer)
@@ -43,11 +56,11 @@ def test_domain_application_and_infrastructure_import_boundaries() -> None:
 
 def test_presentations_do_not_import_infrastructure_or_bootstrap() -> None:
     violations = []
-    for filename in ("cli.py", "tui.py"):
-        for imported in _imports(PACKAGE / filename):
+    for path in (PACKAGE / "presentation").rglob("*.py"):
+        for imported in _imports(path):
             if any(
                 imported == prefix or imported.startswith(prefix + ".")
-                for prefix in _forbidden(filename.removesuffix(".py"))
+                for prefix in _forbidden("cli")
             ):
-                violations.append(f"{filename} imports {imported}")
+                violations.append(f"{path.relative_to(PACKAGE)} imports {imported}")
     assert violations == []

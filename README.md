@@ -109,6 +109,24 @@ The table below is a quick reference for the **active runtime**. For every suppo
 | `PLAIVID_LOG_DB` | `/var/log/pvm/messages.db` | Optional existing audit database, opened read-only. |
 | `PLAIVID_LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
+## Code layout
+
+The active code is grouped by responsibility; retired implementations are isolated under `plaivid_cli/legacy/` and are not included in release packages.
+
+```text
+plaivid_cli/
+├── presentation/       CLI, Textual TUI, and display components
+├── application/       use cases, orchestration policies, and ports
+├── domain/            PVM-independent models, state, and policies
+├── infrastructure/    process execution, audit access, and adapters
+│   └── pvm/            PvM/sbell commands, parsers, and integration
+├── bootstrap.py       composition root and process entry point
+├── config.py          validated runtime settings
+└── legacy/            retired checkout-only implementation
+```
+
+The supported direction is presentation → application/domain → infrastructure through application ports; `bootstrap.py` wires the concrete adapters. `legacy/` is kept separate for historical reference and is not a dependency of the active runtime.
+
 ## Architecture
 
 ```text
@@ -130,7 +148,7 @@ Bootstrap ── SessionManager / OperationCoordinator
 - `domain/` contains immutable records, source/result statuses, errors, and pure policy.
 - `application/` contains read use cases, session management, the serialized collection lane, and lifecycle orchestration.
 - `infrastructure/` contains bounded child execution, the PVM adapter/parsers, redaction, and read-only audit access.
-- `tui.py` uses Textual for rendering; blocking local work runs in workers and visible read requests go through the single collection coordinator.
+- `presentation/tui.py` uses Textual for rendering; blocking local work runs in workers and visible read requests go through the single collection coordinator.
 - Operations use generation/freshness gates, sequential target order, no blind retry, and post-operation reconciliation. They do not prompt for confirmation. Acceptance is never presented as completion.
 
 See [`docs/MONITORING_DASHBOARD.md`](docs/MONITORING_DASHBOARD.md) for Overview controls, data sources, N/A fields, and pending PVM acceptance. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the current module boundaries and [`docs/REFERENCE.md`](docs/REFERENCE.md) for the command cheat sheet. PVM response contracts that remain uncertain are isolated and listed in the manual validation plan; no undocumented command or state transition is inferred.

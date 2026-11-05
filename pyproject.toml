@@ -26,7 +26,7 @@ plaivid = "plaivid_cli.bootstrap:main"
 
 [tool.setuptools.packages.find]
 include = ["plaivid_cli*"]
-exclude = ["plaivid_cli.actions*", "plaivid_cli.commands*"]
+exclude = ["plaivid_cli.legacy*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -37,16 +37,8 @@ target-version = "py312"
 line-length = 100
 extend-exclude = [
   "tests/smoke.py",
-  "plaivid_cli/actions",
-  "plaivid_cli/commands",
-  "plaivid_cli/logs.py",
-  "plaivid_cli/monitoring.py",
-  "plaivid_cli/orchestrator.py",
-  "plaivid_cli/render.py",
-  "plaivid_cli/session.py",
-  "plaivid_cli/theme.py",
-  "plaivid_cli/transport.py",
-  "plaivid_cli/vms.py",
+  "plaivid_cli/legacy",
+  "plaivid_cli/legacy/**",
 ]
 
 [tool.ruff.lint]
@@ -56,16 +48,8 @@ ignore = ["E501"]
 [tool.coverage.run]
 source = ["plaivid_cli"]
 omit = [
-  "plaivid_cli/actions/*",
-  "plaivid_cli/commands/*",
-  "plaivid_cli/logs.py",
-  "plaivid_cli/monitoring.py",
-  "plaivid_cli/orchestrator.py",
-  "plaivid_cli/render.py",
-  "plaivid_cli/session.py",
-  "plaivid_cli/theme.py",
-  "plaivid_cli/transport.py",
-  "plaivid_cli/vms.py",
+  "plaivid_cli/legacy/*",
+  "plaivid_cli/legacy/**/*",
 ]
 
 [tool.pyright]
@@ -77,14 +61,5 @@ include = ["plaivid_cli"]
 exclude = [
   ".venv",
   "tests",
-  "plaivid_cli/actions/**",
-  "plaivid_cli/commands/**",
-  "plaivid_cli/logs.py",
-  "plaivid_cli/monitoring.py",
-  "plaivid_cli/orchestrator.py",
-  "plaivid_cli/render.py",
-  "plaivid_cli/session.py",
-  "plaivid_cli/theme.py",
-  "plaivid_cli/transport.py",
-  "plaivid_cli/vms.py",
+  "plaivid_cli/legacy/**",
 ]

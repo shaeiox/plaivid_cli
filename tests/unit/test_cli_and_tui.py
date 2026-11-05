@@ -12,7 +12,7 @@ from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
 from plaivid_cli.application.services import PlaividApplication
 from plaivid_cli.application.session import SessionManager, SessionStore
-from plaivid_cli.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
+from plaivid_cli.presentation.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
 from plaivid_cli.config import load_settings
 from plaivid_cli.domain.models import (
     Action,
@@ -26,7 +26,7 @@ from plaivid_cli.domain.models import (
     SourceResult,
 )
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
-from plaivid_cli.tui import PlaividTui
+from plaivid_cli.presentation.tui import PlaividTui
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
 UUID_B = "800b0429-d82a-4e26-a5e2-225990172e6e"

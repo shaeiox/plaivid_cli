@@ -16,7 +16,7 @@ from plaivid_cli.domain.overview import PhysicalNic
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
 from plaivid_cli.infrastructure.pvm.adapter import DASHBOARD_QUERY
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
-from plaivid_cli.tui import PlaividTui
+from plaivid_cli.presentation.tui import PlaividTui
 
 
 def test_schedule_is_single_flight_cadenced_and_discovery_is_one_shot():
