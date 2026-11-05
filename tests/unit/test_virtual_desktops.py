@@ -16,7 +16,7 @@ from plaivid_cli.infrastructure.process import ProcessResult
 from plaivid_cli.infrastructure.pvm.adapter import DESKTOP_QUERY, LocalPvmAdapter
 from plaivid_cli.infrastructure.pvm.desktops import parse_virtual_desktops
 from plaivid_cli.infrastructure.pvm.sbell import SbellClient
-from plaivid_cli.presentation.tui import PlaividTui
+from plaivid_cli.presentation.tui.app import PlaividTui
 
 
 def description(*objects: str) -> ET.Element:

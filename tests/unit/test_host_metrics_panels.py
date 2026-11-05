@@ -3,7 +3,7 @@ from pathlib import Path
 
 from plaivid_cli.domain.models import HostMetrics
 from plaivid_cli.infrastructure.pvm.parsers import parse_metrics
-from plaivid_cli.presentation import host_metrics as hm
+from plaivid_cli.presentation import overview_metrics as hm
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "monitoring-metrics.xml"
 

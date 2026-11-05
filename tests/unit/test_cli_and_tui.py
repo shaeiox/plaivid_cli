@@ -26,7 +26,7 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.presentation.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
-from plaivid_cli.presentation.tui import PlaividTui
+from plaivid_cli.presentation.tui.app import PlaividTui
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
 UUID_B = "800b0429-d82a-4e26-a5e2-225990172e6e"

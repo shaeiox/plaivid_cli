@@ -75,15 +75,20 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     )
     assert {
         "app",
+        "layout",
         "session",
         "refresh",
+        "audit",
+    }.issubset({name for _, name, _ in tui_modules})
+    assert not {
         "desktops",
         "host_page",
+        "overview",
+        "support",
         "virtual_machines",
         "vm_selection",
         "vm_operations",
-        "audit",
-    }.issubset({name for _, name, _ in tui_modules})
+    }.intersection({name for _, name, _ in tui_modules})
     assert (
         command.find_package_modules("plaivid_cli.legacy", str(ROOT / "plaivid_cli/legacy")) == []
     )

@@ -35,7 +35,7 @@ def run_command(
                 file=sys.stderr,
             )
             return EXIT_REJECTED
-        from plaivid_cli.presentation.tui import PlaividTui
+        from plaivid_cli.presentation.tui.app import PlaividTui
 
         PlaividTui(application, operations, sessions).run()
         return EXIT_OK

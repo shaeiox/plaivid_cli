@@ -33,7 +33,7 @@ from plaivid_cli.presentation.theme import (
     palette_for,
     styled_metric,
 )
-from plaivid_cli.presentation.tui import PlaividTui
+from plaivid_cli.presentation.tui.app import PlaividTui
 
 
 def test_brand_uses_one_accent_without_decorative_gradient():

@@ -140,7 +140,7 @@ plaivid_cli/
 └── legacy/             retired checkout-only implementation
 ```
 
-The supported direction is presentation → application/domain → infrastructure through application ports; `bootstrap.py` wires the concrete adapters. Public import facades preserve the existing module API while the implementation is divided into focused packages. `legacy/` is kept separate for historical reference and is not a dependency of the active runtime.
+The supported direction is presentation → application/domain → infrastructure through application ports; `bootstrap.py` wires the concrete adapters. The TUI composition root imports the canonical page and component packages directly; obsolete root-level page shims have been removed. `legacy/` is kept separate for historical reference and is not a dependency of the active runtime.
 
 ## Architecture
 

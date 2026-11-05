@@ -64,7 +64,7 @@ def test_command_summary_counts_every_process_with_most_common_first():
 
 
 def test_cpu_detail_model_and_current_clock_are_parsed_from_cpu_info():
-    from plaivid_cli.presentation.host_metrics import cpu_body
+    from plaivid_cli.presentation.overview_metrics import cpu_body
 
     metrics = parse_metrics(ET.parse(FIXTURE).getroot()).value
     assert metrics.cpu_model == "Intel(R) Xeon(R) CPU E5-2620 v2 @ 2.10GHz"

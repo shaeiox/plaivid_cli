@@ -25,7 +25,7 @@ from plaivid_cli.presentation.tui.pages.overview.components import (
     SystemCard,
 )
 
-from ...support import _section_status
+from ...components.status import section_status as _section_status
 from .presenter import cards, nic_details
 
 

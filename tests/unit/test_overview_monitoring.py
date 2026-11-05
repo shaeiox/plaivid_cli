@@ -16,7 +16,7 @@ from plaivid_cli.domain.overview import PhysicalNic
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor
 from plaivid_cli.infrastructure.pvm.adapter import DASHBOARD_QUERY
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
-from plaivid_cli.presentation.tui import PlaividTui
+from plaivid_cli.presentation.tui.app import PlaividTui
 
 
 def test_schedule_is_single_flight_cadenced_and_discovery_is_one_shot():
@@ -291,7 +291,7 @@ def test_running_vm_count_uses_last_verified_helper_row_not_object_inventory() -
     from plaivid_cli.application.overview import OverviewHistory
     from plaivid_cli.domain.models import ApplicationSnapshot
     from plaivid_cli.infrastructure.pvm.parsers import parse_process_rows
-    from plaivid_cli.presentation.overview import cards
+    from plaivid_cli.presentation.tui.pages.overview.presenter import cards
 
     result = parse_process_rows((Path(__file__).parents[1] / "fixtures" / "running-vms-six.txt").read_text())
     assert result.status is CollectionStatus.CURRENT

@@ -8,7 +8,7 @@ from plaivid_cli.domain.overview import DashboardSample, LocalHostSample
 from plaivid_cli.infrastructure.process import ProcessError
 from plaivid_cli.infrastructure.pvm.adapter import SBALLD_STATUS_ARGV, LocalPvmAdapter
 from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
-from plaivid_cli.presentation.overview import _uptime, cards
+from plaivid_cli.presentation.tui.pages.overview.presenter import _uptime, cards
 
 STATUS = """\
 ● sballd.service - PVM Cluster Engine (aka. Sball)

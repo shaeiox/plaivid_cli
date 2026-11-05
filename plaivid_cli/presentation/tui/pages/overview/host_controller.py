@@ -18,7 +18,8 @@ from plaivid_cli.presentation.tui.pages.overview.components import (
     TemperatureCard,
 )
 
-from ...support import _host_banner_text, _host_status_text, _quorum_verdict, _section_status
+from ...components.status import section_status as _section_status
+from .components.host_status import _host_banner_text, _host_status_text, _quorum_verdict
 
 
 class HostPageMixin:

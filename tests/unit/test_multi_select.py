@@ -8,7 +8,8 @@ from textual.widgets import DataTable, Input
 
 from plaivid_cli.domain.models import PvmSession
 from plaivid_cli.presentation.charts import LOAD_COLOURS, ChartView
-from plaivid_cli.presentation.tui import CheckableTable, PlaividTui
+from plaivid_cli.presentation.tui.app import PlaividTui
+from plaivid_cli.presentation.tui.components import CheckableTable
 
 
 def _checkbox(table: DataTable, uuid: str) -> str:
