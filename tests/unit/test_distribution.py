@@ -25,6 +25,15 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
         "infrastructure.pvm.adapter",
         "infrastructure.pvm.parsers",
         "presentation.charts",
+        "presentation.tui.components",
+        "presentation.tui.pages",
+        "presentation.tui.pages.overview",
+        "presentation.tui.pages.overview.components",
+        "presentation.tui.pages.virtual_machines",
+        "presentation.tui.pages.virtual_machines.components",
+        "presentation.tui.pages.virtual_desktops",
+        "presentation.tui.pages.virtual_desktops.components",
+        "presentation.overview_metrics",
     ):
         assert f"plaivid_cli.{nested}" in packages
     assert not any(
@@ -38,6 +47,14 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     spec.loader.exec_module(module)
     assert module.LEGACY_PACKAGE not in module.RUNTIME_PACKAGES
     assert "plaivid_cli.presentation" in module.RUNTIME_PACKAGES
+    for nested in (
+        "presentation.tui.components",
+        "presentation.tui.pages.overview.components",
+        "presentation.tui.pages.virtual_machines.components",
+        "presentation.tui.pages.virtual_desktops.components",
+        "presentation.overview_metrics",
+    ):
+        assert f"plaivid_cli.{nested}" in module.RUNTIME_PACKAGES
     distribution = Distribution({"packages": module.RUNTIME_PACKAGES})
     distribution.script_name = str(ROOT / "setup.py")
     command = module.RuntimeBuildPy(distribution)

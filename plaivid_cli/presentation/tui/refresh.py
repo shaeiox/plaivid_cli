@@ -15,7 +15,7 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.presentation.theme import styled_metric
 
-from .support import DESKTOP_MIN_REFRESH_SECONDS
+from .pages.virtual_desktops.policy import MIN_REFRESH_SECONDS
 
 
 class RefreshMixin:
@@ -89,7 +89,7 @@ class RefreshMixin:
                     else "inventory"
                 )
                 interval = (
-                    max(DESKTOP_MIN_REFRESH_SECONDS, self.application.settings.refresh_interval)
+                    max(MIN_REFRESH_SECONDS, self.application.settings.refresh_interval)
                     if section == "desktops"
                     else self.application.settings.refresh_interval
                 )
@@ -163,9 +163,11 @@ class RefreshMixin:
             else:
                 self._publish_snapshot(snapshot)
 
-    def _put(self, widget_id: str, text: str) -> None:
+    def _put(self, widget_id: str, text: str, *, setter=None) -> None:
         if self._render_cache.get(widget_id) != text:
-            self.query_one(f"#{widget_id}", Static).update(
-                styled_metric(text, palette=self._palette)
-            )
+            rendered = styled_metric(text, palette=self._palette)
+            if setter is None:
+                self.query_one(f"#{widget_id}", Static).update(rendered)
+            else:
+                setter(rendered)
             self._render_cache[widget_id] = text

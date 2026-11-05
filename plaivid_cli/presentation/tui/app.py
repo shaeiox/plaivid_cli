@@ -41,15 +41,15 @@ from plaivid_cli.presentation.theme import (
 )
 
 from .audit import AuditMixin
-from .desktops import DesktopMixin
-from .host_page import HostPageMixin
+from .components import CheckableTable
 from .layout import LayoutMixin
-from .overview import OverviewMixin
+from .pages.overview.controller import OverviewMixin
+from .pages.overview.host_controller import HostPageMixin
+from .pages.virtual_desktops.controller import DesktopMixin
+from .pages.virtual_machines.controller import VirtualMachinesMixin
 from .refresh import RefreshMixin
 from .session import SessionMixin
 from .styles import TUI_CSS
-from .support import CheckableTable
-from .virtual_machines import VirtualMachinesMixin
 
 
 class PlaividTui(
@@ -208,17 +208,9 @@ class PlaividTui(
     def show_desktop_audit(self) -> None:
         RefreshMixin.show_desktop_audit(self)
 
-    @on(Button.Pressed, "#rediscover")
-    def rediscover(self) -> None:
-        RefreshMixin.rediscover(self)
-
     @on(Button.Pressed, "#interval-apply")
     def apply_interval(self) -> None:
         RefreshMixin.apply_interval(self)
-
-    @on(Button.Pressed, ".nic-tab")
-    def select_nic(self, event: Button.Pressed) -> None:
-        OverviewMixin.select_nic(self, event)
 
     @on(Input.Changed, "#desktop-search")
     def desktop_search_changed(self) -> None:

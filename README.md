@@ -117,7 +117,14 @@ The active code is grouped by responsibility; retired implementations are isolat
 plaivid_cli/
 ├── presentation/
 │   ├── cli/            parser, dispatch, read/operation handlers, serialization
-│   ├── tui/            app/layout, sessions, refresh, pages, widgets, styles
+│   ├── tui/
+│   │   ├── app.py, layout.py, session.py, refresh.py
+│   │   ├── components/ shared cards, inventory toolbar, checkable table
+│   │   └── pages/
+│   │       ├── overview/           page, presenter, controller, telemetry components
+│   │       ├── virtual_machines/   page, selection, operations, components
+│   │       └── virtual_desktops/   page, controller, components
+│   ├── overview_metrics/ pure telemetry text formatters by concern
 │   └── charts/         chart geometry, rendering, and Textual widget
 ├── application/
 │   ├── collection/     coordinator, source reader, freshness, publication

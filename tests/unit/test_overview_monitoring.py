@@ -121,6 +121,8 @@ def test_overview_navigation_interval_nic_tabs_and_vm_operations_remain_availabl
             assert "Refresh: 3s" in str(tui.query_one("#refresh-label").render())
             assert "Running VMs" in str(tui.query_one("#running-card").render())
             assert "eno2" in tui._nic_tab_names
+            await pilot.click("#nic-tab-0")
+            assert tui._nic_selected == "eno1"
             tui._nic_selected = "eno2"
             tui._render_overview(collection.snapshot)
             assert provider.nic_calls == 1

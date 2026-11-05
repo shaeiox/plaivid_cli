@@ -1,8 +1,7 @@
-"""VM page behavior composed from selection and lifecycle-operation concerns."""
+"""Compatibility facade for the page-oriented Virtual Machine controller."""
 
-from .vm_operations import VMOperationMixin
-from .vm_selection import VMSelectionMixin
+from .pages.virtual_machines.controller import VirtualMachinesMixin
+from .pages.virtual_machines.operations import VMOperationMixin
+from .pages.virtual_machines.selection import VMSelectionMixin
 
-
-class VirtualMachinesMixin(VMSelectionMixin, VMOperationMixin):
-    """Combined VM page API retained for the main TUI composition root."""
+__all__ = ["VMOperationMixin", "VMSelectionMixin", "VirtualMachinesMixin"]

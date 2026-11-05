@@ -21,7 +21,7 @@ from plaivid_cli.domain.models import (
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.charts import ChartView
 
-from .support import _METRIC_PANELS
+from .pages.overview.components.panels import METRIC_PANEL_IDS
 
 
 class SessionMixin:
@@ -110,7 +110,7 @@ class SessionMixin:
         self.query_one("#audit-panel", Static).display = False
         self.query_one("#host-banner", Static).update("")
         self.query_one("#host-status", Static).update("Waiting for collection…")
-        for panel in _METRIC_PANELS:
+        for panel in METRIC_PANEL_IDS:
             self.query_one(f"#{panel}", Static).update("Waiting for collection…")
         self._visible_snapshot = None
         self._history = OverviewHistory()
