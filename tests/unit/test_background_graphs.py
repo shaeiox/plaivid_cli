@@ -1,10 +1,11 @@
 import asyncio
 from pathlib import Path
 
+from test_cli_and_tui import runtime
+
 from plaivid_cli.application.overview import OverviewSchedule
 from plaivid_cli.domain.models import PvmSession
 from plaivid_cli.presentation.tui import PlaividTui
-from test_cli_and_tui import runtime
 
 
 def test_background_sampling_only_runs_when_overview_is_not_visible() -> None:

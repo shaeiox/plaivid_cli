@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from test_cli_and_tui import UUID_A, UUID_B, runtime
 from textual.widgets import DataTable, Input
 
 from plaivid_cli.domain.models import PvmSession
 from plaivid_cli.presentation.charts import LOAD_COLOURS, ChartView
 from plaivid_cli.presentation.tui import CheckableTable, PlaividTui
-from test_cli_and_tui import UUID_A, UUID_B, runtime
 
 
 def _checkbox(table: DataTable, uuid: str) -> str:

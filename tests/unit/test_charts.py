@@ -44,7 +44,12 @@ def test_every_size_and_mode_renders_exact_rows_and_columns() -> None:
                 for header in (None, Text("CPU 5.0%")):
                     text = render_chart(
                         (Series("cpu", CPU_GREEN, FULL, area=True),),
-                        width=width, height=height, t_end=60.0, scale_top=100.0, header=header, mode=mode,
+                        width=width,
+                        height=height,
+                        t_end=60.0,
+                        scale_top=100.0,
+                        header=header,
+                        mode=mode,
                     )
                     rows = _lines(text)
                     assert len(rows) == height, (mode, width, height, header is not None)
@@ -52,52 +57,111 @@ def test_every_size_and_mode_renders_exact_rows_and_columns() -> None:
 
 
 def test_braille_and_block_modes_draw_with_their_own_glyphs() -> None:
-    braille = render_chart((Series("cpu", CPU_GREEN, FULL, area=True),), width=20, height=9, t_end=60.0, scale_top=100.0)
-    blocks = render_chart((Series("cpu", CPU_GREEN, FULL, area=True),), width=20, height=9, t_end=60.0, scale_top=100.0, mode="blocks")
-    assert any(0x2800 <= ord(char) <= 0x28FF and char != "\u2800" for row in _graph(braille) for char in row)
+    braille = render_chart(
+        (Series("cpu", CPU_GREEN, FULL, area=True),),
+        width=20,
+        height=9,
+        t_end=60.0,
+        scale_top=100.0,
+    )
+    blocks = render_chart(
+        (Series("cpu", CPU_GREEN, FULL, area=True),),
+        width=20,
+        height=9,
+        t_end=60.0,
+        scale_top=100.0,
+        mode="blocks",
+    )
+    assert any(
+        0x2800 <= ord(char) <= 0x28FF and char != "\u2800"
+        for row in _graph(braille)
+        for char in row
+    )
     assert all(ord(char) < 0x2800 or ord(char) > 0x28FF for row in _graph(blocks) for char in row)
     assert "█" in "".join(_graph(blocks))
 
 
 def test_full_scale_fills_the_top_graph_row_and_zero_is_drawn_on_the_bottom() -> None:
-    top = render_chart((Series("cpu", CPU_GREEN, tuple((float(t), 100.0) for t in range(0, 61, 3))),),
-                       width=20, height=6, t_end=60.0, scale_top=100.0, mode="blocks")
+    top = render_chart(
+        (Series("cpu", CPU_GREEN, tuple((float(t), 100.0) for t in range(0, 61, 3))),),
+        width=20,
+        height=6,
+        t_end=60.0,
+        scale_top=100.0,
+        mode="blocks",
+    )
     assert _graph(top)[0].strip() != ""
-    zero = render_chart((Series("cpu", CPU_GREEN, tuple((float(t), 0.0) for t in range(0, 61, 3))),),
-                        width=20, height=6, t_end=60.0, scale_top=100.0, mode="blocks")
+    zero = render_chart(
+        (Series("cpu", CPU_GREEN, tuple((float(t), 0.0) for t in range(0, 61, 3))),),
+        width=20,
+        height=6,
+        t_end=60.0,
+        scale_top=100.0,
+        mode="blocks",
+    )
     assert _graph(zero)[-1].strip() != ""  # a real zero is a visible line, not an empty graph
     assert all(_ink(row) == "" for row in _graph(zero)[:-1])
 
 
 def test_missing_samples_leave_a_gap_and_are_never_drawn_as_zero() -> None:
-    samples = tuple([(float(t), 100.0) for t in range(0, 21, 3)] + [(float(t), 100.0) for t in range(50, 61, 3)])
-    text = render_chart((Series("cpu", CPU_GREEN, samples),), width=60, height=6, t_end=60.0,
-                        scale_top=100.0, max_gap=5.0, mode="blocks")
+    samples = tuple(
+        [(float(t), 100.0) for t in range(0, 21, 3)] + [(float(t), 100.0) for t in range(50, 61, 3)]
+    )
+    text = render_chart(
+        (Series("cpu", CPU_GREEN, samples),),
+        width=60,
+        height=6,
+        t_end=60.0,
+        scale_top=100.0,
+        max_gap=5.0,
+        mode="blocks",
+    )
     graph = _graph(text)
     middle = [row[20:40] for row in graph]  # the 20 s..50 s span with no samples
-    assert all(_ink(row) == "" for row in middle[:-1])  # only the 0 baseline may sit on the bottom row
+    assert all(
+        _ink(row) == "" for row in middle[:-1]
+    )  # only the 0 baseline may sit on the bottom row
     assert set(middle[-1]) <= {"▁", " "}
     assert any(row[-5:].strip() for row in graph)  # the samples after the gap still render
 
 
 def test_insufficient_history_shows_a_message_not_a_line() -> None:
-    text = render_chart((Series("cpu", CPU_GREEN, ((1.0, 50.0),)),), width=30, height=5, t_end=60.0, scale_top=100.0)
+    text = render_chart(
+        (Series("cpu", CPU_GREEN, ((1.0, 50.0),)),), width=30, height=5, t_end=60.0, scale_top=100.0
+    )
     assert "Waiting for samples" in text.plain
     assert text.plain.split("\n")[-1].startswith("-60s")
 
 
 def test_time_axis_labels_appear_where_there_is_room() -> None:
-    wide = render_chart((Series("cpu", CPU_GREEN, FULL),), width=40, height=5, t_end=60.0, scale_top=100.0)
-    assert wide.plain.split("\n")[-1].startswith("-60s") and "-30s" in wide.plain.split("\n")[-1] and wide.plain.split("\n")[-1].rstrip().endswith("now")
-    narrow = render_chart((Series("cpu", CPU_GREEN, FULL),), width=12, height=5, t_end=60.0, scale_top=100.0)
+    wide = render_chart(
+        (Series("cpu", CPU_GREEN, FULL),), width=40, height=5, t_end=60.0, scale_top=100.0
+    )
+    assert (
+        wide.plain.split("\n")[-1].startswith("-60s")
+        and "-30s" in wide.plain.split("\n")[-1]
+        and wide.plain.split("\n")[-1].rstrip().endswith("now")
+    )
+    narrow = render_chart(
+        (Series("cpu", CPU_GREEN, FULL),), width=12, height=5, t_end=60.0, scale_top=100.0
+    )
     assert "-30s" not in narrow.plain and narrow.plain.split("\n")[-1].rstrip().endswith("now")
 
 
 def test_three_load_lines_use_three_distinct_colours() -> None:
-    series = [Series(name, colour, tuple((float(t), 1.0 + index) for t in range(0, 61, 3)))
-              for index, (name, colour) in enumerate(zip(("1m", "5m", "15m"), LOAD_COLOURS))]
-    text = render_chart(tuple(series), width=40, height=9, t_end=60.0, scale_top=stable_top(3.0),
-                        header=Text("Load"), max_gap=5.0)
+    series = [
+        Series(name, colour, tuple((float(t), 1.0 + index) for t in range(0, 61, 3)))
+        for index, (name, colour) in enumerate(zip(("1m", "5m", "15m"), LOAD_COLOURS, strict=True))
+    ]
+    text = render_chart(
+        tuple(series),
+        width=40,
+        height=9,
+        t_end=60.0,
+        scale_top=stable_top(3.0),
+        header=Text("Load"),
+        max_gap=5.0,
+    )
     colours = {str(span.style) for span in text.spans}
     for colour in LOAD_COLOURS:
         assert colour in colours
@@ -121,8 +185,14 @@ def test_stable_scale_only_moves_when_it_must() -> None:
 
 
 def test_colour_off_draws_plain_bars_with_one_style() -> None:
-    text = render_chart((Series("cpu", CPU_GREEN, FULL, area=True),), width=20, height=6, t_end=60.0,
-                        scale_top=100.0, palette=NO_COLOR)
+    text = render_chart(
+        (Series("cpu", CPU_GREEN, FULL, area=True),),
+        width=20,
+        height=6,
+        t_end=60.0,
+        scale_top=100.0,
+        palette=NO_COLOR,
+    )
     assert {str(span.style) for span in text.spans} <= {NO_COLOR.foreground, NO_COLOR.muted}
 
 
@@ -141,8 +211,16 @@ def test_chart_mode_follows_environment_then_locale(monkeypatch) -> None:
 def _snapshot(stamp: float, cpu: float, load: float, generation: int) -> ApplicationSnapshot:
     now = datetime.now(UTC)
     sample = LocalHostSample(cpu_percent=cpu, load1=load, load5=load / 2, load15=load / 4)
-    section = SectionSnapshot("local_host", sample, sample, CollectionStatus.CURRENT, now, now,
-                              generation, succeeded_monotonic=stamp)
+    section = SectionSnapshot(
+        "local_host",
+        sample,
+        sample,
+        CollectionStatus.CURRENT,
+        now,
+        now,
+        generation,
+        succeeded_monotonic=stamp,
+    )
     return ApplicationSnapshot(generation, now, (section,))
 
 
@@ -168,8 +246,13 @@ def test_chart_view_redraws_when_the_terminal_is_resized() -> None:
         app = Host()
         async with app.run_test(size=(40, 14)) as pilot:
             chart = app.query_one("#chart", ChartView)
-            chart.set_chart(series=(Series("cpu", CPU_GREEN, FULL, area=True),), t_end=60.0,
-                            scale_top=100.0, header=Text("CPU"), max_gap=5.0)
+            chart.set_chart(
+                series=(Series("cpu", CPU_GREEN, FULL, area=True),),
+                t_end=60.0,
+                scale_top=100.0,
+                header=Text("CPU"),
+                max_gap=5.0,
+            )
             await pilot.pause(0.1)
             before = len(chart.rendered.plain.split("\n")[1])
             await pilot.resize_terminal(70, 14)
@@ -184,7 +267,9 @@ def test_chart_view_redraws_when_the_terminal_is_resized() -> None:
 def test_fast_refresh_samples_are_averaged_into_buckets() -> None:
     from plaivid_cli.presentation.charts import bucketed
 
-    jitter = tuple((float(t), 0.0 if t % 2 else 0.5) for t in range(0, 60))  # 1 s refresh, quantised
+    jitter = tuple(
+        (float(t), 0.0 if t % 2 else 0.5) for t in range(0, 60)
+    )  # 1 s refresh, quantised
     points = bucketed(jitter, 0.0, 60.0, 2.0)
     assert 25 <= len(points) <= 31
     assert all(abs(value - 0.25) < 1e-9 for _, value in points)
@@ -193,7 +278,9 @@ def test_fast_refresh_samples_are_averaged_into_buckets() -> None:
 def test_empty_buckets_are_skipped_not_drawn_as_zero() -> None:
     from plaivid_cli.presentation.charts import bucketed
 
-    samples = tuple([(float(t), 40.0) for t in range(0, 11)] + [(float(t), 40.0) for t in range(40, 61)])
+    samples = tuple(
+        [(float(t), 40.0) for t in range(0, 11)] + [(float(t), 40.0) for t in range(40, 61)]
+    )
     points = bucketed(samples, 0.0, 60.0, 2.0)
     assert not any(20 < stamp < 38 for stamp, _ in points)
     assert all(value == 40.0 for _, value in points)
@@ -201,8 +288,16 @@ def test_empty_buckets_are_skipped_not_drawn_as_zero() -> None:
 
 def test_one_second_refresh_draws_a_continuous_line_in_every_column() -> None:
     samples = tuple((float(t), 50.0 if t % 2 == 0 else 0.0) for t in range(0, 61))
-    text = render_chart((Series("cpu", CPU_GREEN, samples),), width=40, height=9, t_end=60.0,
-                        scale_top=100.0, mode="blocks", min_bucket=2.0, max_gap=3.0)
+    text = render_chart(
+        (Series("cpu", CPU_GREEN, samples),),
+        width=40,
+        height=9,
+        t_end=60.0,
+        scale_top=100.0,
+        mode="blocks",
+        min_bucket=2.0,
+        max_gap=3.0,
+    )
     graph = _graph(text)
     for column in range(40):
         assert any(_ink(row)[:1] and row[column] not in " ·" for row in graph), column
@@ -214,8 +309,15 @@ def test_low_cpu_trace_has_visible_peaks_and_troughs() -> None:
     samples = tuple((float(t), 20.0 if (t // 3) % 2 else 5.0) for t in range(0, 61, 3))
     scale = stable_top(20.0, None, floor=CPU_MIN_SCALE)
     assert scale >= 20.0
-    text = render_chart((Series("cpu", CPU_GREEN, samples),), width=60, height=9, t_end=60.0,
-                        scale_top=scale, mode="blocks", max_gap=4.0)
+    text = render_chart(
+        (Series("cpu", CPU_GREEN, samples),),
+        width=60,
+        height=9,
+        t_end=60.0,
+        scale_top=scale,
+        mode="blocks",
+        max_gap=4.0,
+    )
     rows_with_ink = {index for index, row in enumerate(_graph(text)) if _ink(row)}
     assert len(rows_with_ink) >= 3  # 5% and 20% sit on clearly different rows
 
@@ -223,8 +325,14 @@ def test_low_cpu_trace_has_visible_peaks_and_troughs() -> None:
 def test_zero_baseline_is_drawn_under_every_column() -> None:
     samples = tuple((float(t), 5.0) for t in range(0, 61, 3))
     for mode in ("blocks", "braille"):
-        text = render_chart((Series("cpu", CPU_GREEN, samples),), width=30, height=7, t_end=60.0,
-                            scale_top=12.0, mode=mode)
+        text = render_chart(
+            (Series("cpu", CPU_GREEN, samples),),
+            width=30,
+            height=7,
+            t_end=60.0,
+            scale_top=12.0,
+            mode=mode,
+        )
         bottom = _graph(text)[-1]
         assert all(cell != " " for cell in bottom), mode
 

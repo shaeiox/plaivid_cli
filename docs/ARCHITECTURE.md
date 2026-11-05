@@ -2,6 +2,8 @@
 
 This describes the current implementation, not the earlier dynamic command/action plugin design. The application is Linux-local and calls only the configured local `sbell` and `pvm-running-vms` programs. It does not use SSH or an application-owned telemetry database. The retired implementation—including the former `actions/`, `commands/`, and root-level runtime modules—is grouped under `plaivid_cli/legacy/` for historical reference; the supported runtime does not route through it, it is excluded from release packages, and it is excluded from active Ruff/Pyright checks rather than mechanically rewritten. Active CLI and TUI front ends live under `plaivid_cli/presentation/`; application, domain, infrastructure, and PvM integrations each have their own package directories.
 
+The active multi-file responsibilities use focused packages: `presentation/cli/` separates parsing, dispatch, read handlers, operation handling, and serialization; `presentation/tui/` separates app/layout, session, refresh, page, and widget behavior; `presentation/charts/` separates geometry, rendering, and the Textual widget. `application/collection/` contains the serialized coordinator, source reader, freshness policy, and last-good publisher; `application/operations/` separates lifecycle planning, dispatch, and result aggregation. Domain value groups live in `domain/models/`, while `infrastructure/pvm/adapter/` and `infrastructure/pvm/parsers/` isolate PVM requests, gateway behavior, and response parsing. Small `__init__.py` facades preserve established public import paths. Active implementation modules are kept to 300 lines or fewer; the retired `legacy/` archive is excluded from that constraint.
+
 ## Runtime boundaries
 
 ```text

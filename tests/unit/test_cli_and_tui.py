@@ -12,7 +12,6 @@ from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
 from plaivid_cli.application.services import PlaividApplication
 from plaivid_cli.application.session import SessionManager, SessionStore
-from plaivid_cli.presentation.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
 from plaivid_cli.config import load_settings
 from plaivid_cli.domain.models import (
     Action,
@@ -26,6 +25,7 @@ from plaivid_cli.domain.models import (
     SourceResult,
 )
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
+from plaivid_cli.presentation.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
 from plaivid_cli.presentation.tui import PlaividTui
 
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
@@ -61,25 +61,43 @@ class FakeProvider:
         self.host_calls += 1
         if self.host_gate is not None:
             self.host_gate.wait(2)
-        return SourceResult(HostStatus(name="node-a", sball_state="quorate"), CollectionStatus.CURRENT, "host")
+        return SourceResult(
+            HostStatus(name="node-a", sball_state="quorate"), CollectionStatus.CURRENT, "host"
+        )
 
     def host_metrics(self, token):
         return SourceResult(HostMetrics(cpu_pct=19.5), CollectionStatus.CURRENT, "metrics")
 
     def dashboard(self, token):
         self.dashboard_calls += 1
-        return SourceResult(DashboardSample(host_name="node-a", host_id="host-1"), CollectionStatus.CURRENT, "dashboard")
+        return SourceResult(
+            DashboardSample(host_name="node-a", host_id="host-1"),
+            CollectionStatus.CURRENT,
+            "dashboard",
+        )
 
     def local_host(self):
         self.local_calls += 1
-        return SourceResult(LocalHostSample(hostname="node-a", cpu_percent=19.5, memory_used=512, memory_total=1024, load1=0.5), CollectionStatus.CURRENT, "local")
+        return SourceResult(
+            LocalHostSample(
+                hostname="node-a", cpu_percent=19.5, memory_used=512, memory_total=1024, load1=0.5
+            ),
+            CollectionStatus.CURRENT,
+            "local",
+        )
 
     def physical_nics(self, token):
-        return SourceResult((PhysicalNic("eno1"), PhysicalNic("eno2")), CollectionStatus.CURRENT, "nics")
+        return SourceResult(
+            (PhysicalNic("eno1"), PhysicalNic("eno2")), CollectionStatus.CURRENT, "nics"
+        )
 
     def nic_samples(self, devices):
         self.nic_calls += 1
-        return SourceResult(tuple(NicSample(name=nic.name, rx_bytes=12, tx_bytes=0) for nic in devices), CollectionStatus.CURRENT, "counters")
+        return SourceResult(
+            tuple(NicSample(name=nic.name, rx_bytes=12, tx_bytes=0) for nic in devices),
+            CollectionStatus.CURRENT,
+            "counters",
+        )
 
     def vm_detail(self, token, uuid):
         return SourceResult(None, CollectionStatus.UNAVAILABLE, "detail")
@@ -128,22 +146,28 @@ def test_cli_inventory_and_direct_action_with_fake_provider(tmp_path, capsys):
     provider, collection, application, operations, sessions, settings = runtime(tmp_path)
     parser = build_parser()
     inventory_args = parser.parse_args(["inventory"])
-    assert run_command(
-        inventory_args,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
-    ) == EXIT_OK
+    assert (
+        run_command(
+            inventory_args,
+            application=application,
+            operations=operations,
+            sessions=sessions,
+            settings=settings,
+        )
+        == EXIT_OK
+    )
     assert "alpha" in capsys.readouterr().out
     json_args = parser.parse_args(["inventory", "--json"])
-    assert run_command(
-        json_args,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
-    ) == EXIT_OK
+    assert (
+        run_command(
+            json_args,
+            application=application,
+            operations=operations,
+            sessions=sessions,
+            settings=settings,
+        )
+        == EXIT_OK
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "current"
     assert payload["data"]["records"][0]["uuid"] == UUID_A
@@ -152,23 +176,32 @@ def test_cli_inventory_and_direct_action_with_fake_provider(tmp_path, capsys):
     with pytest.raises(SystemExit):
         parser.parse_args(["stop", UUID_A, "--approve", f"STOP {UUID_A}"])
     stop_args = parser.parse_args(["stop", UUID_A])
-    assert run_command(
-        stop_args, application=application, operations=operations,
-        sessions=sessions, settings=settings,
-    ) == EXIT_OK
+    assert (
+        run_command(
+            stop_args,
+            application=application,
+            operations=operations,
+            sessions=sessions,
+            settings=settings,
+        )
+        == EXIT_OK
+    )
     output = capsys.readouterr().out
     assert "SUCCEEDED" in output
     assert provider.dispatched == [(Action.STOP, UUID_A)]
 
     provider.action_reply = PvmReply("maybe")
     unknown_args = parser.parse_args(["start", UUID_B])
-    assert run_command(
-        unknown_args,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
-    ) == EXIT_UNKNOWN
+    assert (
+        run_command(
+            unknown_args,
+            application=application,
+            operations=operations,
+            sessions=sessions,
+            settings=settings,
+        )
+        == EXIT_UNKNOWN
+    )
     assert "OUTCOME_UNKNOWN" in capsys.readouterr().out
     assert provider.dispatched[-1] == (Action.START, UUID_B)
     collection.close()
@@ -205,15 +238,20 @@ def test_cli_redacts_sensitive_pvm_metadata_in_human_and_json_output(tmp_path, c
 
 def test_cli_json_preserves_partial_inventory_status_and_records(tmp_path, capsys):
     provider, collection, application, operations, sessions, settings = runtime(tmp_path)
-    provider.list_processes = lambda: (_ for _ in ()).throw(RuntimeError("synthetic helper failure"))
+    provider.list_processes = lambda: (_ for _ in ()).throw(
+        RuntimeError("synthetic helper failure")
+    )
     args = build_parser().parse_args(["inventory", "--json"])
-    assert run_command(
-        args,
-        application=application,
-        operations=operations,
-        sessions=sessions,
-        settings=settings,
-    ) == 3
+    assert (
+        run_command(
+            args,
+            application=application,
+            operations=operations,
+            sessions=sessions,
+            settings=settings,
+        )
+        == 3
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "partial"
     assert payload["data"]["records"][0]["uuid"] == UUID_A
@@ -243,7 +281,9 @@ def test_tui_redacts_sensitive_pvm_names_and_descriptions(tmp_path):
             assert "synthetic-description-secret" not in visible + detail
             assert "[REDACTED]" in detail
             row = tui.query_one("#fleet-table").get_row(UUID_A)
-            assert "synthetic-tui-secret" not in str(row[2])  # column 0 is the checkbox, 1 is the index
+            assert "synthetic-tui-secret" not in str(
+                row[2]
+            )  # column 0 is the checkbox, 1 is the index
             assert "[REDACTED]" in str(row[2])
 
     try:
@@ -406,7 +446,9 @@ def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
     from textual.widgets import Checkbox, DataTable, Input, Static
 
     async def exercise(width: int) -> None:
-        provider, collection, application, operations, sessions, settings = runtime(tmp_path / str(width))
+        provider, collection, application, operations, sessions, settings = runtime(
+            tmp_path / str(width)
+        )
         operations._settings = replace(settings, max_inventory_age_seconds=30)
         calls = 0
         original = provider.list_objects
@@ -420,16 +462,24 @@ def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
         tui = PlaividTui(application, operations, sessions)
         try:
             async with tui.run_test(size=(width, 40)) as pilot:
-                await pilot.pause(.2)
+                await pilot.pause(0.2)
                 tui.action_vms_page()
-                await pilot.pause(.05)
+                await pilot.pause(0.05)
+                # Let startup and tab-switch refreshes drain before isolating local search.
+                for _ in range(20):
+                    if not tui._refresh_busy and not tui._pending_manual_refresh:
+                        break
+                    await pilot.pause(0.05)
+                assert not tui._refresh_busy and not tui._pending_manual_refresh
                 table = tui.query_one("#fleet-table", DataTable)
                 search = tui.query_one("#vm-search", Input)
                 assert table.row_count == 2
+                # The half-second timer can schedule a separate fleet refresh during this assertion.
+                tui._fleet_due = float("inf")
                 initial_calls = calls
                 search.focus()
                 await pilot.press("b", "e", "t", "a")
-                await pilot.pause(.05)
+                await pilot.pause(0.05)
                 assert calls == initial_calls
                 assert table.row_count == 1
                 assert tui._selected_uuid == UUID_B
@@ -440,21 +490,23 @@ def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
                 tui._publish_snapshot(collection.snapshot)
                 assert table.row_count == 1
                 search.value = "missing"
-                await pilot.pause(.05)
+                await pilot.pause(0.05)
                 assert table.row_count == 0 and tui._selected_uuid is None
                 assert "No matching VMs" in str(tui.query_one("#detail-box", Static).render())
                 tui._begin_action(Action.START)
                 assert not provider.dispatched
                 search.value = "beta"
-                await pilot.pause(.05)
+                await pilot.pause(0.05)
                 tui._begin_action(Action.START)
-                await pilot.pause(.2)
+                await pilot.pause(0.2)
                 assert provider.dispatched == [(Action.START, UUID_B)]
                 tui.query_one("#select-all", Checkbox).value = True
-                await pilot.pause(.05)
-                assert "All unfiltered VMs · 2 target(s) · 1 shown" in str(tui.query_one("#vm-scope", Static).render())
+                await pilot.pause(0.05)
+                assert "All unfiltered VMs · 2 target(s) · 1 shown" in str(
+                    tui.query_one("#vm-scope", Static).render()
+                )
                 tui._begin_action(Action.STOP)
-                await pilot.pause(.25)
+                await pilot.pause(0.25)
                 assert provider.dispatched[-2:] == [(Action.STOP, UUID_A), (Action.STOP, UUID_B)]
                 tui._session_ended("test logout")
                 assert search.value == "" and table.row_count == 0

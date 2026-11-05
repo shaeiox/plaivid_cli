@@ -1,6 +1,13 @@
 import colorsys
 
-from plaivid_cli.presentation.theme import GROUP_STOPS, NO_COLOR, TRUECOLOR, group_color, group_title, gradient_text
+from plaivid_cli.presentation.theme import (
+    GROUP_STOPS,
+    NO_COLOR,
+    TRUECOLOR,
+    gradient_text,
+    group_color,
+    group_title,
+)
 
 
 def _hue(hex_colour: str) -> float:

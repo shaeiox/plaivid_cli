@@ -1,4 +1,4 @@
-"""Infrastructure implementation of the single local PVM gateway."""
+"""Local PVM gateway implementation over bounded local process adapters."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from plaivid_cli.infrastructure.diagnostics import redact_text
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor, sballd_pid_file_present
 from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
-from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
 from plaivid_cli.infrastructure.pvm.parsers import (
     parse_metrics,
     parse_object_inventory,
@@ -38,59 +37,17 @@ from plaivid_cli.infrastructure.pvm.parsers import (
     parse_vm_detail,
 )
 from plaivid_cli.infrastructure.pvm.sbell import SbellClient, SbellResponse
+from plaivid_cli.infrastructure.pvm.uptime import sball_uptime_seconds
 
-DASHBOARD_QUERY = (
-    "<params><query_path>/plaivid/overview/pvm_overview_dashboard</query_path>"
-    "<page_size>0</page_size><requested_page>1</requested_page>"
-    "<variable_list/><order_by_list/><order_by/><filter_by_list/><filter_by/>"
-    "</params>"
+from .requests import (
+    DASHBOARD_QUERY,
+    DESKTOP_QUERY,
+    ERRNO_HINT,
+    SBALLD_STATUS_ARGV,
+    VM_QUERY,
+    _action_params,
+    _login_params,
 )
-
-DESKTOP_QUERY = (
-    '<params><query>/objects/object/*[type[text()="pvm_desktop_lite_virtual_desktop"]]'
-    '</query></params>'
-)
-VM_QUERY = (
-    "<params><query>/objects/object/pvm_vmm_obj"
-    "[type[text()='pvm_vmm_virtual_machine']]</query></params>"
-)
-ERRNO_HINT = {
-    "39": "session missing or expired",
-    "40": "permission denied or malformed request",
-    "108": "local sbell permission denied",
-    "137": "authentication rejected",
-    "146": "VM state rejected by PVM",
-    "185": "PVM session limit reached; no sessions were removed",
-}
-
-
-def _xml_text(tag: str, value: str) -> str:
-    element = ET.Element(tag)
-    element.text = value
-    return ET.tostring(element, encoding="unicode", short_empty_elements=False)
-
-
-def _login_params(username: str, password: str) -> str:
-    root = ET.Element("params")
-    ET.SubElement(root, "username").text = username
-    ET.SubElement(root, "password").text = password
-    return ET.tostring(root, encoding="unicode", short_empty_elements=False)
-
-
-def _action_params(action: Action, uuid: str) -> str:
-    key = canonical_uuid(uuid)
-    if action is Action.START:
-        # This parameter structure is copied from the existing source action.
-        return (
-            f"<vm_start><vm_key>{key}</vm_key><host>auto</host>"
-            "<version_start><version_enable>no</version_enable>"
-            "<version_vkey></version_vkey></version_start>"
-            "<exit_from_replicate>yes</exit_from_replicate></vm_start>"
-        )
-    return _xml_text("vm_key", key)
-
-
-SBALLD_STATUS_ARGV = ("systemctl", "status", "sballd", "--no-pager")
 
 
 class LocalPvmAdapter:
@@ -112,7 +69,9 @@ class LocalPvmAdapter:
         self._allow_credential_argv = allow_credential_argv
         self._local_monitor = LinuxMonitor()
 
-    def _call(self, module: str, command: str, params: str = "<params/>", token: str | None = None) -> SbellResponse:
+    def _call(
+        self, module: str, command: str, params: str = "<params/>", token: str | None = None
+    ) -> SbellResponse:
         if token and not self._allow_credential_argv:
             raise AppError(
                 ErrorKind.POLICY,
@@ -129,7 +88,9 @@ class LocalPvmAdapter:
     @staticmethod
     def _require_read(response: SbellResponse, operation: str) -> ET.Element:
         if not response.ok:
-            details = response.what or ERRNO_HINT.get(response.errno or "") or "PVM rejected the request"
+            details = (
+                response.what or ERRNO_HINT.get(response.errno or "") or "PVM rejected the request"
+            )
             safe = redact_text(details)
             code = response.errno or "UNKNOWN"
             raise AppError(
@@ -238,10 +199,7 @@ class LocalPvmAdapter:
 
     def vm_detail(self, token: str, uuid: str) -> SourceResult[VMDetail | None]:
         key = canonical_uuid(uuid)
-        query = (
-            f"<params><query>/objects/object/pvm_vmm_obj[uuid[text()='{key}']]"
-            "</query></params>"
-        )
+        query = f"<params><query>/objects/object/pvm_vmm_obj[uuid[text()='{key}']]</query></params>"
         response = self._call("user", "objects", query, token)
         description = self._require_read(response, "user/objects/detail")
         return parse_vm_detail(description, key)
@@ -259,7 +217,11 @@ class LocalPvmAdapter:
 
     def local_host(self) -> SourceResult[LocalHostSample]:
         sample = self._local_monitor.host()
-        status = CollectionStatus.CURRENT if sample.memory_total is not None and sample.load1 is not None else CollectionStatus.PARTIAL
+        status = (
+            CollectionStatus.CURRENT
+            if sample.memory_total is not None and sample.load1 is not None
+            else CollectionStatus.PARTIAL
+        )
         sample = replace(
             sample,
             pvm_uptime_seconds=self._sball_uptime_seconds(),
@@ -284,15 +246,19 @@ class LocalPvmAdapter:
         if result.value is None:
             return result
         physical = tuple(item for item in result.value if self._local_monitor.physical(item.name))
-        return SourceResult(physical, result.status, result.source, quality_issues=result.quality_issues)
+        return SourceResult(
+            physical, result.status, result.source, quality_issues=result.quality_issues
+        )
 
     def nic_samples(self, devices: tuple[PhysicalNic, ...]) -> SourceResult[tuple[NicSample, ...]]:
         # A NIC-list record is not itself proof of a physical Linux device.
         physical = tuple(item for item in devices if self._local_monitor.physical(item.name))
         samples = self._local_monitor.nics(physical)
-        status = CollectionStatus.PARTIAL if any(
-            sample.rx_bytes is None or sample.tx_bytes is None for sample in samples
-        ) else CollectionStatus.CURRENT
+        status = (
+            CollectionStatus.PARTIAL
+            if any(sample.rx_bytes is None or sample.tx_bytes is None for sample in samples)
+            else CollectionStatus.CURRENT
+        )
         return SourceResult(samples, status, "local sysfs")
 
     def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply:

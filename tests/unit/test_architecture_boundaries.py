@@ -49,7 +49,10 @@ def test_domain_application_and_infrastructure_import_boundaries() -> None:
         root = PACKAGE / layer
         for path in root.rglob("*.py"):
             for imported in _imports(path):
-                if any(imported == prefix or imported.startswith(prefix + ".") for prefix in _forbidden(layer)):
+                if any(
+                    imported == prefix or imported.startswith(prefix + ".")
+                    for prefix in _forbidden(layer)
+                ):
                     violations.append(f"{path.relative_to(PACKAGE)} imports {imported}")
     assert violations == []
 
@@ -64,3 +67,12 @@ def test_presentations_do_not_import_infrastructure_or_bootstrap() -> None:
             ):
                 violations.append(f"{path.relative_to(PACKAGE)} imports {imported}")
     assert violations == []
+
+
+def test_active_modules_stay_within_responsibility_sized_files() -> None:
+    oversized = [
+        f"{path.relative_to(PACKAGE)}: {len(path.read_text(encoding='utf-8').splitlines())} lines"
+        for path in PACKAGE.rglob("*.py")
+        if "legacy" not in path.parts and len(path.read_text(encoding="utf-8").splitlines()) > 300
+    ]
+    assert oversized == []

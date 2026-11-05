@@ -111,21 +111,29 @@ The table below is a quick reference for the **active runtime**. For every suppo
 
 ## Code layout
 
-The active code is grouped by responsibility; retired implementations are isolated under `plaivid_cli/legacy/` and are not included in release packages.
+The active code is grouped by responsibility; retired implementations are isolated under `plaivid_cli/legacy/` and are not included in release packages. Larger areas are decomposed into smaller feature modules instead of accumulating unrelated helpers in one file.
 
 ```text
 plaivid_cli/
-├── presentation/       CLI, Textual TUI, and display components
-├── application/       use cases, orchestration policies, and ports
-├── domain/            PVM-independent models, state, and policies
-├── infrastructure/    process execution, audit access, and adapters
-│   └── pvm/            PvM/sbell commands, parsers, and integration
-├── bootstrap.py       composition root and process entry point
-├── config.py          validated runtime settings
-└── legacy/            retired checkout-only implementation
+├── presentation/
+│   ├── cli/            parser, dispatch, read/operation handlers, serialization
+│   ├── tui/            app/layout, sessions, refresh, pages, widgets, styles
+│   └── charts/         chart geometry, rendering, and Textual widget
+├── application/
+│   ├── collection/     coordinator, source reader, freshness, publication
+│   └── operations/     lifecycle coordinator, planner, result aggregation
+├── domain/
+│   └── models/         inventory, host, snapshots, sessions, audit, operations
+├── infrastructure/
+│   └── pvm/
+│       ├── adapter/    local gateway and documented request shapes
+│       └── parsers/    inventory, host, VM detail, and shared XML parsing
+├── bootstrap.py        composition root and process entry point
+├── config.py           validated runtime settings
+└── legacy/             retired checkout-only implementation
 ```
 
-The supported direction is presentation → application/domain → infrastructure through application ports; `bootstrap.py` wires the concrete adapters. `legacy/` is kept separate for historical reference and is not a dependency of the active runtime.
+The supported direction is presentation → application/domain → infrastructure through application ports; `bootstrap.py` wires the concrete adapters. Public import facades preserve the existing module API while the implementation is divided into focused packages. `legacy/` is kept separate for historical reference and is not a dependency of the active runtime.
 
 ## Architecture
 

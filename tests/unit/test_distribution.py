@@ -18,7 +18,19 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     assert "plaivid_cli.application" in packages
     assert "plaivid_cli.presentation" in packages
     assert "plaivid_cli.infrastructure.pvm" in packages
-    assert not any(package == "plaivid_cli.legacy" or package.startswith("plaivid_cli.legacy.") for package in packages)
+    for nested in (
+        "application.collection",
+        "application.operations",
+        "domain.models",
+        "infrastructure.pvm.adapter",
+        "infrastructure.pvm.parsers",
+        "presentation.charts",
+    ):
+        assert f"plaivid_cli.{nested}" in packages
+    assert not any(
+        package == "plaivid_cli.legacy" or package.startswith("plaivid_cli.legacy.")
+        for package in packages
+    )
 
     spec = importlib.util.spec_from_file_location("plaivid_setup", ROOT / "setup.py")
     assert spec is not None and spec.loader is not None
@@ -33,14 +45,34 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     root_modules = command.find_package_modules("plaivid_cli", str(ROOT / "plaivid_cli"))
     root_names = {name for _, name, _ in root_modules}
     assert "cli" not in root_names and "tui" not in root_names
-    presentation_modules = command.find_package_modules(
-        "plaivid_cli.presentation", str(ROOT / "plaivid_cli/presentation")
+    assert "plaivid_cli.presentation.cli" in module.RUNTIME_PACKAGES
+    assert "plaivid_cli.presentation.tui" in module.RUNTIME_PACKAGES
+    cli_modules = command.find_package_modules(
+        "plaivid_cli.presentation.cli", str(ROOT / "plaivid_cli/presentation/cli")
     )
-    presentation_names = {name for _, name, _ in presentation_modules}
-    assert {"cli", "tui"}.issubset(presentation_names)
-    assert command.find_package_modules(
-        "plaivid_cli.legacy", str(ROOT / "plaivid_cli/legacy")
-    ) == []
-    assert command.find_package_modules(
-        "plaivid_cli.legacy.actions", str(ROOT / "plaivid_cli/legacy/actions")
-    ) == []
+    tui_modules = command.find_package_modules(
+        "plaivid_cli.presentation.tui", str(ROOT / "plaivid_cli/presentation/tui")
+    )
+    assert {"dispatch", "parser", "reads", "operations", "serialization"}.issubset(
+        {name for _, name, _ in cli_modules}
+    )
+    assert {
+        "app",
+        "session",
+        "refresh",
+        "desktops",
+        "host_page",
+        "virtual_machines",
+        "vm_selection",
+        "vm_operations",
+        "audit",
+    }.issubset({name for _, name, _ in tui_modules})
+    assert (
+        command.find_package_modules("plaivid_cli.legacy", str(ROOT / "plaivid_cli/legacy")) == []
+    )
+    assert (
+        command.find_package_modules(
+            "plaivid_cli.legacy.actions", str(ROOT / "plaivid_cli/legacy/actions")
+        )
+        == []
+    )

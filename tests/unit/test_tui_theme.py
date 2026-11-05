@@ -20,10 +20,10 @@ from plaivid_cli.domain.models import ObjectVM
 from plaivid_cli.presentation.theme import (
     ACCENT,
     ANSI16,
-    NO_COLOR,
     ANSI256,
     BACKGROUND,
     ERROR,
+    NO_COLOR,
     PRIMARY,
     SECONDARY,
     SUCCESS,
