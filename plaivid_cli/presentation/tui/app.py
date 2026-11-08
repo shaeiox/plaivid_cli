@@ -113,6 +113,8 @@ class PlaividTui(
         self._chart_mode = default_chart_mode()
         self._load_scale: float | None = None
         self._cpu_scale: float | None = None
+        # Next wall-clock chart redraw; the 60 s window advances without new samples.
+        self._chart_tick_due = 0.0
         self._overview_schedule = OverviewSchedule(
             min(60, max(1, application.settings.refresh_interval)),
             host_status_interval=application.settings.host_status_interval,

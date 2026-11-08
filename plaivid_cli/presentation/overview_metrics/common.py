@@ -45,6 +45,20 @@ def row(label: str, value: str) -> str:
     return f"{label:<12}: {value}"
 
 
+def body(lines: list[str]) -> str:
+    """Join measurement lines only and apply redaction.
+
+    Collection status is owned by the card header, so it is intentionally *not*
+    appended here: repeating "ONLINE" at the bottom of every child widget made one
+    state look like several independent readings.
+    """
+    return redact_text("\n".join(lines))
+
+
 def finish(lines: list[str], status: str) -> str:
-    """Join body lines with the collection status and apply redaction."""
+    """Join body lines with the collection status and apply redaction.
+
+    Retained for callers that render a standalone status line; dashboard cards
+    use :func:`body` and :meth:`DashboardCard.set_status` instead.
+    """
     return redact_text("\n".join([*lines, status]))

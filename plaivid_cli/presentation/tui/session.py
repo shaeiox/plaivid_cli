@@ -21,6 +21,7 @@ from plaivid_cli.domain.models import (
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.charts import ChartView
 
+from .components import DashboardCard
 from .pages.overview.components.panels import METRIC_PANEL_IDS
 
 
@@ -133,8 +134,11 @@ class SessionMixin:
             self.query_one(f"#{widget_id}", ChartView).reset(
                 "Waiting for authenticated monitoring data…"
             )
+        for card in self.query(DashboardCard):
+            card.set_status("")
         self._load_scale = None
         self._cpu_scale = None
+        self._chart_tick_due = 0.0
 
     def _session_ended(self, message: str) -> None:
         self.session = None

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
+
 from rich.text import Text
+from textual.css.query import NoMatches
 from textual.widgets import Static
 
 from plaivid_cli.domain.models import (
@@ -13,10 +16,12 @@ from plaivid_cli.domain.models import (
 from plaivid_cli.presentation.charts import (
     CPU_MIN_SCALE,
     LOAD_COLOURS,
+    WINDOW_SECONDS,
     Series,
     cpu_colour,
-    stable_top,
+    dynamic_top,
 )
+from plaivid_cli.presentation.tui.components import DashboardCard
 from plaivid_cli.presentation.tui.pages.overview.components import (
     CPUCard,
     LoadCard,
@@ -26,24 +31,56 @@ from plaivid_cli.presentation.tui.pages.overview.components import (
 )
 
 from ...components.status import section_status as _section_status
-from .presenter import cards, nic_details
+from .presenter import card_statuses, cards, nic_details
 
 
 class OverviewMixin:
     """Render overview data; it never calls providers or owns refresh policy."""
 
-    def _render_charts(self) -> None:
-        """CPU and load graphs from the 60-second overview history. Only real samples are plotted."""
-        cpu = tuple(self._history.values["cpu"])
+    def _render_charts(self, *, now: float | None = None) -> None:
+        """CPU and load graphs from a *wall-clock* 60-second window.
+
+        ``t_end`` is the current monotonic clock, not the newest sample: pruning
+        and the Y scale keep advancing even when collection stalls. Only samples
+        still inside ``[now - 60s, now]`` are plotted or considered for the scale.
+        A direct call with fixture timestamps (a different clock domain) anchors
+        the window to its newest sample instead; the UI tick always supplies the
+        real clock so this fallback never masks a stalled production history.
+        """
+        clock = time.monotonic() if now is None else now
+        # A timer tick can arrive while the Overview page is being torn down.
+        try:
+            cpu_chart = self.query_one("#cpu-box", CPUCard).chart
+            load_chart = self.query_one("#load-box", LoadCard).chart
+        except NoMatches:
+            return
+        # The UI tick always passes an explicit clock and prunes against it, so a
+        # stalled production history is empty by the time it gets here. A direct
+        # call with fixture/synthetic timestamps belongs to a different clock
+        # domain: anchor that window to its newest sample instead of the wall clock.
+        newest_raw = max(
+            (points[-1][0] for points in self._history.values.values() if points), default=None
+        )
+        if newest_raw is None:
+            self._cpu_scale = None
+            self._load_scale = None
+            cpu_chart.reset("Waiting for samples")
+            load_chart.reset("Waiting for samples")
+            return
+        t_end = clock
+        if now is None and clock - newest_raw > WINDOW_SECONDS:
+            t_end = newest_raw
+        self._history.prune(t_end)
+        cpu = self._history.window("cpu", t_end=t_end)
         loads = {
-            "1m": tuple(self._history.values["load"]),
-            "5m": tuple(self._history.values["load5"]),
-            "15m": tuple(self._history.values["load15"]),
+            "1m": self._history.window("load", t_end=t_end),
+            "5m": self._history.window("load5", t_end=t_end),
+            "15m": self._history.window("load15", t_end=t_end),
         }
         newest = max((points[-1][0] for points in (cpu, *loads.values()) if points), default=None)
-        cpu_chart = self.query_one("#cpu-box", CPUCard).chart
-        load_chart = self.query_one("#load-box", LoadCard).chart
         if newest is None:
+            self._cpu_scale = None
+            self._load_scale = None
             cpu_chart.reset("Waiting for samples")
             load_chart.reset("Waiting for samples")
             return
@@ -60,12 +97,12 @@ class OverviewMixin:
             "—" if cpu_now is None else f"{cpu_now:.1f}%",
             style=f"bold {cpu_colour(cpu_now, palette)}",
         )
-        cpu_peak = max((value for _, value in cpu), default=None)
-        self._cpu_scale = stable_top(cpu_peak, self._cpu_scale, floor=CPU_MIN_SCALE)
+        # Strict scale: a peak that leaves the window stops pinning the axis at once.
+        self._cpu_scale = dynamic_top(cpu, t_end=t_end, floor=CPU_MIN_SCALE)
         cpu_header.append(f"   last 60 s · scale 0–{self._cpu_scale:g} %", style=palette.muted)
         cpu_chart.set_chart(
             series=(Series("cpu", cpu_colour(cpu_now, palette), cpu),),
-            t_end=newest,
+            t_end=t_end,
             scale_top=self._cpu_scale,
             header=cpu_header,
             max_gap=max_gap,
@@ -73,9 +110,7 @@ class OverviewMixin:
         )
 
         one_minute = loads["1m"]
-        self._load_scale = stable_top(
-            max((value for _, value in one_minute), default=None), self._load_scale
-        )
+        self._load_scale = dynamic_top(one_minute, t_end=t_end)
         load_header = Text()
         load_header.append("Load ", style=f"bold {palette.foreground}")
         for label, points in loads.items():
@@ -91,7 +126,7 @@ class OverviewMixin:
         load_header.append(f"last 60 s · scale 0–{self._load_scale:g}", style=palette.muted)
         load_chart.set_chart(
             series=tuple(series),
-            t_end=newest,
+            t_end=t_end,
             scale_top=self._load_scale,
             header=load_header,
             max_gap=max_gap,
@@ -112,6 +147,9 @@ class OverviewMixin:
         }
         for widget_id, text in values.items():
             self._put(widget_id, text, setter=component_setters.get(widget_id))
+        # One collection-status indicator per card, in the card header.
+        for card_id, status in card_statuses(snapshot, self._overview_schedule.interval).items():
+            self.query_one(f"#{card_id}", DashboardCard).set_status(status)
         self._render_charts()
         devices, detail = nic_details(snapshot, self._nic_selected)
         names = tuple(item.name for item in devices)

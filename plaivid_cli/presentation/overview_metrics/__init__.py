@@ -1,7 +1,7 @@
 """Pure Overview telemetry text presenters, independent of Textual widgets."""
 
 from .commands import commands_body
-from .common import bar, finish, number, pct_of, row, size
+from .common import bar, body, finish, number, pct_of, row, size
 from .cpu import cpu_body
 from .memory import memory_body
 from .network import network_body
@@ -14,6 +14,7 @@ from .temperature import temperature_body
 
 __all__ = [
     "bar",
+    "body",
     "commands_body",
     "cpu_body",
     "finish",

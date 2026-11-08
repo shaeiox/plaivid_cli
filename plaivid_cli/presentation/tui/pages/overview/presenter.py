@@ -13,8 +13,8 @@ from plaivid_cli.domain.overview import LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.overview_metrics import (
     bar,
+    body,
     cpu_body,
-    finish,
     memory_body,
     pct_of,
     row,
@@ -96,17 +96,20 @@ def cards(
     elif process_section is not None and process_section.status is CollectionStatus.STALE:
         running = history.last_verified_running
     memory_pct = pct_of(host.memory_used, host.memory_total)
-    host_status = _label(host_section, interval)
+    # Measurement boxes contain measurements only. The one status indicator per
+    # card lives in its header (see card_statuses / DashboardCard.set_status).
     groups = {
-        "running-card": f"Running VMs  {running if running is not None else 'N/A'}\n{_label(process_section, max(18, interval))}",
-        "cpu-card": finish(
+        "running-card": (
+            f"Running VMs  {running if running is not None else 'N/A'}\n"
+            "from verified pvm-running-vms rows"
+        ),
+        "cpu-card": body(
             [
                 row("Usage", f"{_pct(host.cpu_percent)}  {bar(host.cpu_percent)}"),
                 *cpu_body(metrics),
-            ],
-            host_status,
+            ]
         ),
-        "memory-card": finish(
+        "memory-card": body(
             [
                 row(
                     "RAM",
@@ -114,22 +117,18 @@ def cards(
                 ),
                 bar(memory_pct),
                 *memory_body(metrics),
-            ],
-            host_status,
+            ]
         ),
-        "load-card": finish(
+        "load-card": body(
             [
                 row(
                     "Load avg",
                     f"{_load(host.load1)} · {_load(host.load5)} · {_load(host.load15)}  (1m · 5m · 15m)",
                 ),
                 *tasks_body(metrics),
-            ],
-            host_status,
+            ]
         ),
-        "metrics-system": finish(
-            system_body(metrics), _section_label(snapshot, "host_metrics", interval)
-        ),
+        "metrics-system": body(system_body(metrics)),
     }
     groups["host-identity"] = redact_text(
         f"LOCAL  {host.hostname or 'N/A'}\n"
@@ -137,6 +136,29 @@ def cards(
         f"Server uptime  {_uptime(host.uptime_seconds)}"
     )
     return {key: redact_text(value) for key, value in groups.items()}
+
+
+def card_statuses(snapshot: ApplicationSnapshot, interval: float) -> dict[str, str]:
+    """One collection-state label per card, centralised in the card header.
+
+    Keyed by the card container id. Child metric widgets never repeat the labels,
+    so a single ``ONLINE``/``WARNING``/``OFFLINE`` reading describes the whole card.
+    """
+    local = _label(snapshot.section("local_host"), interval)
+    metrics = _section_label(snapshot, "host_metrics", interval)
+    status = {
+        "cpu-box": local,
+        "memory-box": local,
+        "load-box": local,
+        "system-card": metrics,
+        "host-status-box": _label(snapshot.section("host_status"), 2),
+        "network-box": _label(snapshot.section("physical_nics"), float("inf")),
+        "storage-box": metrics,
+        "sessions-box": metrics,
+        "temperature-box": metrics,
+        "processes-card": _label(snapshot.section("processes"), max(18, interval)),
+    }
+    return {key: redact_text(value) for key, value in status.items()}
 
 
 def _load(value: float | None) -> str:

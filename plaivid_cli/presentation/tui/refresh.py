@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
+
 from textual import on, work
+from textual.css.query import NoMatches
 from textual.widgets import (
     Button,
     Input,
@@ -65,12 +68,34 @@ class RefreshMixin:
         )
 
     def _tick(self) -> None:
-        self._set_width_class()
+        # During teardown a pending timer may fire after the shell is removed.
+        try:
+            self._set_width_class()
+        except NoMatches:
+            return
         if self.session is None:
             return
+        # The 60-second graph window is anchored to wall-clock time. Prune on
+        # every tick and redraw at most once a second (or immediately when the
+        # window actually dropped a peak), so old peaks leave the visible window
+        # and the Y scale shrinks even when collection stalls.
+        now = time.monotonic()
+        dropped = self._history.prune(now)
+        try:
+            overview_active = self.query_one("#tabs", TabbedContent).active == "overview"
+        except NoMatches:
+            return
+        if overview_active and (
+            dropped or (not self._refresh_busy and now >= self._chart_tick_due)
+        ):
+            self._chart_tick_due = now + 1.0
+            # A timer tick can land while the page is being torn down; only draw
+            # when both chart widgets are actually mounted.
+            if self.query("#cpu-chart") and self.query("#load-chart"):
+                self._render_charts(now=now)
         if self._refresh_busy:
             return
-        if self.query_one("#tabs", TabbedContent).active == "overview":
+        if overview_active:
             sections = self._overview_schedule.due()
             if sections:
                 self._start_refresh(sections)
@@ -79,8 +104,6 @@ class RefreshMixin:
             if background:
                 self._start_refresh(background)
                 return
-            import time
-
             now = time.monotonic()
             if now >= self._fleet_due:
                 section = (

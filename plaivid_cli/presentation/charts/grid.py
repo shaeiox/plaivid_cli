@@ -43,7 +43,11 @@ def _line_dots(points: Sequence[tuple[float, float]], dw: int, dh: int) -> set[t
 def _series_dots(
     series: Series, t0: float, dw: int, dh: int, scale: float, max_gap: float
 ) -> set[tuple[int, int]]:
-    """Map samples to dots. A time gap longer than ``max_gap`` breaks the line."""
+    """Map samples to one dot per step; a gap longer than ``max_gap`` breaks the line.
+
+    No artificial two-dot thickening: Braille keeps its full 2x4 sub-cell
+    resolution and curves stay one dot thick, sharp and high-resolution.
+    """
     runs: list[list[tuple[float, float]]] = [[]]
     previous: float | None = None
     for stamp, value in series.points:
@@ -59,8 +63,6 @@ def _series_dots(
     for run in runs:
         if run:
             dots |= _line_dots(run, dw, dh)
-    # Two dots thick, so a line reads as a line rather than a dotted trail.
-    dots |= {(x, y + 1) for x, y in dots}
     return {(x, y) for x, y in dots if 0 <= x < dw and 0 <= y < dh}
 
 
@@ -90,13 +92,28 @@ def bucketed(
 
 
 def _axis_row(width: int) -> Text:
-    cells = [" "] * width
+    """A smooth Unicode time-axis divider that connects the three time labels.
+
+    ``─`` draws the continuous baseline; ``┴`` marks the -30s/now ticks (and the
+    end of the -60s label). Dotted dividers made the axis read as part of the data
+    layer, so the line is drawn as one uninterrupted rule instead.
+    """
+    cells = ["─"] * width
     labels = [(0, "-60s")]
     if width >= 30:
         labels.append((width // 2 - 2, "-30s"))
     labels.append((width - 3, "now"))
-    for start, label in labels:
+    occupied: set[int] = set()
+    for index, (start, label) in enumerate(labels):
+        if index and 0 <= start - 1 < width:
+            cells[start - 1] = "┴"
+            occupied.add(start - 1)
         for offset, char in enumerate(label):
             if 0 <= start + offset < width:
                 cells[start + offset] = char
+                occupied.add(start + offset)
+    # A tick immediately after the -60s label closes the first segment.
+    tick = len("-60s")
+    if 0 <= tick < width and tick not in occupied:
+        cells[tick] = "┴"
     return Text("".join(cells), no_wrap=True, overflow="crop")

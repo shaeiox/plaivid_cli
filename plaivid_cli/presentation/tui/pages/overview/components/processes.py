@@ -5,7 +5,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Static
 
-from plaivid_cli.presentation.theme import Palette, group_title
+from plaivid_cli.presentation.theme import Palette
 from plaivid_cli.presentation.tui.components import DashboardCard
 
 
@@ -29,4 +29,5 @@ class ProcessesCard(DashboardCard):
         self.query_one("#metrics-commands", Static).update(value)
 
     def set_title(self, title: str) -> None:
-        self.border_title = group_title("compute", title, self._palette)
+        # Keep the centralised header status when the process total changes.
+        super().set_title(title)

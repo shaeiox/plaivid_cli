@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from plaivid_cli.domain.models import ApplicationSnapshot, CollectionStatus, SectionSnapshot
@@ -130,8 +131,33 @@ class OverviewSchedule:
 HISTORY_WINDOW_SECONDS = 60.0
 
 
+def window_points(
+    points: Iterable[tuple[float, float]],
+    t_end: float,
+    window: float = HISTORY_WINDOW_SECONDS,
+) -> tuple[tuple[float, float], ...]:
+    """Samples still visible in the rolling window ``[t_end - window, t_end]``.
+
+    ``t_end`` is the current wall/monotonic clock, **not** the timestamp of the
+    newest sample: during a collection stall the window keeps advancing, so old
+    peaks leave it on time instead of pinning the chart scale forever.
+    """
+    t0 = t_end - window
+    return tuple(
+        (stamp, value)
+        for stamp, value in points
+        if math.isfinite(stamp) and math.isfinite(value) and t0 <= stamp <= t_end
+    )
+
+
 class OverviewHistory:
-    """Timestamped local samples for the Overview graphs. Missing samples are never stored as zero."""
+    """Timestamped local samples for the Overview graphs. Missing samples are never stored as zero.
+
+    The 60-second window is anchored to the *clock*, not to the last sample: ``prune``
+    can be called on every UI tick so the visible history shrinks even when collection
+    stalls. ``add`` keeps its original behaviour when no explicit clock is supplied,
+    which lets callers feed synthetic/fixture timestamps in tests.
+    """
 
     def __init__(self, limit: int = 1024) -> None:
         self.values: dict[str, deque[tuple[float, float]]] = {
@@ -140,7 +166,41 @@ class OverviewHistory:
         self._last_generation: int | None = None
         self.last_verified_running: int | None = None
 
-    def add(self, snapshot: ApplicationSnapshot) -> None:
+    def prune(self, now: float | None = None) -> int:
+        """Drop samples older than ``now - HISTORY_WINDOW_SECONDS`` from every series.
+
+        ``now`` uses the same monotonic clock as ``SectionSnapshot.succeeded_monotonic``.
+        Returns the number of dropped points so callers can tell that the window moved.
+        """
+        clock = time.monotonic() if now is None else now
+        cutoff = clock - HISTORY_WINDOW_SECONDS
+        dropped = 0
+        for series in self.values.values():
+            while series and series[0][0] < cutoff:
+                series.popleft()
+                dropped += 1
+        return dropped
+
+    def window(
+        self, name: str, *, now: float | None = None, t_end: float | None = None
+    ) -> tuple[tuple[float, float], ...]:
+        """Visible points for one series at the current wall-clock window end."""
+        end = t_end if t_end is not None else (time.monotonic() if now is None else now)
+        return window_points(self.values[name], end)
+
+    def peak(
+        self, name: str, *, now: float | None = None, t_end: float | None = None
+    ) -> float | None:
+        """Highest *active* value in the visible window, or None when there is none."""
+        return max((value for _, value in self.window(name, now=now, t_end=t_end)), default=None)
+
+    def add(self, snapshot: ApplicationSnapshot, *, now: float | None = None) -> None:
+        """Append one validated sample and prune against the supplied wall clock.
+
+        With ``now=None`` the newest sample's timestamp is used as the clock (the
+        legacy, sample-relative behaviour). Pass ``now=time.monotonic()`` to enforce
+        wall-clock pruning even when a sample arrives late or collection stalls.
+        """
         section = snapshot.section("local_host")
         if section is None or section.generation == self._last_generation or section.status is not CollectionStatus.CURRENT:
             return
@@ -158,12 +218,13 @@ class OverviewHistory:
             "load15": sample.load15,
         }
         stamp = section.succeeded_monotonic
+        clock = stamp if now is None else now
+        self.prune(clock)
         for key, value in metrics.items():
             if value is not None and math.isfinite(value):
-                series = self.values[key]
-                series.append((stamp, value))
-                while series and series[0][0] < stamp - HISTORY_WINDOW_SECONDS:
-                    series.popleft()
+                self.values[key].append((stamp, value))
+        # A late/stalled sample that is itself outside the window must not be kept.
+        self.prune(clock)
 
 
 def sparkline(values: deque[tuple[float, float]], width: int = 32) -> str:

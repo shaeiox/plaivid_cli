@@ -175,6 +175,12 @@ def test_resize_and_repeated_navigation_do_not_duplicate_pending_collection(tmp_
             await pilot.pause(.2)
             # The host read has its own 2s timer, so one timer read may follow the gated one.
             assert provider.host_calls <= 2
+            # The threaded collector reports completion through call_from_thread;
+            # wait for that callback instead of racing a single timer interval.
+            for _ in range(10):
+                if not tui._refresh_busy:
+                    break
+                await pilot.pause(.05)
             assert tui._refresh_busy is False
 
     try:

@@ -17,15 +17,41 @@ class DashboardCard(Vertical):
         super().__init__(id=id, classes="card")
         self._group = group
         self._title = title
+        self._status = ""
         self.use_palette(palette)
 
     def use_palette(self, palette: Palette) -> None:
         """Set the presentation palette supplied by the page composition root."""
         self._palette = palette
-        self.border_title = group_title(self._group, self._title, palette)
+        self._apply_header()
         colour = group_color(self._group, palette)
         if colour is not None:
             self.styles.border = ("round", colour)
+
+    def set_status(self, status: str) -> None:
+        """Keep the card's one collection-status indicator in its header.
+
+        Child metric widgets show measurements only; repeating ``ONLINE`` at the
+        bottom of each of them made the same state look like several readings.
+        """
+        if status == self._status:
+            return
+        self._status = status
+        self._apply_header()
+
+    def set_title(self, title: str) -> None:
+        """Replace the card title while preserving its centralised status label."""
+        self._title = title
+        self._apply_header()
+
+    def _apply_header(self) -> None:
+        palette = getattr(self, "_palette", None)
+        if palette is None:
+            return
+        title = group_title(self._group, self._title, palette)
+        if self._status:
+            title.append(f"  ·  {self._status}", style=palette.muted)
+        self.border_title = title
 
 
 class TextDashboardCard(DashboardCard):

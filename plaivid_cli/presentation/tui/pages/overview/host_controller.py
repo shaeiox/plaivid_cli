@@ -18,7 +18,6 @@ from plaivid_cli.presentation.tui.pages.overview.components import (
     TemperatureCard,
 )
 
-from ...components.status import section_status as _section_status
 from .components.host_status import _host_banner_text, _host_status_text, _quorum_verdict
 
 
@@ -54,13 +53,14 @@ class HostPageMixin:
     def _render_metric_panels(
         self, metrics: HostMetrics | None, section: SectionSnapshot[object] | None
     ) -> None:
-        status = _section_status(section)
+        # Collection state is shown once, in the card header. Child metric panels
+        # carry measurements only (no trailing/duplicate status line).
         texts = {
-            "metrics-network": hm.finish(hm.network_body(metrics), status),
-            "metrics-storage": hm.finish(hm.storage_body(metrics), status),
-            "metrics-temperature": hm.finish(hm.temperature_body(metrics), status),
-            "metrics-sessions": hm.finish(hm.sessions_body(metrics), status),
-            "metrics-processes": hm.finish(hm.processes_body(metrics), status),
+            "metrics-network": hm.body(hm.network_body(metrics)),
+            "metrics-storage": hm.body(hm.storage_body(metrics)),
+            "metrics-temperature": hm.body(hm.temperature_body(metrics)),
+            "metrics-sessions": hm.body(hm.sessions_body(metrics)),
+            "metrics-processes": hm.body(hm.processes_body(metrics)),
             "metrics-commands": redact_text("\n".join(hm.commands_body(metrics))),
         }
         self.query_one("#network-box", NetworkCard).set_metrics(texts["metrics-network"])
