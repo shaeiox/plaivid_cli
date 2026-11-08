@@ -1,0 +1,75 @@
+flowchart LR
+    BOOT["bootstrap.py (only universal wiring point)"]
+    subgraph P["Presentation"]
+        CLI["presentation/cli"]
+        TUI["presentation/tui"]
+        COMP["presentation/tui/components"]
+        FMT["presentation/overview_metrics"]
+        GFX["presentation/charts"]
+        THEME["presentation/theme.py"]
+    end
+    subgraph A["Application"]
+        SVC["application/services.py"]
+        COLL["application/collection"]
+        OPS["application/operations"]
+        PORTS["application/ports.py"]
+        SESS["application/session.py"]
+        OVW["application/overview.py"]
+    end
+    subgraph D["Domain"]
+        MODELS["domain/models/__init__.py (32 exports)"]
+        PURE["domain pure logic"]
+    end
+    subgraph I["Infrastructure"]
+        ADAPTER["pvm/adapter/local.py"]
+        PARSERS["pvm/parsers"]
+        PROCESS["process.py"]
+        AUDIT["audit.py"]
+        MONITOR["local_monitor.py"]
+    end
+    LEGACY["plaivid_cli/legacy (isolated, not shipped)"]
+
+    BOOT --> CLI
+    BOOT --> SVC
+    BOOT --> COLL
+    BOOT --> OPS
+    BOOT --> SESS
+    BOOT --> ADAPTER
+    BOOT --> AUDIT
+    BOOT --> PROCESS
+    CLI --> SVC
+    CLI --> OPS
+    CLI --> SESS
+    CLI --> MODELS
+    TUI --> SVC
+    TUI --> OPS
+    TUI --> OVW
+    TUI --> COMP
+    TUI --> FMT
+    TUI --> GFX
+    TUI --> THEME
+    COMP --> THEME
+    FMT --> MODELS
+    GFX --> OVW
+    GFX --> THEME
+    SVC --> COLL
+    SVC --> MODELS
+    OPS --> COLL
+    OPS --> PURE
+    COLL --> PORTS
+    COLL --> MODELS
+    OVW --> MODELS
+    SESS --> PORTS
+    PORTS -. "structural Protocol implementation" .-> ADAPTER
+    PORTS -. "structural Protocol implementation" .-> AUDIT
+    ADAPTER --> PARSERS
+    ADAPTER --> PROCESS
+    ADAPTER --> MONITOR
+    ADAPTER --> MODELS
+    PARSERS --> MODELS
+    AUDIT --> MODELS
+    MONITOR --> MODELS
+    LEGACY -. "no active imports" .- BOOT
+
+    classDef retired fill:#eeeeee,stroke:#999,stroke-dasharray: 4 3,color:#555
+    class LEGACY retired

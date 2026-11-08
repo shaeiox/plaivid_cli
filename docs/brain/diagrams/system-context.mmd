@@ -1,0 +1,31 @@
+flowchart LR
+    Operator["Operator (local Linux TTY or shell)"]
+    subgraph App["plaivid_cli (single local process)"]
+        CLI["One-shot CLI"]
+        TUI["Textual dashboard"]
+        Core["Application + domain layers"]
+        Adapter["Local PVM / OS adapters"]
+    end
+    Sbell["sbell executable (default sudo sbell)"]
+    Helper["pvm-running-vms helper"]
+    Proc["Linux /proc, sysfs, systemctl sballd"]
+    AuditDB["PVM-owned SQLite messages.db (read-only)"]
+    Terminal["Terminal / color system"]
+
+    Operator -->|"argv, one-shot commands"| CLI
+    Operator -->|"keys, tabs, login"| TUI
+    TUI -->|"Rich / Textual rendering"| Terminal
+    CLI --> Core
+    TUI --> Core
+    Core --> Adapter
+    Adapter -->|"bounded argv, XML params, token"| Sbell
+    Adapter -->|"bounded argv, numbered text rows"| Helper
+    Adapter -->|"read-only local sampling"| Proc
+    Core -->|"sqlite mode=ro, bounded rows"| AuditDB
+    Sbell -.->|"XML status/description envelope"| Adapter
+    Helper -.->|"process observations"| Adapter
+    AuditDB -.->|"Log rows"| Core
+    Terminal -.->|"display"| Operator
+
+    classDef external fill:#f5f5f5,stroke:#666,color:#222
+    class Operator,Sbell,Helper,Proc,AuditDB,Terminal external

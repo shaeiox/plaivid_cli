@@ -1,0 +1,79 @@
+flowchart TB
+    subgraph Root["Composition root"]
+        BOOT["bootstrap.py — main / build_runtime / Runtime"]
+        CFG["config.py — load_settings / Settings"]
+    end
+
+    subgraph Presentation["presentation/"]
+        CLI["cli/ — parser, dispatch, reads, operations, serialization"]
+        APP["tui/app.py — PlaividTui (8 mixins)"]
+        LAYOUT["tui/layout.py — shell + 3 tabs"]
+        PAGES["tui/pages/ — overview, virtual_machines, virtual_desktops"]
+        WIDGETS["tui/components/ — cards, tables, toolbar"]
+        FORMAT["overview_metrics/ — pure text formatters"]
+        CHARTS["charts/ — grid, render, ChartView"]
+        THEME["theme.py / styles.py / logo.py"]
+    end
+
+    subgraph Application["application/"]
+        PORTS["ports.py — PvmGateway, MonitoringGateway, AuditGateway"]
+        SERVICES["services.py — PlaividApplication"]
+        COLLECTION["collection/ — coordinator, reader, publisher, freshness, sections"]
+        OPERATIONS["operations/ — coordinator, planner, desktop_executor, results"]
+        SESSION["session.py — SessionManager / SessionStore"]
+        OVERVIEW["overview.py — schedule, history, health"]
+    end
+
+    subgraph Domain["domain/"]
+        MODELS["models/ — frozen dataclasses + StrEnums"]
+        LOGIC["inventory.py, policies.py, redaction.py, errors.py, overview.py, desktops.py"]
+    end
+
+    subgraph Infrastructure["infrastructure/"]
+        PROCESS["process.py — ProcessRunner"]
+        SBELL["pvm/sbell.py — SbellClient"]
+        ADAPTER["pvm/adapter/ — LocalPvmAdapter + requests.py"]
+        PARSERS["pvm/parsers/ + overview.py, desktops.py, uptime.py"]
+        LOCAL["local_monitor.py — LinuxMonitor"]
+        AUDIT["audit.py — ReadOnlyAuditAdapter"]
+        DIAG["diagnostics.py — redacting logging"]
+    end
+
+    BOOT --> CFG
+    BOOT --> CLI
+    BOOT --> SERVICES
+    BOOT --> COLLECTION
+    BOOT --> OPERATIONS
+    BOOT --> SESSION
+    BOOT --> ADAPTER
+    BOOT --> AUDIT
+    BOOT --> PROCESS
+    CLI --> SERVICES
+    CLI --> MODELS
+    APP --> LAYOUT
+    LAYOUT --> PAGES
+    PAGES --> WIDGETS
+    PAGES --> FORMAT
+    PAGES --> CHARTS
+    WIDGETS --> THEME
+    CHARTS --> OVERVIEW
+    APP --> SESSION
+    APP --> COLLECTION
+    APP --> OPERATIONS
+    SERVICES --> COLLECTION
+    OPERATIONS --> COLLECTION
+    COLLECTION --> PORTS
+    SERVICES --> PORTS
+    COLLECTION --> LOGIC
+    OPERATIONS --> LOGIC
+    PORTS -. "implemented by" .-> ADAPTER
+    PORTS -. "implemented by" .-> AUDIT
+    ADAPTER --> SBELL
+    ADAPTER --> PARSERS
+    ADAPTER --> LOCAL
+    SBELL --> PROCESS
+    ADAPTER --> PROCESS
+    AUDIT --> MODELS
+    PARSERS --> MODELS
+    LOCAL --> MODELS
+    MODELS --- LOGIC
