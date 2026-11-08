@@ -32,12 +32,16 @@ class VMOperationMixin:
         if section is None or inventory is None:
             self._show_error("No inventory available. Refresh before operating a VM.")
             return
-        if self.query_one("#select-all", Checkbox).value:
+        self._vm_checked.intersection_update(self._records)
+        checked = tuple(sorted(self._vm_checked))
+        if checked:
+            selectors = checked
+        elif self.query_one("#select-all", Checkbox).value:
             selectors = ("all",)
         elif self._selected_uuid in self._table_order:
             selectors = (self._selected_uuid,)
         else:
-            self._show_error("Select a VM row first.")
+            self._show_error("Select one or more VMs first.")
             return
         try:
             selection = self.application.resolve_targets(inventory, selectors)

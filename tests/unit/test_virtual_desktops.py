@@ -201,7 +201,7 @@ def test_desktop_operation_selected_and_bulk_fail_closed(tmp_path) -> None:
         plan = operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=False)
         with pytest.raises(AppError, match="bulk Desktop actions need"):
             operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
-        with pytest.raises(AppError, match="full unfiltered"):
+        with pytest.raises(AppError, match="bulk Desktop actions need"):
             operations.create_desktop_plan(Action.START, (items[0],), section, is_bulk=True)
         result = operations.execute_desktop("fake", Action.START, (items[0],), section,
                                             is_bulk=False, plan=plan)
@@ -282,8 +282,8 @@ def test_desktop_rejects_partial_stale_and_changed_target_set(tmp_path) -> None:
             operations.create_desktop_plan(Action.STOP, items, partial, is_bulk=True)
         provider.list_desktops = lambda token: SourceResult(items, CollectionStatus.CURRENT, "desktops")
         current = collection.collect_once("fake", sections=("desktops",)).section("desktops")
-        with pytest.raises(AppError, match="full unfiltered"):
-            operations.create_desktop_plan(Action.STOP, (items[1],), current, is_bulk=True)
+        subset = operations.create_desktop_plan(Action.STOP, (items[1],), current, is_bulk=True)
+        assert subset.target_uuids == (UUID_B,)
         plan = operations.create_desktop_plan(Action.STOP, items, current, is_bulk=True)
         collection.collect_once("fake", sections=("desktops",))
         with pytest.raises(AppError, match="current Desktop inventory"):

@@ -131,7 +131,7 @@ class OperationPlanner:
         *,
         is_bulk: bool,
     ) -> OperationPlan:
-        """Desktop-only admission; never substitute a VMRecord or VM inventory."""
+        """Admit an exact Desktop target set, including checked bulk subsets."""
         settings = self._settings()
         ids = tuple(item.uuid for item in targets)
         if not ids or len(set(ids)) != len(ids) or (len(ids) > 1 and not is_bulk):
@@ -151,10 +151,8 @@ class OperationPlanner:
             current.get(item.uuid) != item for item in targets
         ):
             raise AppError(ErrorKind.POLICY, "Desktop targets do not match the current listing")
-        if is_bulk and tuple(sorted(current)) != ids:
-            raise AppError(
-                ErrorKind.POLICY, "all-target plan must include the full unfiltered Desktop listing"
-            )
+        # Bulk describes multi-target admission, not necessarily an all-inventory scope.
+        # Exact record membership above keeps checked subsets bound to the current listing.
         age = settings.max_inventory_age_seconds
         if age is None:
             if is_bulk:

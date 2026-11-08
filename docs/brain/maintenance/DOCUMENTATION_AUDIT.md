@@ -52,6 +52,7 @@ a separate documentation check (see [`../workflows/TESTING.md`](../workflows/TES
 |---|---|---|
 | 2026-11-08 | `python scripts/validate_brain.py` | **PASS** — exit 0. |
 | 2026-11-08 | `python scripts/validate_brain.py --dependency-stats` | **PASS** — exit 0; 157 package modules (128 active / 29 legacy), 388 deduplicated edges, 0 active→legacy edges, 7 legacy→active, 54 legacy internal, 1 multi-node SCC (the charts type-only cycle). |
+| 2026-11-08 | `python scripts/validate_brain.py` | **PASS** — post-change audit for checked-row action priority and Desktop bulk subsets. |
 
 Final validator result (2026-11-08): **all 11 check groups report OK, exit code 0** —
 required tree, Markdown links, referenced paths (including unique-path count), evidence

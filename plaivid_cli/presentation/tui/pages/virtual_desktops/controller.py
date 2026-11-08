@@ -165,20 +165,31 @@ class DesktopMixin:
             self._desktop_message("Sign in and wait for the current operation to finish.")
             return
         section = self._desktop_section
+        self._desktop_checked.intersection_update(self._desktops)
+        checked = tuple(sorted(self._desktop_checked))
         all_targets = self.query_one("#desktop-all", Checkbox).value
-        if all_targets:
+        if checked:
+            targets = tuple(self._desktops[uuid] for uuid in checked)
+            is_bulk = len(targets) > 1
+        elif all_targets:
             targets = tuple(self._desktops[uuid] for uuid in sorted(self._desktops))
+            is_bulk = True
         elif self._desktop_selected in self._desktop_rows:
             selected = self._desktops.get(self._desktop_selected or "")
             targets = (selected,) if selected else ()
+            is_bulk = False
         else:
             targets = ()
+            is_bulk = False
         if section is None:
             self._desktop_message("Refresh the Desktop inventory before choosing an action.")
             return
+        if not targets:
+            self._desktop_message("Select one or more Desktops first.")
+            return
         try:
             plan = self.operations.create_desktop_plan(
-                action, targets, section, is_bulk=all_targets
+                action, targets, section, is_bulk=is_bulk
             )
         except AppError as exc:
             self._desktop_message(str(exc))

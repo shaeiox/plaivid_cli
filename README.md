@@ -58,10 +58,13 @@ The remaining lifecycle commands are `kill`, `reset`, `pause`, and `resume`. Tar
 
 The **Virtual Desktops** TUI tab mirrors the VM page's summary, Refresh,
 action dropdown, all-target checkbox and Audit layout. Both inventory tabs have
-local name search: it does not trigger a PVM read, and selection follows visible
-UUID rows. Apply to all always targets the complete unfiltered inventory, not just
-search matches. The VM scope line shows both the target count and visible count. Choosing one of six Desktop actions submits the selected UUID or the full
-unfiltered Desktop set immediately, without another confirmation. The commands use
+local name search: it does not trigger a PVM read, and row checkbox selection is
+retained by UUID. At action time, valid checked rows take priority over both Apply
+to all and the highlighted row. With no checked rows, Apply to all targets the
+complete unfiltered inventory rather than search matches; otherwise the highlighted
+row is the fallback. The VM scope line shows both the target count and visible count.
+Choosing one of six Desktop actions submits that resolved target set immediately,
+without another confirmation. The commands use
 the documented `sbell vm/<action>` forms; successful applicability to Lite
 Desktops is **not yet established by a captured response**. Treat them as
 operator-authorized attempts, not verified production behavior. All-target

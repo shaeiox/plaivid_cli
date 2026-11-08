@@ -134,7 +134,8 @@ Section → provider source labels (from `SectionReader.collect`): `objects`/`de
   define a second `App`. Event handlers are re-declared on `PlaividTui` with `@on(...)` because
   Textual discovers decorated handlers on the concrete class. Widget ids (`#tabs`, `#fleet-table`,
   `#cpu-chart`, `#load-chart`, `#audit-panel`, …) are a de-facto contract used by controllers,
-  CSS, and tests.
+  CSS, and tests. VM and Desktop lifecycle actions resolve valid checked UUIDs first, then an
+  enabled all-inventory scope, then the highlighted row; stale checked UUIDs are discarded.
 - **Charts:** `ChartView` accepts `id`, `mode`, `palette`, `y_labels` and arbitrary extra
   composition keywords; it forwards only real `Static.__init__` parameters and ignores unknown
   hints. `render_chart` returns Rich `Text` with exactly `height` rows; grid dots are a separate
