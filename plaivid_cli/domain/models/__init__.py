@@ -25,6 +25,14 @@ from .operations import (
 )
 from .session import PvmSession
 from .snapshots import ApplicationSnapshot, SectionSnapshot, SourceResult
+from .tasks import (
+    TargetRef,
+    TaskEvent,
+    TaskKey,
+    TaskRecord,
+    TaskStatus,
+    task_status_for,
+)
 
 __all__ = [
     "Action",
@@ -54,9 +62,15 @@ __all__ = [
     "SourceResult",
     "StoragePartition",
     "TargetOutcome",
+    "TargetRef",
+    "TaskEvent",
+    "TaskKey",
+    "TaskRecord",
+    "TaskStatus",
     "TemperatureReading",
     "UserSession",
     "VMDetail",
     "VMRecord",
     "canonical_uuid",
+    "task_status_for",
 ]

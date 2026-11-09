@@ -198,7 +198,10 @@ def test_logout_clears_old_vm_and_monitoring_values_before_next_login(tmp_path):
 
     async def exercise():
         async with tui.run_test() as pilot:
-            await pilot.pause(.2)
+            for _ in range(300):
+                if tui._inventory is not None:
+                    break
+                await pilot.pause(0.01)
             assert tui._inventory is not None
             assert "node-a" in str(tui.query_one("#host-identity").render())
             tui._session_ended("Signed out")
@@ -208,7 +211,10 @@ def test_logout_clears_old_vm_and_monitoring_values_before_next_login(tmp_path):
             tui._session_ready(PvmSession("second", "second-synthetic-token"))
             assert tui._inventory is None  # old session cannot authorize a VM action
             assert "node-a" not in str(tui.query_one("#host-identity").render())
-            await pilot.pause(.2)
+            for _ in range(300):
+                if tui._inventory is not None:
+                    break
+                await pilot.pause(0.01)
             assert tui._inventory is not None
             assert tui.query_one("#tabs", TabbedContent).active == "overview"
 

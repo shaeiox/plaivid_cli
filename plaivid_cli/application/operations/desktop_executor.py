@@ -36,7 +36,19 @@ class PlanFactory(Protocol):
     ) -> OperationPlan: ...
 
 
-DispatchOne = Callable[[str, Action, VirtualDesktop], TargetOutcome]
+DispatchOne = Callable[..., TargetOutcome]
+
+#: Per-target progress callback, identical to the VM path: ``(uuid, state)``.
+ProgressSink = Callable[[str, OperationState], None]
+
+
+def _report(sink: ProgressSink | None, target_uuid: str, state: OperationState) -> None:
+    if sink is None:
+        return
+    try:
+        sink(target_uuid, state)
+    except Exception:
+        pass
 
 
 class DesktopOperationExecutor:
@@ -65,6 +77,7 @@ class DesktopOperationExecutor:
         *,
         is_bulk: bool,
         plan: OperationPlan,
+        on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         if self._closing.is_set():
             raise AppError(ErrorKind.POLICY, "operation coordinator is shutting down")
@@ -105,8 +118,9 @@ class DesktopOperationExecutor:
                                 "not dispatched after earlier failure or unknown outcome",
                             )
                         )
+                        _report(on_progress, item.uuid, OperationState.NOT_STARTED)
                         continue
-                    outcome = self._dispatch_one(token, action, item)
+                    outcome = self._dispatch_one(token, action, item, on_progress=on_progress)
                     outcomes.append(outcome)
                     if outcome.state in {
                         OperationState.FAILED,

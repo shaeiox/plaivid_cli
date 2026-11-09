@@ -140,9 +140,17 @@ class SessionMixin:
         self._cpu_scale = None
         self._chart_tick_due = 0.0
 
+    def _reset_task_board(self, message: str) -> None:
+        """Clear the task board; a dead token must not leave live rows behind."""
+        try:
+            self.tasks.reset(message)
+        except Exception:
+            pass
+
     def _session_ended(self, message: str) -> None:
         self.session = None
         self._session_epoch += 1
+        self._reset_task_board(message)
         self._overview_schedule.reset()
         self._pending_manual_refresh = False
         self._clear_session_view()
@@ -158,6 +166,7 @@ class SessionMixin:
     def _session_ready(self, session: PvmSession) -> None:
         self.session = session
         self._session_epoch += 1
+        self._reset_task_board("session started")
         self._pending_manual_refresh = False
         self._clear_session_view()
         self.query_one("#tabs", TabbedContent).active = "overview"

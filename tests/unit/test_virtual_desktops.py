@@ -111,9 +111,20 @@ def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
 
     async def exercise():
         async with tui.run_test(size=(width, 30)) as pilot:
-            await pilot.pause(0.15)
+            # Switch tabs only once the initial overview collection has
+            # settled. Otherwise the Desktop demand raised by tab activation is
+            # dropped while the read lane is busy and is re-issued on a later
+            # tick, which would race this "one read, no polling" assertion.
+            for _ in range(300):
+                if tui._inventory is not None and not tui._refresh_busy:
+                    break
+                await pilot.pause(0.01)
             tui.query_one("#tabs", TabbedContent).active = "desktops"
-            await pilot.pause(0.25)
+            for _ in range(300):
+                if provider.desktop_calls:
+                    break
+                await pilot.pause(0.01)
+            await pilot.pause(0.2)
             assert provider.desktop_calls == 1
             from textual.containers import Horizontal, Vertical
             from textual.widgets import Button
@@ -353,7 +364,14 @@ def test_desktop_ui_all_targets_ignores_search_without_confirmation(tmp_path) ->
         async with tui.run_test(size=(80, 30)) as pilot:
             await pilot.pause(0.15)
             tui.query_one("#tabs", TabbedContent).active = "desktops"
-            await pilot.pause(0.2)
+            # Wait for the Desktop roster instead of a fixed pause: with nothing
+            # loaded there is no target to act on and the assertion below would
+            # fail for a timing reason rather than a behaviour one.
+            for _ in range(300):
+                if len(tui._desktops) == 2:
+                    break
+                await pilot.pause(0.01)
+            assert len(tui._desktops) == 2
             tui.query_one("#desktop-search", Input).value = "beta"
             tui.query_one("#desktop-all", Checkbox).value = True
             tui.query_one("#desktop-actions", Select).value = Action.START.value

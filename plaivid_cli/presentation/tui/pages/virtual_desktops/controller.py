@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid as uuidlib
+
 from textual import on, work
 from textual.widgets import (
     Button,
@@ -12,6 +14,7 @@ from textual.widgets import (
     Static,
 )
 
+from plaivid_cli.application.operations import Admission
 from plaivid_cli.domain.desktops import VirtualDesktop
 from plaivid_cli.domain.errors import AppError
 from plaivid_cli.domain.models import (
@@ -21,7 +24,9 @@ from plaivid_cli.domain.models import (
     OperationResult,
     SectionSnapshot,
 )
+from plaivid_cli.domain.models.tasks import TargetRef
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.tui.messages import OperationFinished
 
 
 class DesktopMixin:
@@ -161,8 +166,8 @@ class DesktopMixin:
             return
         action = Action(event.value)
         event.select.clear()
-        if self._operation_active or self.session is None:
-            self._desktop_message("Sign in and wait for the current operation to finish.")
+        if self.session is None:
+            self._desktop_message("Sign in before submitting an operation.")
             return
         section = self._desktop_section
         self._desktop_checked.intersection_update(self._desktops)
@@ -195,11 +200,15 @@ class DesktopMixin:
             self._desktop_message(str(exc))
             return
         # Selecting the action is the operator's intent; no extra confirmation.
-        self._operation_active = True
+        refs = tuple(TargetRef(item.uuid, item.name or "", "desktop") for item in targets)
+        operation_id = str(uuidlib.uuid4())
+        if self.tasks.admit(action, refs, operation_id) is not Admission.ADMITTED:
+            # The TaskManager listener already surfaced the refusal inline.
+            return
         self.query_one("#logout", Button).disabled = True
         self.query_one("#desktop-actions", Select).disabled = True
         self._desktop_message(f"{action.value.upper()} submitted for {len(targets)} Desktop(s)…")
-        self._execute_desktop(action, targets, section, plan, self._session_epoch)
+        self._execute_desktop(action, targets, section, plan, self._session_epoch, operation_id)
 
     def _desktop_message(self, message: str) -> None:
         self.query_one("#desktop-action-status", Static).update(redact_text(message))
@@ -212,43 +221,41 @@ class DesktopMixin:
         section: SectionSnapshot[object],
         plan: OperationPlan,
         epoch: int,
+        operation_id: str,
     ) -> None:
+        session = self.session
+        if session is None or epoch != self._session_epoch:
+            self.tasks.abandon(operation_id, "session ended before dispatch")
+            return
+        self.tasks.start(operation_id)
         try:
-            session = self.session
-            if session is None or epoch != self._session_epoch:
-                return
-            try:
-                result = self.operations.execute_desktop(
-                    session.token,
-                    action,
-                    targets,
-                    section,
-                    is_bulk=plan.is_bulk,
-                    plan=plan,
-                )
-            except AppError as exc:
-                self.call_from_thread(self._desktop_error_if_current, epoch, str(exc))
-            else:
-                self.call_from_thread(self._desktop_result_if_current, epoch, result)
-        finally:
-            try:
-                self.call_from_thread(self._desktop_operation_finished)
-            except RuntimeError:
-                pass
-
-    def _desktop_error_if_current(self, epoch: int, message: str) -> None:
-        if self.session is not None and epoch == self._session_epoch:
-            self._desktop_message(message)
-
-    def _desktop_result_if_current(self, epoch: int, result: OperationResult) -> None:
-        if self.session is not None and epoch == self._session_epoch:
-            summary = "; ".join(f"{item.uuid}: {item.state.value}" for item in result.targets)
-            self._desktop_message(
-                f"{result.action.value.upper()} · {result.state.value} · {result.message} · {summary}"
+            result = self.operations.execute_desktop(
+                session.token,
+                action,
+                targets,
+                section,
+                is_bulk=plan.is_bulk,
+                plan=plan,
+                on_progress=lambda target_uuid, state: self.tasks.progress(
+                    operation_id, target_uuid, state
+                ),
             )
-            self._publish_snapshot(self.application.collection.snapshot)
+        except AppError as exc:
+            self.tasks.abandon(operation_id, str(exc))
+            settled = OperationFinished(operation_id, error=str(exc), page="desktops")
+        except Exception as exc:  # noqa: BLE001 - never lose an admitted task
+            detail = f"{type(exc).__name__}: operation failed"
+            self.tasks.abandon(operation_id, detail)
+            settled = OperationFinished(operation_id, error=detail, page="desktops")
+        else:
+            self.tasks.finish(operation_id, result)
+            settled = OperationFinished(operation_id, result=result, page="desktops")
+        self.post_message(settled)
 
-    def _desktop_operation_finished(self) -> None:
-        self._operation_active = False
-        self.query_one("#logout", Button).disabled = False
-        self.query_one("#desktop-actions", Select).disabled = False
+    def _desktop_result_text(self, result: OperationResult) -> str:
+        """Long-form detail for the page status line (the board holds the rows)."""
+        summary = "; ".join(f"{item.uuid}: {item.state.value}" for item in result.targets)
+        return (
+            f"{result.action.value.upper()} · {result.state.value} · "
+            f"{result.message} · {summary}"
+        )

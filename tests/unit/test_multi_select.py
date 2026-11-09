@@ -170,8 +170,13 @@ def test_desktop_checked_subset_overrides_highlight_and_apply_all(tmp_path: Path
         async with tui.run_test(size=(140, 60)) as pilot:
             await pilot.pause(0.2)
             tui.query_one("#tabs").active = "desktops"
-            await pilot.pause(0.3)
             table = tui.query_one("#desktop-table", CheckableTable)
+            # Bounded wait for the Desktop roster instead of a fixed pause; the
+            # cursor move below is only meaningful once rows exist.
+            for _ in range(300):
+                if table.row_count >= 3:
+                    break
+                await pilot.pause(0.01)
             table.post_message(CheckableTable.CheckRequested(table, UUID_A))
             table.post_message(CheckableTable.CheckRequested(table, UUID_B))
             await pilot.pause(0.1)

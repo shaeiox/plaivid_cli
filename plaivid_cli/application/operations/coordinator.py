@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid as uuidlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from plaivid_cli.application.collection import CollectionCoordinator, CollectionSuperseded
@@ -26,6 +27,20 @@ from plaivid_cli.domain.redaction import redact_text
 from .desktop_executor import DesktopOperationExecutor
 from .planner import OperationPlanner
 from .results import _aggregate_message, aggregate_state
+
+#: Per-target progress callback: ``(target_uuid, state)``. The sink is notified
+#: before and after each dispatch so a view can show live per-target status. A
+#: sink exception is swallowed: presentation must never corrupt a mutation.
+ProgressSink = Callable[[str, OperationState], None]
+
+
+def _report(sink: ProgressSink | None, target_uuid: str, state: OperationState) -> None:
+    if sink is None:
+        return
+    try:
+        sink(target_uuid, state)
+    except Exception:
+        pass
 
 
 class OperationCoordinator:
@@ -82,9 +97,16 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan,
+        on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         return self._desktop_executor.execute(
-            token, action, targets, section, is_bulk=is_bulk, plan=plan
+            token,
+            action,
+            targets,
+            section,
+            is_bulk=is_bulk,
+            plan=plan,
+            on_progress=on_progress,
         )
 
     @staticmethod
@@ -119,6 +141,7 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan | None = None,
+        on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         if self._closing.is_set():
             raise AppError(ErrorKind.POLICY, "operation coordinator is shutting down")
@@ -132,6 +155,7 @@ class OperationCoordinator:
                 inventory,
                 is_bulk=is_bulk,
                 plan=plan,
+                on_progress=on_progress,
             )
 
     def _execute_locked(
@@ -143,6 +167,7 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan | None,
+        on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         current_plan = self.create_plan(action, targets, inventory, is_bulk=is_bulk)
         if plan is not None and (
@@ -186,8 +211,9 @@ class OperationCoordinator:
                             "not dispatched after an earlier definite failure or unknown outcome",
                         )
                     )
+                    _report(on_progress, record.uuid, OperationState.NOT_STARTED)
                     continue
-                outcomes.append(self._dispatch_one(token, action, record))
+                outcomes.append(self._dispatch_one(token, action, record, on_progress=on_progress))
                 outcome = outcomes[-1]
                 if outcome.state in {
                     OperationState.FAILED,
@@ -216,6 +242,18 @@ class OperationCoordinator:
         )
 
     def _dispatch_one(
+        self,
+        token: str,
+        action: Action,
+        record: VMRecord | VirtualDesktop,
+        *,
+        on_progress: ProgressSink | None = None,
+    ) -> TargetOutcome:
+        outcome = self._dispatch_outcome(token, action, record)
+        _report(on_progress, record.uuid, outcome.state)
+        return outcome
+
+    def _dispatch_outcome(
         self, token: str, action: Action, record: VMRecord | VirtualDesktop
     ) -> TargetOutcome:
         try:

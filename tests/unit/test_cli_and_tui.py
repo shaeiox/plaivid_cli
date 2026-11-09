@@ -24,6 +24,7 @@ from plaivid_cli.domain.models import (
     PvmSession,
     SourceResult,
 )
+from plaivid_cli.domain.models.tasks import TargetRef
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.presentation.cli import EXIT_OK, EXIT_UNKNOWN, build_parser, run_command
 from plaivid_cli.presentation.tui.app import PlaividTui
@@ -352,13 +353,19 @@ def test_tui_blocks_duplicate_operation_and_logout_while_operation_is_active(tmp
     async def exercise() -> None:
         async with tui.run_test() as pilot:
             await pilot.pause(0.15)
-            tui._operation_active = True
+            # Seed the task board rather than a global boolean: admission is now
+            # per target, so an in-flight task is what blocks a second request.
+            tui.tasks.admit(
+                Action.START,
+                (TargetRef(UUID_A, "alpha"),),
+                "seed-operation",
+            )
             tui._begin_action(Action.START)
             tui.submit_logout()
             await pilot.pause(0.05)
             assert provider.dispatched == []
             assert provider.logout_calls == 0
-            assert "already in progress" in str(tui.query_one("#action-status").render())
+            assert "already running" in str(tui.query_one("#action-status").render()).lower()
 
     try:
         asyncio.run(exercise())

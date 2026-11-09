@@ -8,6 +8,7 @@ from textual.widgets import Button, Footer, Input, Label, Static, TabbedContent
 
 from plaivid_cli.presentation.theme import brand
 
+from .components import TaskViewFooter
 from .pages.overview import OverviewPage
 from .pages.virtual_desktops import VirtualDesktopPage
 from .pages.virtual_machines import VirtualMachinePage
@@ -52,4 +53,8 @@ class LayoutMixin:
                 "1 Overview · 2 Virtual Machines · 3 Virtual Desktops · R refresh · Q quit",
                 id="notice",
             )
+            # Above the key-hint Footer, in normal flow: a docked child would
+            # overlay the tuned #notice/Footer rows instead of shrinking the
+            # flexible tab area. Hidden while no task exists (see TUI_CSS).
+            yield TaskViewFooter(self._palette)
             yield Footer()

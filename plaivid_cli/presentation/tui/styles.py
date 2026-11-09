@@ -51,6 +51,15 @@ TUI_CSS = """
         Footer { background: $p-panel; color: $p-text; }
         #notice { height: 1; color: $p-muted; padding: 0 1; }
 
+        /* Task board: hidden while idle so the tuned layout is unchanged; it
+           takes flow space (not dock) above the key hints when tasks exist. */
+        #task-footer { display: none; height: 6; max-height: 50%;
+                       background: $p-panel; border-top: solid $p-border;
+                       scrollbar-color: $p-border; }
+        #task-footer.-visible { display: block; }
+        #task-footer > .datatable--header { background: $p-panel; color: $p-muted; }
+        #task-footer:focus { border-top: solid $p-blue; }
+
         #overview { height: 1fr; }
         #overview-scroll { height: 1fr; scrollbar-color: $p-border; }
         #overview-toolbar { height: 3; background: $p-panel; border-bottom: solid $p-border;

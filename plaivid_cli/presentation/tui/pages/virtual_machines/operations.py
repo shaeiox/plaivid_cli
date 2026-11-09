@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import uuid as uuidlib
+
 from textual import on, work
 from textual.widgets import Button, Checkbox, Select, Static
 
+from plaivid_cli.application.operations import Admission
 from plaivid_cli.application.services import TargetSelection
 from plaivid_cli.domain.errors import AppError
 from plaivid_cli.domain.models import Action, OperationPlan, OperationResult, SectionSnapshot
+from plaivid_cli.domain.models.tasks import TargetRef
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.tui.messages import OperationFinished
 
 
 class VMOperationMixin:
@@ -24,9 +29,6 @@ class VMOperationMixin:
         self._begin_action(action)
 
     def _begin_action(self, action: Action) -> None:
-        if self._operation_active:
-            self._show_error("An operation is already in progress.")
-            return
         section = self._inventory_section
         inventory = self._inventory
         if section is None or inventory is None:
@@ -64,13 +66,24 @@ class VMOperationMixin:
         section: SectionSnapshot[object],
         plan: OperationPlan,
     ) -> None:
-        if self._operation_active:
-            self._show_error("An operation is already in progress.")
+        """Admit the request per target, then dispatch it in a worker thread.
+
+        Admission is synchronous on the UI thread: an exact duplicate is
+        ignored, a conflicting action on a claimed target is refused, and one
+        mutation group at a time is enforced by the task board.
+        """
+        refs = tuple(
+            TargetRef(record.uuid, record.name or "") for record in selection.records
+        )
+        operation_id = str(uuidlib.uuid4())
+        decision = self.tasks.admit(action, refs, operation_id)
+        if decision is not Admission.ADMITTED:
+            # The refused message has already been published through the
+            # TaskManager listener, which shows it inline; nothing is dispatched.
             return
-        self._operation_active = True
         self.query_one("#bulk-actions", Select).disabled = True
         self.query_one("#logout", Button).disabled = True
-        self._execute_action(action, selection, section, plan)
+        self._execute_action(action, selection, section, plan, operation_id)
 
     @work(thread=True, group="operation", exclusive=False)
     def _execute_action(
@@ -79,39 +92,39 @@ class VMOperationMixin:
         selection: TargetSelection,
         section: SectionSnapshot[object],
         plan: OperationPlan,
+        operation_id: str,
     ) -> None:
+        session = self.session
+        if session is None:
+            self.tasks.abandon(operation_id, "sign in before submitting an operation")
+            return
+        self.tasks.start(operation_id)
         try:
-            session = self.session
-            if session is None:
-                self.call_from_thread(self._show_error, "Sign in before submitting an operation.")
-                return
-            try:
-                result = self.operations.execute(
-                    session.token,
-                    action,
-                    selection.records,
-                    section,
-                    is_bulk=selection.is_bulk,
-                    plan=plan,
-                )
-            except AppError as exc:
-                self.call_from_thread(self._show_error, str(exc))
-                self.call_from_thread(self._request_refresh)
-                return
-            self.call_from_thread(self._show_operation, result)
-            self.call_from_thread(self._request_refresh)
-        finally:
-            try:
-                self.call_from_thread(self._operation_finished)
-            except RuntimeError:
-                # Textual may already be shutting down; Runtime.close still
-                # waits for the application-owned operation lane to finish.
-                pass
-
-    def _operation_finished(self) -> None:
-        self._operation_active = False
-        self.query_one("#bulk-actions", Select).disabled = False
-        self.query_one("#logout", Button).disabled = False
+            result = self.operations.execute(
+                session.token,
+                action,
+                selection.records,
+                section,
+                is_bulk=selection.is_bulk,
+                plan=plan,
+                on_progress=lambda target_uuid, state: self.tasks.progress(
+                    operation_id, target_uuid, state
+                ),
+            )
+        except AppError as exc:
+            self.tasks.abandon(operation_id, str(exc))
+            settled = OperationFinished(operation_id, error=str(exc))
+        except Exception as exc:  # noqa: BLE001 - never lose an admitted task
+            self.tasks.abandon(operation_id, f"{type(exc).__name__}: operation failed")
+            settled = OperationFinished(
+                operation_id, error=f"{type(exc).__name__}: operation failed"
+            )
+        else:
+            self.tasks.finish(operation_id, result)
+            settled = OperationFinished(operation_id, result=result)
+        # post_message is thread-safe and returns False once the app is
+        # closing, so a late completion is a no-op instead of a traceback.
+        self.post_message(settled)
 
     def _show_operation(self, result: OperationResult) -> None:
         self.query_one("#action-status", Static).update(
