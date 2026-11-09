@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.containers import VerticalScroll
 from textual.widgets import Static, TabPane
 
 from plaivid_cli.presentation.theme import Palette
@@ -21,5 +22,7 @@ class VirtualMachinePage(TabPane):
         yield VMSummary(self._palette)
         yield VMInventoryPanel()
         yield Static("Selected VM · 0 target(s)", id="vm-scope", markup=False)
-        yield VMDetailPanel()
+        # Scroll wrapper: the detail body is taller than the old fixed 10-row box,
+        # so every field and a long description must stay reachable at any height.
+        yield VerticalScroll(VMDetailPanel(), id="detail-scroll")
         yield VMAuditPanel()

@@ -15,6 +15,7 @@ from textual.widgets import (
     Static,
     TabbedContent,
 )
+from tui_plain import plain
 
 from plaivid_cli.domain.models import ObjectVM
 from plaivid_cli.presentation.theme import (
@@ -97,7 +98,7 @@ def test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120(tmp_path
                 table = tui.query_one("#fleet-table", DataTable)
                 assert "UUID" not in [column.label.plain for column in table.columns.values()]
                 assert table.virtual_size.width <= table.region.width
-                assert "UUID" in str(tui.query_one("#detail-box", Static).render())
+                assert "UUID" in plain(tui.query_one("#detail-box", Static))
         finally:
             collection.close()
 
@@ -181,7 +182,7 @@ def test_long_vm_name_keeps_table_readable_at_80_columns(tmp_path, monkeypatch):
                 await pilot.pause(.1)
                 table = tui.query_one("#fleet-table", DataTable)
                 assert table.virtual_size.width <= table.region.width
-                detail = str(tui.query_one("#detail-box", Static).render())
+                detail = plain(tui.query_one("#detail-box", Static))
                 assert "Eleven-Cluster-ReverseProxy" in detail
                 assert original.uuid in detail
         finally:

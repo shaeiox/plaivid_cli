@@ -125,8 +125,11 @@ TUI_CSS = """
                        border: round $p-border; }
         DataTable > .datatable--header { background: $p-panel; color: $p-text; text-style: bold; }
         DataTable:focus > .datatable--cursor { background: $p-blue; color: $p-bg; }
-        #detail-box { height: 10; margin-top: 1; border: round $p-border;
-                      background: $p-panel; padding: 1; }
+        /* Content-driven up to a cap: a short record keeps room for the Audit
+           panel, a long description scrolls instead of pushing rows off-screen. */
+        #detail-scroll { height: auto; max-height: 12; margin-top: 1; border: round $p-border;
+                         background: $p-panel; padding: 0 1; scrollbar-color: $p-border; }
+        #detail-box { height: auto; min-height: 9; background: $p-panel; }
         #action-status { height: 1; color: $p-yellow; }
         #desktop-summary { height: 5; margin-top: 1; align-vertical: middle; }
         #desktop-refresh { width: 11; min-width: 11; margin: 0 0 0 1; }

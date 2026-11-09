@@ -144,6 +144,12 @@ Section → provider source labels (from `SectionReader.collect`): `objects`/`de
   are pure: they accept snapshot values and produce display strings; they never call providers
   or read files. `body()` is the current rendering helper; `finish()` is retained for a
   standalone status contract.
+- **Selected-VM detail:** `pages/virtual_machines/components/details.py::build_vm_detail(record,
+  detail, palette)` is pure (domain models + `Palette` → Rich renderable); it redacts every
+  PVM-supplied value before styling, keeps the full UUID on its own row, and renders
+  `build_detail_placeholder(kind, palette)` for empty/loading/failed states. `#detail-box` remains
+  the stable body widget id inside the `#detail-scroll` wrapper; `state_colour()` is the single
+  state classification shared by the inventory tables and `state_badge()`.
 - **Dependency restriction:** presentation must not import `infrastructure/` or `bootstrap.py`.
 - **Compatibility:** redaction must be applied to any new user-visible string; missing values
   render as `—`/`N/A`, never synthetic zeroes.

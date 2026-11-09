@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from rich.console import Group, RenderableType
 from rich.text import Text
 from textual import on, work
+from textual.css.query import NoMatches
 from textual.widgets import Checkbox, DataTable, Input, Static
 from textual.widgets._data_table import CellDoesNotExist
 
@@ -14,10 +16,21 @@ from plaivid_cli.presentation.theme import state_text
 
 from ...components import CheckableTable
 from ...components import display as _display
+from .components import (
+    DetailPlaceholder,
+    build_detail_placeholder,
+    build_vm_detail,
+)
 
 
 class VMSelectionMixin:
     """Own the table's visible UUID selection and VM detail read model."""
+
+    # Declared here so the composed app and the mixin agree on the detail state.
+    _detail_record: VMRecord | None
+    _detail_loaded: VMDetail | None
+    _detail_uuid: str | None
+    _detail_status: DetailPlaceholder | None
 
     @on(Checkbox.Changed, "#select-all")
     def vm_scope_changed(self) -> None:
@@ -142,12 +155,16 @@ class VMSelectionMixin:
             table.move_cursor(row=order.index(self._selected_uuid), animate=False)
             self._render_record(self._records[self._selected_uuid])
         else:
-            self._detail_base = (
-                "No matching VMs. Clear search to view the inventory."
-                if query and self._inventory is not None
-                else "No VM records are currently available."
+            self._detail_record = None
+            self._detail_loaded = None
+            self._detail_uuid = None
+            self._detail_status = None
+            kind: DetailPlaceholder = (
+                "no_match" if query and self._inventory is not None else "no_records"
             )
-            self.query_one("#detail-box", Static).update(self._detail_base)
+            self.query_one("#detail-box", Static).update(
+                build_detail_placeholder(kind, self._palette)
+            )
 
     @on(DataTable.RowHighlighted, "#fleet-table")
     def row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -163,40 +180,77 @@ class VMSelectionMixin:
             self._render_record(record)
 
     def _render_record(self, record: VMRecord) -> None:
-        state_conflict = " · STATE EVIDENCE CONFLICT" if record.state_disagreed else ""
-        detail = (
-            f"{record.name}\nUUID  {record.uuid}\nObject state  {record.state}{state_conflict}\n"
-            f"Process observed  {'Yes' if record.process_seen else 'No'}\n"
-            f"PID  {_display(record.process.pid if record.process else None)}\n"
-            f"vCPU  {_display(record.vcpu)}  ·  Memory  {_display(record.mem_mb, suffix=' MB')}\n"
-            f"Description  {record.object.description or '—'}"
-        )
-        self._detail_base = detail
-        self.query_one("#detail-box", Static).update(redact_text(detail))
+        if self._detail_uuid != record.uuid:
+            # Never show a previously highlighted VM's asynchronous read on this row.
+            self._detail_uuid = record.uuid
+            self._detail_loaded = None
+            self._detail_status = None
+        self._detail_record = record
+        self._paint_detail()
+
+    def _detail_view(self) -> RenderableType:
+        if self._detail_record is None:
+            return build_detail_placeholder("empty", self._palette)
+        parts: list[RenderableType] = [
+            build_vm_detail(self._detail_record, self._detail_loaded, self._palette)
+        ]
+        if self._detail_status is not None:
+            parts.append(build_detail_placeholder(self._detail_status, self._palette))
+        return Group(*parts) if len(parts) > 1 else parts[0]
+
+    def _paint_detail(self) -> None:
+        try:
+            box = self.query_one("#detail-box", Static)
+        except NoMatches:
+            return  # The screen is being torn down; a queued worker may still call this.
+        box.update(self._detail_view())
 
     @work(thread=True, group="detail", exclusive=True)
     def _load_detail(self, uuid: str) -> None:
         session = self.session
         if session is None:
+            self.call_from_thread(self._detail_failed, uuid)
             return
         try:
             section = self.application.detail(session.token, uuid)
             value = as_vm_detail(section)
         except Exception:
+            self.call_from_thread(self._detail_failed, uuid)
             return
         self.call_from_thread(self._publish_detail, uuid, value)
 
     def _publish_detail(self, uuid: str, detail: VMDetail) -> None:
         if uuid != self._selected_uuid:
             return
-        extra = (
-            f"\nHost  {detail.host or '—'}  ·  machine  {detail.machine or '—'}"
-            f"\nCPU model  {detail.cpu_model or '—'}  ·  topology  {detail.vcpu_topology or '—'}"
-            f"\nDisks  {len(detail.disks)}  ·  NICs  {len(detail.nics)}  ·  console  "
-            f"{detail.console.kind if detail.console else '—'}"
-        )
-        self.query_one("#detail-box", Static).update(redact_text(self._detail_base + extra))
+        if detail.uuid != uuid:
+            # A provider answer for another object is not evidence for this row.
+            self._detail_failed(uuid)
+            return
+        self._detail_uuid = uuid
+        self._detail_loaded = detail
+        self._detail_status = None
+        record = self._records.get(uuid)
+        if record is not None:
+            self._detail_record = record
+            self._paint_detail()
+
+    def _detail_failed(self, uuid: str) -> None:
+        """Surface a failed detail read instead of leaving the pane silently unchanged."""
+        if uuid != self._selected_uuid:
+            return
+        self._detail_uuid = uuid
+        self._detail_loaded = None
+        self._detail_status = "error"
+        self._paint_detail()
 
     def action_details(self) -> None:
-        if self._selected_uuid in self._table_order:
-            self._load_detail(self._selected_uuid)
+        uuid = self._selected_uuid
+        if uuid not in self._table_order or self._detail_record is None:
+            return
+        if self._detail_status == "loading" and self._detail_uuid == uuid:
+            return  # Enter is idempotent while a read for this row is in flight.
+        self._detail_uuid = uuid
+        self._detail_loaded = None
+        self._detail_status = "loading"
+        self._paint_detail()
+        self._load_detail(uuid)

@@ -179,18 +179,40 @@ _TRANSIENT_STATES = frozenset({
 })
 
 
-def state_text(value: str, palette: Palette = TRUECOLOR) -> Text:
-    """Color an object or cluster state: started/running green, stopped red, transitional yellow."""
+def state_colour(value: str, palette: Palette = TRUECOLOR) -> str:
+    """Resolve an object or cluster state to its semantic colour.
+
+    This is the single classification table for states; ``state_text`` and
+    ``state_badge`` (and therefore the inventory tables and the detail pane)
+    cannot drift apart.
+    """
     key = value.strip().lower()
     if key in _HEALTHY_STATES:
-        color = palette.success
-    elif key in _STOPPED_STATES:
-        color = palette.error
-    elif key in _TRANSIENT_STATES:
-        color = palette.warning
-    else:
-        color = palette.muted
-    return Text(value, style=f"bold {color}")
+        return palette.success
+    if key in _STOPPED_STATES:
+        return palette.error
+    if key in _TRANSIENT_STATES:
+        return palette.warning
+    return palette.muted
+
+
+def state_text(value: str, palette: Palette = TRUECOLOR) -> Text:
+    """Color an object or cluster state: started/running green, stopped red, transitional yellow."""
+    return Text(value, style=f"bold {state_colour(value, palette)}")
+
+
+def status_badge(value: str, colour: str, *, glyph: str = "●") -> Text:
+    """A status word carrying a leading marker, so meaning never depends on colour alone."""
+    return Text.assemble((f"{glyph} ", f"bold {colour}"), (value, f"bold {colour}"))
+
+
+def state_badge(value: str, palette: Palette = TRUECOLOR) -> Text:
+    """A state word in its semantic colour, e.g. green ``● started`` or red ``● stopped``.
+
+    The marker and the word survive every palette, including ``NO_COLOR``, where the
+    semantic colours collapse to white and only the text still carries the verdict.
+    """
+    return status_badge(value, state_colour(value, palette))
 
 
 def apply_theme(app: App, palette: Palette = TRUECOLOR) -> None:

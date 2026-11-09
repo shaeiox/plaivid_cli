@@ -23,6 +23,7 @@ from plaivid_cli.presentation.charts import ChartView
 
 from .components import DashboardCard
 from .pages.overview.components.panels import METRIC_PANEL_IDS
+from .pages.virtual_machines.components.details import build_detail_placeholder
 
 
 class SessionMixin:
@@ -105,7 +106,13 @@ class SessionMixin:
         self.query_one("#vm-count", Static).update("—")
         self.query_one("#process-count", Static).update("—")
         self.query_one("#inventory-quality", Static).update("Not collected")
-        self.query_one("#detail-box", Static).update("Select a VM to inspect its details.")
+        self._detail_record = None
+        self._detail_loaded = None
+        self._detail_uuid = None
+        self._detail_status = None
+        self.query_one("#detail-box", Static).update(
+            build_detail_placeholder("empty", self._palette)
+        )
         self.query_one("#action-status", Static).update("No operation submitted.")
         self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
         self.query_one("#audit-panel", Static).display = False
