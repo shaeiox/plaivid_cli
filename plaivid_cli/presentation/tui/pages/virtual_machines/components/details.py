@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
 
-from plaivid_cli.domain.models import VMDetail, VMRecord
+from plaivid_cli.domain.models import VMDetail, VMRecord, resolve_console_port
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.theme import (
     TRUECOLOR,
@@ -25,8 +25,8 @@ DetailPlaceholder = Literal["empty", "no_match", "no_records", "loading", "error
 _MISSING = "—"
 # Label columns are measured from the label set, so renaming a label cannot
 # silently push values out of alignment (the old f-string pane had no alignment).
-_LEFT_LABELS = ("Object state", "PID", "Memory", "Machine", "Topology", "Disks / NICs")
-_RIGHT_LABELS = ("Process", "vCPU", "Host", "CPU model", "Console")
+_LEFT_LABELS = ("Object state", "PID", "Memory", "Console")
+_RIGHT_LABELS = ("Process", "vCPU", "Host", "Description")
 _LEFT_WIDTH = max(len(label) for label in _LEFT_LABELS) + 2
 _RIGHT_WIDTH = max(len(label) for label in _RIGHT_LABELS) + 2
 _LEFT_VALUE_WIDTH = 18
@@ -83,32 +83,53 @@ def _description(record: VMRecord, detail: VMDetail | None) -> str:
     return _present(description)
 
 
+def _description_value(record: VMRecord, detail: VMDetail | None, palette: Palette) -> Text:
+    """Free text folds inside its column instead of being clipped."""
+    value = _description(record, detail)
+    return Text(
+        value,
+        style=palette.muted if value == _MISSING else palette.foreground,
+        no_wrap=False,
+        overflow="fold",
+    )
+
+
+def _console_value(record: VMRecord, detail: VMDetail | None, palette: Palette) -> Text:
+    """``<kind> : <port>`` with the port resolved from live, configured or detail evidence."""
+    kind = detail.console.kind if detail is not None and detail.console is not None else None
+    port = resolve_console_port(record, detail)
+    if not kind and port is None:
+        return Text(_MISSING, style=palette.muted)
+    text = Text()
+    text.append(_present(kind), style=palette.foreground if kind else palette.muted)
+    text.append(" : ", style=palette.muted)
+    text.append(_present(port), style=palette.accent if port is not None else palette.muted)
+    return text
+
+
 def _pairs_grid(record: VMRecord, detail: VMDetail | None, palette: Palette) -> Table:
     """Aligned label/value pairs; detail-only fields stay absent until Enter reads them."""
     pid = record.process.pid if record.process is not None else None
-    disks_nics = f"{len(detail.disks)} / {len(detail.nics)}" if detail is not None else None
-    console = detail.console.kind if detail is not None and detail.console else None
+    # The node is a native object-store fact, so it survives without an Enter read.
+    host = record.host or (detail.host if detail is not None else None)
     left = (
         ("Object state", state_badge(_present(record.state), palette)),
         ("PID", _value(pid, palette)),
         ("Memory", _value(_format_mb(record.mem_mb), palette, style=palette.accent)),
-        ("Machine", _value(detail.machine if detail else None, palette)),
-        ("Topology", _value(detail.vcpu_topology if detail else None, palette)),
-        ("Disks / NICs", _value(disks_nics, palette)),
+        ("Console", _console_value(record, detail, palette)),
     )
     right = (
         ("Process", _process_badge(record, palette)),
         ("vCPU", _value(record.vcpu, palette, style=palette.accent)),
-        ("Host", _value(detail.host if detail else None, palette)),
-        ("CPU model", _value(detail.cpu_model if detail else None, palette)),
-        ("Console", _value(console, palette)),
+        ("Host", _value(host, palette)),
+        ("Description", _description_value(record, detail, palette)),
     )
 
     grid = Table.grid(padding=(0, 2))
     grid.add_column(width=_LEFT_WIDTH, no_wrap=True)
     grid.add_column(width=_LEFT_VALUE_WIDTH, no_wrap=True)
     grid.add_column(width=_RIGHT_WIDTH, no_wrap=True)
-    grid.add_column(ratio=1, no_wrap=True)
+    grid.add_column(ratio=1)
     for index, (left_label, left_value) in enumerate(left):
         if index < len(right):
             right_label, right_value = right[index]
@@ -141,14 +162,6 @@ def build_vm_detail(
     uuid_line = Text(no_wrap=True)
     uuid_line.append(f"{'UUID':<{_INDENT}}", style=palette.muted)
     uuid_line.append(redact_text(record.uuid), style=palette.foreground)
-    description_value = _description(record, detail)
-    description = Text(no_wrap=False, overflow="fold")
-    description.append(f"{'Description':<{_INDENT}}", style=palette.muted)
-    description.append(
-        description_value,
-        style=palette.muted if description_value == _MISSING else palette.foreground,
-    )
-
     grid = Table.grid(padding=(0, 0))
     grid.add_column()
     grid.add_row(identity)
@@ -158,7 +171,6 @@ def build_vm_detail(
         )
     grid.add_row(uuid_line)
     grid.add_row(_pairs_grid(record, detail, palette))
-    grid.add_row(description)
     return grid
 
 

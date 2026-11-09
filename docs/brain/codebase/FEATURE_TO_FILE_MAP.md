@@ -156,7 +156,7 @@ There are **16 feature/capability maps** in this document.
 
 ### Feature: VM inventory page (search, multi-select, detail, bulk scope)
 
-- **Description:** Local search without PVM reads, UUID-stable selection, checked-row-first action targeting, all-target toggle, selected-VM detail panel (aligned, colour-coded, scrollable, with explicit loading/failure states).
+- **Description:** Local search without PVM reads, UUID-stable selection, checked-row-first action targeting, all-target toggle, selected-VM detail panel (aligned, colour-coded, scrollable, with explicit loading/failure states; native node and console port from the inventory read, console kind from the on-demand detail read).
 - **Entry point:** `plaivid_cli/presentation/tui/pages/virtual_machines/page.py::VirtualMachinePage`.
 - **Main implementation:** `plaivid_cli/presentation/tui/pages/virtual_machines/selection.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/controller.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/inventory.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/details.py`.
 - **Supporting modules:** `plaivid_cli/presentation/tui/components/checkable_table.py`, `plaivid_cli/presentation/tui/components/inventory_toolbar.py`, `plaivid_cli/presentation/tui/components/formatting.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/summary.py`.

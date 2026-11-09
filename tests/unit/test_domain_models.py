@@ -23,6 +23,14 @@ def test_uuid_is_canonicalized_and_invalid_uuid_rejected() -> None:
         canonical_uuid("not-a-uuid")
 
 
+def test_object_host_is_optional_and_normalised() -> None:
+    assert ObjectVM(uuid=UUID_A, name="vm-a").host is None
+    assert ObjectVM(uuid=UUID_A, name="vm-a", host="  node-a ").host == "node-a"
+    assert ObjectVM(uuid=UUID_A, name="vm-a", host="   ").host is None
+    record = VMRecord(object=ObjectVM(uuid=UUID_A, name="vm-a", host="node-a"))
+    assert record.host == "node-a"
+
+
 def test_process_presence_does_not_overwrite_object_state() -> None:
     obj = ObjectVM(uuid=UUID_A, name="vm-a", state="stopped")
     process = ProcessObservation(uuid=UUID_A, pid=100, uptime="00:01", port=5900)

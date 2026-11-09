@@ -63,9 +63,16 @@ method `section(name)`.
 
 `InventoryData` holds `objects`, `process_rows`, `records: tuple[VMRecord, ...]`,
 `unmatched_process_rows`, and `quality_issues`. `VMRecord` correlates an `ObjectVM` with an
-optional `ProcessObservation` and exposes `process_seen` / `state_disagreed`. Correlation is
-pure: `plaivid_cli/domain/inventory.py::merge_inventory` receives
+optional `ProcessObservation` and exposes `process_seen` / `state_disagreed` / `host`. Correlation
+is pure: `plaivid_cli/domain/inventory.py::merge_inventory` receives
 `(objects, process_rows, process_available, process_complete, quality_issues)`.
+
+`ObjectVM.host` is the node from `virtual_machine/cluster/host` (verbatim, blank normalised to
+`None`), so placement is available on first paint without the on-demand detail read.
+`ObjectVM.configured_port` is the object's console port; the live port comes from a matched
+`ProcessObservation.port`. `resolve_console_port(record, detail)` in
+`plaivid_cli/domain/models/inventory.py` resolves display precedence: live process port →
+configured object port → detail console port → `None`. It never derives or guesses a port.
 
 **Rule:** process-only rows never create defined VM objects; a partial process list is not
 negative evidence of absence; disagreements stay visible and block mutation of that record

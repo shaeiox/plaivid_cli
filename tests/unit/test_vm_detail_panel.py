@@ -23,6 +23,7 @@ from plaivid_cli.domain.models import (
     SourceResult,
     VMDetail,
     VMRecord,
+    resolve_console_port,
 )
 from plaivid_cli.presentation.theme import (
     NO_COLOR,
@@ -54,6 +55,9 @@ def _record(**overrides: object) -> VMRecord:
         "vcpu": 4,
         "mem_mb": 8192,
         "description": "Primary reverse proxy for the public edge.",
+        "host": None,
+        "configured_port": None,
+        "process_port": None,
     }
     values.update(overrides)
     return VMRecord(
@@ -64,12 +68,18 @@ def _record(**overrides: object) -> VMRecord:
             vcpu=values["vcpu"],  # type: ignore[arg-type]
             mem_mb=values["mem_mb"],  # type: ignore[arg-type]
             description=str(values["description"]),
+            configured_port=values["configured_port"],  # type: ignore[arg-type]
+            host=values["host"],  # type: ignore[arg-type]
         ),
-        ProcessObservation(str(values["uuid"]), pid=4242),
+        ProcessObservation(
+            str(values["uuid"]), pid=4242, port=values["process_port"]  # type: ignore[arg-type]
+        ),
     )
 
 
-def _detail(uuid: str = UUID_A, *, host: str = "node-7") -> VMDetail:
+def _detail(
+    uuid: str = UUID_A, *, host: str = "node-7", port: int | None = 5900
+) -> VMDetail:
     return VMDetail(
         uuid,
         "web-prod-01",
@@ -80,7 +90,7 @@ def _detail(uuid: str = UUID_A, *, host: str = "node-7") -> VMDetail:
         vcpu_topology="4/1/1",
         disks=(DiskInfo("vda"), DiskInfo("vdb")),
         nics=(NicInfo("eth0"),),
-        console=ConsoleInfo(kind="vnc"),
+        console=ConsoleInfo(kind="vnc", port=port),
     )
 
 
@@ -126,7 +136,7 @@ def test_build_vm_detail_aligns_pairs_and_keeps_the_full_uuid() -> None:
     state_line = next(line for line in lines if line.startswith("Object state"))
     pid_line = next(line for line in lines if line.startswith("PID"))
     memory_line = next(line for line in lines if line.startswith("Memory"))
-    process_line = next(line for line in lines if "Process" in line)
+    console_line = next(line for line in lines if line.startswith("Console"))
     uuid_line = next(line for line in lines if line.startswith("UUID"))
 
     value_column = state_line.index("● stopped")
@@ -134,23 +144,24 @@ def test_build_vm_detail_aligns_pairs_and_keeps_the_full_uuid() -> None:
     assert memory_line.index("8 192 MB") == value_column
     assert uuid_line.index(UUID_A) == value_column
     assert uuid_line.rstrip().endswith(UUID_A)  # full 36-character UUID, never truncated
-    # The right-hand pair shares its own aligned column.
-    assert process_line.index("Process") == state_line.index("Process")
-    assert pid_line.index("vCPU") == state_line.index("Process")
-    assert lines[-1].startswith("Description")
+    # The right-hand pairs share their own aligned column, including the description row.
+    right_column = state_line.index("Process")
+    assert pid_line.index("vCPU") == right_column
+    assert memory_line.index("Host") == right_column
+    assert console_line.index("Description") == right_column
+    assert "Primary reverse proxy." in console_line
+    console_cell = console_line[: console_line.index("Description")]
+    assert console_cell.split("Console", 1)[1].strip() == "—"  # no console evidence yet
+    assert lines[-1].startswith("Console")
 
     for label in (
         "Object state",
         "PID",
         "Memory",
-        "Machine",
-        "Topology",
-        "Disks / NICs",
+        "Console",
         "Process",
         "vCPU",
         "Host",
-        "CPU model",
-        "Console",
         "Description",
     ):
         assert label in "\n".join(lines), label
@@ -172,7 +183,7 @@ def test_build_vm_detail_reports_state_conflict_separately_from_the_state() -> N
     assert "STATE EVIDENCE CONFLICT" not in state
 
 
-def test_build_vm_detail_adds_detail_fields_and_redacts_every_value() -> None:
+def test_build_vm_detail_renders_console_port_and_redacts_every_value() -> None:
     record = VMRecord(
         ObjectVM(
             UUID_A,
@@ -191,12 +202,63 @@ def test_build_vm_detail_adds_detail_fields_and_redacts_every_value() -> None:
     assert "synthetic-host" not in text
     assert text.count("[REDACTED]") >= 3
 
-    for value in ("pc-q35-6.2", "EPYC 7443", "4/1/1", "2 / 1", "vnc"):
-        assert value in text, value
+    assert "vnc : 5900" in text  # the detail read is the only port source here
     assert "16 384 MB" in text
     # Detail-owned fields stay absent (never fabricated) until Enter reads them.
     assert "Host" in _render(build_vm_detail(_record(), None))
     assert "node-7" not in _render(build_vm_detail(_record(), None))
+
+
+def test_removed_detail_fields_are_not_rendered() -> None:
+    text = _render(build_vm_detail(_record(), _detail()))
+    for label in ("Machine", "Topology", "Disks / NICs", "CPU model"):
+        assert label not in text, label
+    for value in ("pc-q35-6.2", "4/1/1", "2 / 1", "EPYC 7443"):
+        assert value not in text, value
+
+
+def test_host_renders_from_the_native_object_record_before_enter() -> None:
+    text = _render(build_vm_detail(_record(host="node-a"), None))
+    assert "node-a" in text
+    # No asynchronous detail was read, so nothing may be borrowed from it.
+    assert "node-7" not in text
+
+
+def test_host_falls_back_to_the_detail_read_and_then_to_unknown() -> None:
+    assert "node-7" in _render(build_vm_detail(_record(), _detail(host="node-7")))
+    hostless = _render(build_vm_detail(_record(), _detail(host="")))
+    assert "node-7" not in hostless
+
+
+def test_console_port_uses_live_then_configured_then_detail_evidence() -> None:
+    detail = _detail(port=5901)
+    live = VMRecord(
+        ObjectVM(UUID_A, "vm-a", state="started", configured_port=5900),
+        ProcessObservation(UUID_A, pid=1234, port=6054),
+    )
+    assert resolve_console_port(live, detail) == 6054
+    assert "vnc : 6054" in _render(build_vm_detail(live, detail))
+
+    configured = VMRecord(ObjectVM(UUID_A, "vm-a", configured_port=5900))
+    assert resolve_console_port(configured, detail) == 5900
+    assert "vnc : 5900" in _render(build_vm_detail(configured, detail))
+
+    no_object_port = VMRecord(ObjectVM(UUID_A, "vm-a"))
+    assert resolve_console_port(no_object_port, detail) == 5901
+    assert "vnc : 5901" in _render(build_vm_detail(no_object_port, detail))
+    assert resolve_console_port(no_object_port, None) is None
+
+    kind_only = _detail(port=None)
+    assert resolve_console_port(no_object_port, kind_only) is None
+    assert "vnc : —" in _render(build_vm_detail(no_object_port, kind_only))
+
+
+def test_console_without_kind_or_port_is_unknown_not_a_dangling_separator() -> None:
+    text = _render(build_vm_detail(_record(), None))
+    assert "— :" not in text
+    console_line = next(line for line in text.splitlines() if line.startswith("Console"))
+    console_cell = console_line[: console_line.index("Description")]
+    assert console_cell.split("Console", 1)[1].strip() == "—"
 
 
 def test_detail_placeholders_cover_empty_loading_and_failure() -> None:
@@ -221,6 +283,8 @@ def test_detail_pane_renders_every_field_without_clipping_at_80_columns(tmp_path
             vcpu=4,
             mem_mb=8192,
             description="Primary reverse proxy.",
+            host="node-a",
+            configured_port=5900,
         ),
     )
     tui = PlaividTui(application, operations, sessions)
@@ -238,15 +302,19 @@ def test_detail_pane_renders_every_field_without_clipping_at_80_columns(tmp_path
                 "web-prod-01",
                 "UUID",
                 "Object state",
-                "Process",
                 "PID",
-                "vCPU",
                 "Memory",
+                "Console",
+                "Process",
+                "vCPU",
+                "Host",
                 "Description",
-                "Disks / NICs",
             ):
                 assert field in text, field
             assert UUID_A in text
+            # Native node and configured port survive without an Enter read.
+            assert "node-a" in text
+            assert "— : 5900" in text
             # The wrapper gives the body room: nothing is clipped and no scroll is needed.
             assert box.virtual_size.height <= box.size.height
             assert box.virtual_size.width <= box.size.width
@@ -310,7 +378,7 @@ def test_enter_reports_loading_then_publishes_detail(tmp_path) -> None:
                     break
                 await pilot.pause(0.1)
             text = plain(box)
-            assert "node-7" in text and "EPYC 7443" in text
+            assert "node-7" in text and "vnc : 5900" in text
             assert "Reading full detail…" not in text
 
     try:

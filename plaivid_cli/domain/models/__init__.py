@@ -15,7 +15,13 @@ from .host import (
     UserSession,
     VMDetail,
 )
-from .inventory import InventoryData, ObjectVM, ProcessObservation, VMRecord
+from .inventory import (
+    InventoryData,
+    ObjectVM,
+    ProcessObservation,
+    VMRecord,
+    resolve_console_port,
+)
 from .operations import (
     ActionPolicy,
     OperationPlan,
@@ -72,5 +78,6 @@ __all__ = [
     "VMDetail",
     "VMRecord",
     "canonical_uuid",
+    "resolve_console_port",
     "task_status_for",
 ]
