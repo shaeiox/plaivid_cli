@@ -87,12 +87,12 @@ def test_bulk_sink_reports_every_target_in_dispatch_order() -> None:
     collection.close()
 
 
-def test_bulk_stop_reports_failure_and_not_started_for_the_remainder() -> None:
+def test_bulk_stop_reports_session_scoped_failure_and_not_started_for_the_remainder() -> None:
     provider, collection, application, operations, _, _ = make_application()
     selection, section, plan = _plan_for(
         application, operations, ("state:running",), Action.STOP
     )
-    provider.replies = [PvmReply("failed", errno="17", message="synthetic rejection")]
+    provider.replies = [PvmReply("failed", errno="39", message="session invalid")]
     sink = Sink()
     result = operations.execute(
         "token",
@@ -103,13 +103,42 @@ def test_bulk_stop_reports_failure_and_not_started_for_the_remainder() -> None:
         plan=plan,
         on_progress=sink,
     )
-    # A definite failure dominates the aggregate; the sink still reports the
-    # per-target truth: one failed, one never dispatched.
+    # A session-scoped failure aborts the batch; the sink reports one failed
+    # and one never dispatched.
     assert result.state is OperationState.FAILED
     assert provider.dispatched == [(Action.STOP, UUID_A)]
     assert sink.calls == [
         (UUID_A, OperationState.FAILED),
         (UUID_C, OperationState.NOT_STARTED),
+    ]
+    collection.close()
+
+
+def test_bulk_stop_continues_reporting_after_target_scoped_failure() -> None:
+    provider, collection, application, operations, _, _ = make_application()
+    selection, section, plan = _plan_for(
+        application, operations, ("state:running",), Action.STOP
+    )
+    provider.replies = [
+        PvmReply("failed", errno="146", message="VM 'alpha' is already stopped"),
+        PvmReply("success"),
+    ]
+    sink = Sink()
+    result = operations.execute(
+        "token",
+        Action.STOP,
+        selection.records,
+        section,
+        is_bulk=True,
+        plan=plan,
+        on_progress=sink,
+    )
+    # Target-scoped errno 146 isolates to UUID_A; UUID_C still dispatches and succeeds.
+    assert result.state is OperationState.PARTIAL
+    assert provider.dispatched == [(Action.STOP, UUID_A), (Action.STOP, UUID_C)]
+    assert sink.calls == [
+        (UUID_A, OperationState.FAILED),
+        (UUID_C, OperationState.SUCCEEDED),
     ]
     collection.close()
 

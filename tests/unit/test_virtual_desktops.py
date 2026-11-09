@@ -226,7 +226,7 @@ def test_desktop_operation_selected_and_bulk_fail_closed(tmp_path) -> None:
         collection.close()
 
 
-def test_desktop_bulk_stops_on_failure_and_reconciles_once(tmp_path) -> None:
+def test_desktop_bulk_continues_after_target_scoped_failure(tmp_path) -> None:
     from dataclasses import replace
 
     from plaivid_cli.domain.models import OperationState, PvmReply
@@ -242,12 +242,59 @@ def test_desktop_bulk_stops_on_failure_and_reconciles_once(tmp_path) -> None:
     provider.list_desktops = list_desktops
     operations._settings = replace(settings, max_inventory_age_seconds=30)
     section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
-    provider.action_reply = PvmReply("failed", errno="146", message="rejected")
+    replies = [
+        PvmReply("failed", errno="146", message="VM 'alpha' is already started"),
+        PvmReply("success"),
+    ]
+    original = provider.dispatch_action
+
+    def sequenced(token, action, uuid):
+        provider.action_reply = replies.pop(0) if replies else PvmReply("success")
+        return original(token, action, uuid)
+
+    provider.dispatch_action = sequenced
     try:
         plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
         result = operations.execute_desktop("fake", Action.START, items, section,
                                             is_bulk=True, plan=plan)
-        assert [item.state for item in result.targets] == [OperationState.FAILED, OperationState.NOT_STARTED]
+        # errno 146 is target-scoped, so the second Desktop is still attempted.
+        assert [item.state for item in result.targets] == [
+            OperationState.FAILED,
+            OperationState.SUCCEEDED,
+        ]
+        assert result.state is OperationState.PARTIAL
+        assert provider.dispatched == [(Action.START, UUID_A), (Action.START, UUID_B)]
+        assert reads == ["fake", "fake"]
+    finally:
+        collection.close()
+
+
+def test_desktop_bulk_aborts_on_session_scoped_failure_and_reconciles_once(tmp_path) -> None:
+    from dataclasses import replace
+
+    from plaivid_cli.domain.models import OperationState, PvmReply
+
+    provider, collection, _, operations, _, settings = runtime(tmp_path)
+    items = (VirtualDesktop(UUID_A, "alpha"), VirtualDesktop(UUID_B, "beta"))
+    reads = []
+
+    def list_desktops(token):
+        reads.append(token)
+        return SourceResult(items, CollectionStatus.CURRENT, "desktops")
+
+    provider.list_desktops = list_desktops
+    operations._settings = replace(settings, max_inventory_age_seconds=30)
+    section = collection.collect_once("fake", sections=("desktops",)).section("desktops")
+    provider.action_reply = PvmReply("failed", errno="39", message="UnAuthorized")
+    try:
+        plan = operations.create_desktop_plan(Action.START, items, section, is_bulk=True)
+        result = operations.execute_desktop("fake", Action.START, items, section,
+                                            is_bulk=True, plan=plan)
+        assert [item.state for item in result.targets] == [
+            OperationState.FAILED,
+            OperationState.NOT_STARTED,
+        ]
+        assert result.state is OperationState.FAILED
         assert provider.dispatched == [(Action.START, UUID_A)]
         assert reads == ["fake", "fake"]
     finally:

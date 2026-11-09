@@ -216,7 +216,12 @@ def test_immutable_operation_plan_is_invalidated_by_a_new_inventory_generation()
     collection.close()
 
 
-def test_bulk_stops_on_pvm_failure_and_marks_remainder_not_started():
+def test_bulk_continues_after_target_scoped_pvm_failure():
+    """errno 146 is about one VM, so the rest of the batch still runs.
+
+    Scoped continuation (ADR 0012): a VM-state rejection must not deny service
+    to the other targets in an operator's bulk request.
+    """
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
     provider.replies = [
@@ -229,14 +234,16 @@ def test_bulk_stops_on_pvm_failure_and_marks_remainder_not_started():
     )
     assert [item.state for item in result.targets] == [
         OperationState.FAILED,
-        OperationState.NOT_STARTED,
-        OperationState.NOT_STARTED,
+        OperationState.SUCCEEDED,
+        OperationState.SUCCEEDED,
     ]
-    assert result.state is OperationState.FAILED
+    # One failure plus two successes aggregates to PARTIAL, not FAILED.
+    assert result.state is OperationState.PARTIAL
+    assert result.targets[0].errno == "146"
     assert "errno 146" in result.targets[0].message
     assert "already started" in result.targets[0].message
+    assert len(provider.dispatched) == len(selection.records)
     assert "errno 146" in result.message
-    assert len(provider.dispatched) == 1
     collection.close()
 
 

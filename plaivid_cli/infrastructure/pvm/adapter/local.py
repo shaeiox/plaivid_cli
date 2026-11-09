@@ -97,6 +97,7 @@ class LocalPvmAdapter:
                 ErrorKind.PVM_RESPONSE,
                 f"{operation} failed ({code}): {safe}",
                 code=f"PVM_{operation.upper().replace('/', '_')}_FAILED",
+                errno=response.errno,
             )
         if response.description is None:
             raise AppError(
@@ -120,6 +121,7 @@ class LocalPvmAdapter:
                 ErrorKind.AUTHENTICATION,
                 redact_text(details),
                 code=f"PVM_LOGIN_{response.errno or 'FAILED'}",
+                errno=response.errno,
             )
         token = response.token
         if not token:

@@ -22,6 +22,7 @@ from plaivid_cli.domain.models import (
     TargetOutcome,
     VMRecord,
 )
+from plaivid_cli.domain.policies import batch_stop_reason, outcome_stops_batch
 from plaivid_cli.domain.redaction import redact_text
 
 from .desktop_executor import DesktopOperationExecutor
@@ -200,27 +201,26 @@ class OperationCoordinator:
                 code="OPERATION_PLAN_STALE",
             ) from exc
         outcomes: list[TargetOutcome] = []
-        stop_bulk = False
+        stop_reason: str | None = None
         try:
             for record in targets:
-                if stop_bulk:
+                if stop_reason is not None:
                     outcomes.append(
                         TargetOutcome(
                             record.uuid,
                             OperationState.NOT_STARTED,
-                            "not dispatched after an earlier definite failure or unknown outcome",
+                            f"not dispatched: {stop_reason}",
                         )
                     )
                     _report(on_progress, record.uuid, OperationState.NOT_STARTED)
                     continue
                 outcomes.append(self._dispatch_one(token, action, record, on_progress=on_progress))
                 outcome = outcomes[-1]
-                if outcome.state in {
-                    OperationState.FAILED,
-                    OperationState.REJECTED,
-                    OperationState.OUTCOME_UNKNOWN,
-                }:
-                    stop_bulk = is_bulk
+                # Scoped continuation (ADR 0012): a failure that belongs to this
+                # one target is recorded and the batch proceeds; only a failure
+                # of the session/wire stops the remaining targets.
+                if is_bulk and outcome_stops_batch(outcome):
+                    stop_reason = batch_stop_reason(outcome)
         finally:
             self._collection.end_mutation(target_ids)
 
@@ -261,12 +261,26 @@ class OperationCoordinator:
         except AppError as exc:
             if exc.kind is ErrorKind.POLICY:
                 return TargetOutcome(
-                    record.uuid, OperationState.REJECTED, str(exc), dispatched=False
+                    record.uuid,
+                    OperationState.REJECTED,
+                    str(exc),
+                    dispatched=False,
+                    errno=exc.errno,
                 )
             if exc.code == "PROCESS_START_FAILED":
-                return TargetOutcome(record.uuid, OperationState.FAILED, str(exc), dispatched=False)
+                return TargetOutcome(
+                    record.uuid,
+                    OperationState.FAILED,
+                    str(exc),
+                    dispatched=False,
+                    errno=exc.errno,
+                )
             return TargetOutcome(
-                record.uuid, OperationState.OUTCOME_UNKNOWN, str(exc), dispatched=True
+                record.uuid,
+                OperationState.OUTCOME_UNKNOWN,
+                str(exc),
+                dispatched=True,
+                errno=exc.errno,
             )
         except Exception as exc:
             return TargetOutcome(
@@ -292,6 +306,7 @@ class OperationCoordinator:
                 OperationState.FAILED,
                 redact_text(f"PVM reported failure{code}: {detail}"),
                 dispatched=True,
+                errno=reply.errno,
             )
         # Any other status is not part of the documented contract: stay uncertain.
         return TargetOutcome(

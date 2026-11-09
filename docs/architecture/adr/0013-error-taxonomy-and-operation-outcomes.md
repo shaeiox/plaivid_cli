@@ -42,7 +42,17 @@ Return all per-target outcomes, safe causes, and counts plus one aggregate:
 - `COMMAND_ACCEPTED_UNCONFIRMED` if any target has that status and none is `OUTCOME_UNKNOWN`; it remains visible in the overall summary.
 - `OUTCOME_UNKNOWN` if any target is unknown; this has precedence over ordinary partial/failure summaries and stays visible in aggregate counts.
 
-The implementation policy is sequential and fail-closed: stop on the first definite failure, rejection, or `OUTCOME_UNKNOWN`; every remaining resolved target after a stop is `NOT_STARTED`. Since current PVM response semantics are unverified, even a positive-looking response maps to `OUTCOME_UNKNOWN` and stops bulk dispatch. A later evidence-backed `COMMAND_ACCEPTED_UNCONFIRMED` mapping requires an owner decision on whether bulk may continue. ADR 0012 owns that safety policy; this ADR defines reporting. Do not retry automatically.
+The implementation policy is sequential with **scoped continuation**. Because a bulk request sends one PVM command per target, a failure confined to one target must not stop the batch; only a failure of the session, the request contract, or the local transport does. ADR 0012 owns the policy; this ADR defines the reporting it produces.
+
+| Failure scope | Evidence | Batch behaviour | Remaining targets |
+| --- | --- | --- | --- |
+| Target | PVM answered with a target-state rejection (`errno` 146) | continue | attempted normally |
+| Session | `errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, or any undispatched failure | stop | `NOT_STARTED` |
+| Indeterminate | `OUTCOME_UNKNOWN`, transport failure, unrecognised `errno` | stop | `NOT_STARTED` |
+
+Each `NOT_STARTED` target carries the reason the batch stopped, so an operator can tell a mixed batch from an aborted one. A mixed batch aggregates to `PARTIAL` when at least one target succeeded, and to `FAILED` when none did; `OUTCOME_UNKNOWN` keeps its precedence over both.
+
+Since current PVM response semantics are unverified, even a positive-looking response maps to `OUTCOME_UNKNOWN` and therefore still stops bulk dispatch. A later evidence-backed `COMMAND_ACCEPTED_UNCONFIRMED` mapping requires an owner decision on whether bulk may continue past that state. Do not retry automatically.
 
 ### Read/mutation freshness and ordering
 
@@ -71,4 +81,4 @@ Exact numeric compatibility remains subject to CLI review, but categories must b
 
 ## Validation required
 
-Fake executable/provider tests for output/exit combinations, definite vs unknown result mapping, partial source collection, stop-on-first behavior, remaining `NOT_STARTED`, accepted-unconfirmed aggregation, unknown precedence and exit categories. Confirm PVM response/exit/action-ID/completion semantics with authorized target captures before mapping real operations to `SUCCEEDED` or `FAILED`.
+Fake executable/provider tests for output/exit combinations, definite vs unknown result mapping, partial source collection, scoped continuation (target-scoped failure continues, session-scoped and unrecognised `errno` stop), remaining `NOT_STARTED` reasons, accepted-unconfirmed aggregation, unknown precedence and exit categories. Confirm PVM response/exit/action-ID/completion semantics with authorized target captures before mapping real operations to `SUCCEEDED` or `FAILED`.

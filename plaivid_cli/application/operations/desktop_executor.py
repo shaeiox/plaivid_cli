@@ -21,6 +21,7 @@ from plaivid_cli.domain.models import (
     SectionSnapshot,
     TargetOutcome,
 )
+from plaivid_cli.domain.policies import batch_stop_reason, outcome_stops_batch
 
 from .results import _aggregate_message, aggregate_state
 
@@ -107,27 +108,25 @@ class DesktopOperationExecutor:
                 ) from exc
             started = datetime.now(UTC)
             outcomes: list[TargetOutcome] = []
-            stop_bulk = False
+            stop_reason: str | None = None
             try:
                 for item in targets:
-                    if stop_bulk:
+                    if stop_reason is not None:
                         outcomes.append(
                             TargetOutcome(
                                 item.uuid,
                                 OperationState.NOT_STARTED,
-                                "not dispatched after earlier failure or unknown outcome",
+                                f"not dispatched: {stop_reason}",
                             )
                         )
                         _report(on_progress, item.uuid, OperationState.NOT_STARTED)
                         continue
                     outcome = self._dispatch_one(token, action, item, on_progress=on_progress)
                     outcomes.append(outcome)
-                    if outcome.state in {
-                        OperationState.FAILED,
-                        OperationState.REJECTED,
-                        OperationState.OUTCOME_UNKNOWN,
-                    }:
-                        stop_bulk = is_bulk
+                    # Scoped continuation (ADR 0012) — identical policy to the VM
+                    # path; the two loops must never diverge.
+                    if is_bulk and outcome_stops_batch(outcome):
+                        stop_reason = batch_stop_reason(outcome)
             finally:
                 self._collection.end_mutation(plan.target_uuids, section_name="desktops")
             try:

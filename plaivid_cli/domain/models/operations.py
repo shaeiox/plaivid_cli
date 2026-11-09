@@ -40,6 +40,10 @@ class TargetOutcome:
     state: OperationState
     message: str = ""
     dispatched: bool = False
+    #: sbell/sabadd error number when the PVM answered with a failure envelope.
+    #: Retained so failure scope (target vs. session) is classifiable without
+    #: parsing display text.
+    errno: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
