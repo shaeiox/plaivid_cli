@@ -192,7 +192,14 @@ class VMSelectionMixin:
         if self._detail_record is None:
             return build_detail_placeholder("empty", self._palette)
         parts: list[RenderableType] = [
-            build_vm_detail(self._detail_record, self._detail_loaded, self._palette)
+            build_vm_detail(
+                self._detail_record,
+                self._detail_loaded,
+                self._palette,
+                local_hostname=self._local_hostname,
+                local_node_id=self._local_node_id,
+                local_node_name=self._local_node_name,
+            )
         ]
         if self._detail_status is not None:
             parts.append(build_detail_placeholder(self._detail_status, self._palette))

@@ -442,7 +442,7 @@ Delivered on `arena/86ec82cd-plaivid-cli` on top of `ad52ed2`.
 
 | Area | Change |
 | --- | --- |
-| Native Host | `ObjectVM.host` (verbatim `cluster/host`, blank normalised to `None`), parsed in `parse_object_inventory`; `VMRecord.host` exposes it; the pane renders `record.host or detail.host` |
+| Native Host | `ObjectVM.host` (verbatim `cluster/host`, blank normalised to `None`), parsed in `parse_object_inventory`; `VMRecord.host` exposes it; the pane renders `record.host or detail.host`, decorated with the local hostname (`node (hostname)`) only when the node is proven local |
 | Console Port | `resolve_console_port(record, detail)` in `domain/models/inventory.py` (live process → configured object → detail console → `None`); `Console` renders `<kind> : <port>`, `—` when neither is known |
 | UI cleanup | `Machine`, `Topology`, `Disks / NICs` rows and labels removed; grid is now `Object state / PID / Memory / Console` (left) and `Process / vCPU / Host / Description` (right) |
 

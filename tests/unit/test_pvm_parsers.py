@@ -94,12 +94,37 @@ def test_sball_parser_reads_real_resource_usage_shape() -> None:
     assert result.value.sball_state == "quorate"
     assert result.value.node_state == "up"
     assert result.value.version == "7.2.16"
+    assert result.value.node_id == "1"
     assert result.value.load1 == 1.080566
     assert result.value.load15 == 0.932617
     assert result.value.cpu_count == 24
     assert result.value.ram_total_bytes == 33392357376
     assert result.value.ram_used_bytes == 33392357376 - 25488154624
     assert result.value.storage_total_bytes == 31525343232
+
+
+def test_sball_parser_reads_the_node_id_without_requiring_it() -> None:
+    from_id = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<id>2</id><name>node-b</name><resource_usage><release_info><version>7.2.16</version>"
+        "</release_info></resource_usage></node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(from_id).value.node_id == "2"
+
+    from_usage = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<name>node-c</name><resource_usage><node_id>3</node_id>"
+        "<release_info><version>7.2.16</version></release_info></resource_usage>"
+        "</node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(from_usage).value.node_id == "3"
+
+    missing = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<name>node-d</name><resource_usage><release_info><version>7.2.16</version>"
+        "</release_info></resource_usage></node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(missing).value.node_id is None
 
 
 def test_sball_parser_is_partial_when_resource_usage_is_missing() -> None:

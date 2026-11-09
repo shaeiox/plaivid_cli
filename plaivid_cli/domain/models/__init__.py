@@ -14,6 +14,7 @@ from .host import (
     TemperatureReading,
     UserSession,
     VMDetail,
+    describe_host,
 )
 from .inventory import (
     InventoryData,
@@ -78,6 +79,7 @@ __all__ = [
     "VMDetail",
     "VMRecord",
     "canonical_uuid",
+    "describe_host",
     "resolve_console_port",
     "task_status_for",
 ]

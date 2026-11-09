@@ -128,6 +128,10 @@ class PlaividTui(
         self._inventory_section: SectionSnapshot[object] | None = None
         self._inventory: InventoryData | None = None
         self._records: dict[str, VMRecord] = {}
+        # Local node identity, cached from host sections to decorate the VM pane's Host value.
+        self._local_node_name: str | None = None
+        self._local_node_id: str | None = None
+        self._local_hostname: str | None = None
         self._selected_uuid: str | None = None
         # Selected-VM detail: the record always paints, the asynchronous read and
         # its in-flight/failed state paint on top of it.

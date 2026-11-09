@@ -11,6 +11,8 @@ from .enums import canonical_uuid
 class HostStatus:
     name: str | None = None
     ip: str | None = None
+    # Cluster node number from `sball/show` (`node/id`), kept as text.
+    node_id: str | None = None
     sball_state: str | None = None
     node_state: str | None = None
     version: str | None = None
@@ -176,3 +178,37 @@ class HostMetrics:
     process_total: int | None = None
     # (command name, count) over every process, most common first; not limited to the top rows.
     command_summary: tuple[tuple[str, int], ...] = ()
+
+
+def describe_host(
+    node: str | None,
+    local_hostname: str | None = None,
+    local_node_id: str | None = None,
+    *,
+    local_node_name: str | None = None,
+) -> str:
+    """Format a VM's node as ``<node> (<hostname>)`` when that node is this host.
+
+    The hostname is appended only when ``node`` is proven to identify the local
+    node (by node number, node name, or the hostname itself). A remote or
+    unknown node is returned verbatim: the local hostname is never borrowed for
+    a node the caller cannot prove is this machine. ``None``/blank render ``—``,
+    and PVM's ``auto`` placement marker is passed through untouched.
+    """
+    raw = (node or "").strip()
+    if not raw or raw == "—":
+        return "—"
+    if raw.casefold() == "auto":
+        return raw
+
+    hostname = (local_hostname or "").strip() or None
+    identifiers = (local_node_id, local_node_name, hostname)
+    matched = any(
+        value is not None and raw.casefold() == value.strip().casefold()
+        for value in identifiers
+    )
+    if not matched or hostname is None:
+        return raw
+    if raw.casefold() == hostname.casefold():
+        return hostname
+    return f"{raw} ({hostname})"

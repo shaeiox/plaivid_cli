@@ -69,6 +69,11 @@ is pure: `plaivid_cli/domain/inventory.py::merge_inventory` receives
 
 `ObjectVM.host` is the node from `virtual_machine/cluster/host` (verbatim, blank normalised to
 `None`), so placement is available on first paint without the on-demand detail read.
+`HostStatus.node_id` is the cluster node number from `sball/show` (`node/id`, falling back to
+`resource_usage/node_id`). `describe_host(node, local_hostname, local_node_id, local_node_name=…)`
+in `plaivid_cli/domain/models/host.py` appends the hostname **only** when the node identifies this
+machine (by name, number, or the hostname itself); remote nodes keep their raw identifier and an
+equal node/hostname pair is never duplicated.
 `ObjectVM.configured_port` is the object's console port; the live port comes from a matched
 `ProcessObservation.port`. `resolve_console_port(record, detail)` in
 `plaivid_cli/domain/models/inventory.py` resolves display precedence: live process port →

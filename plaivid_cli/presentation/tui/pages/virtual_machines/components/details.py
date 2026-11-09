@@ -9,7 +9,12 @@ from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
 
-from plaivid_cli.domain.models import VMDetail, VMRecord, resolve_console_port
+from plaivid_cli.domain.models import (
+    VMDetail,
+    VMRecord,
+    describe_host,
+    resolve_console_port,
+)
 from plaivid_cli.domain.redaction import redact_text
 from plaivid_cli.presentation.theme import (
     TRUECOLOR,
@@ -107,11 +112,27 @@ def _console_value(record: VMRecord, detail: VMDetail | None, palette: Palette) 
     return text
 
 
-def _pairs_grid(record: VMRecord, detail: VMDetail | None, palette: Palette) -> Table:
+def _pairs_grid(
+    record: VMRecord,
+    detail: VMDetail | None,
+    palette: Palette,
+    *,
+    local_hostname: str | None = None,
+    local_node_id: str | None = None,
+    local_node_name: str | None = None,
+) -> Table:
     """Aligned label/value pairs; detail-only fields stay absent until Enter reads them."""
     pid = record.process.pid if record.process is not None else None
     # The node is a native object-store fact, so it survives without an Enter read.
-    host = record.host or (detail.host if detail is not None else None)
+    node = record.host or (detail.host if detail is not None else None)
+    described = (
+        describe_host(
+            node, local_hostname, local_node_id, local_node_name=local_node_name
+        )
+        if node
+        else _MISSING
+    )
+    host = None if described == _MISSING else described
     left = (
         ("Object state", state_badge(_present(record.state), palette)),
         ("PID", _value(pid, palette)),
@@ -145,7 +166,13 @@ def _pairs_grid(record: VMRecord, detail: VMDetail | None, palette: Palette) -> 
 
 
 def build_vm_detail(
-    record: VMRecord, detail: VMDetail | None, palette: Palette = TRUECOLOR
+    record: VMRecord,
+    detail: VMDetail | None,
+    palette: Palette = TRUECOLOR,
+    *,
+    local_hostname: str | None = None,
+    local_node_id: str | None = None,
+    local_node_name: str | None = None,
 ) -> RenderableType:
     """Render one selected VM as an aligned, colour-coded identity block.
 
@@ -170,7 +197,16 @@ def build_vm_detail(
             Text("▲ STATE EVIDENCE CONFLICT", style=f"bold {palette.warning}", no_wrap=True)
         )
     grid.add_row(uuid_line)
-    grid.add_row(_pairs_grid(record, detail, palette))
+    grid.add_row(
+        _pairs_grid(
+            record,
+            detail,
+            palette,
+            local_hostname=local_hostname,
+            local_node_id=local_node_id,
+            local_node_name=local_node_name,
+        )
+    )
     return grid
 
 

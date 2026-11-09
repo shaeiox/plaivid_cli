@@ -23,8 +23,10 @@ from plaivid_cli.domain.models import (
     SourceResult,
     VMDetail,
     VMRecord,
+    describe_host,
     resolve_console_port,
 )
+from plaivid_cli.domain.overview import LocalHostSample
 from plaivid_cli.presentation.theme import (
     NO_COLOR,
     TRUECOLOR,
@@ -228,6 +230,78 @@ def test_host_falls_back_to_the_detail_read_and_then_to_unknown() -> None:
     assert "node-7" in _render(build_vm_detail(_record(), _detail(host="node-7")))
     hostless = _render(build_vm_detail(_record(), _detail(host="")))
     assert "node-7" not in hostless
+
+
+LOCAL_IDENTITY = {
+    "local_hostname": "spongebob",
+    "local_node_id": "1",
+    "local_node_name": "node-a",
+}
+
+
+def test_describe_host_only_decorates_a_proven_local_node() -> None:
+    # Matched by node name or node number: keep the raw identifier, append the hostname.
+    assert describe_host("node-a", **LOCAL_IDENTITY) == "node-a (spongebob)"
+    assert describe_host("1", **LOCAL_IDENTITY) == "1 (spongebob)"
+    assert describe_host("NODE-A", **LOCAL_IDENTITY) == "NODE-A (spongebob)"
+    # The node already is the hostname: never duplicate it.
+    assert describe_host("spongebob", **LOCAL_IDENTITY) == "spongebob"
+    assert describe_host("SpongeBob", **LOCAL_IDENTITY) == "spongebob"
+    # A remote node never borrows this machine's hostname.
+    assert describe_host("node-b", **LOCAL_IDENTITY) == "node-b"
+    # A local match without a known hostname stays the raw identifier.
+    assert describe_host("node-a", local_node_name="node-a") == "node-a"
+    # PVM's placement marker and unknown values are not decorated.
+    assert describe_host("auto", **LOCAL_IDENTITY) == "auto"
+    assert describe_host("", **LOCAL_IDENTITY) == "—"
+    assert describe_host(None) == "—"
+    assert describe_host("—") == "—"
+
+
+def test_build_vm_detail_decorates_the_local_node_with_its_hostname() -> None:
+    by_name = _render(build_vm_detail(_record(host="node-a"), None, **LOCAL_IDENTITY))
+    assert "node-a (spongebob)" in by_name
+    by_id = _render(build_vm_detail(_record(host="1"), None, **LOCAL_IDENTITY))
+    assert "1 (spongebob)" in by_id
+
+
+def test_build_vm_detail_leaves_remote_auto_and_unknown_hosts_undecorated() -> None:
+    remote = _render(build_vm_detail(_record(host="node-b"), None, **LOCAL_IDENTITY))
+    assert "node-b" in remote
+    assert "spongebob" not in remote
+
+    auto = _render(build_vm_detail(_record(host="auto"), None, **LOCAL_IDENTITY))
+    assert "auto" in auto
+    assert "spongebob" not in auto
+
+    unknown = _render(build_vm_detail(_record(host=None), None, **LOCAL_IDENTITY))
+    assert "spongebob" not in unknown
+
+
+def test_tui_decorates_the_local_node_with_the_snapshot_hostname(tmp_path) -> None:
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    provider.objects = (ObjectVM(UUID_A, "web-prod-01", state="started", host="node-a"),)
+    provider.local_host = lambda: SourceResult(
+        LocalHostSample(hostname="spongebob"), CollectionStatus.CURRENT, "local"
+    )
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise() -> None:
+        async with tui.run_test(size=(80, 40)) as pilot:
+            await pilot.pause(0.3)
+            tui.action_vms_page()
+            await pilot.pause(0.1)
+            box = tui.query_one("#detail-box", Static)
+            for _ in range(20):
+                if "spongebob" in plain(box):
+                    break
+                await pilot.pause(0.1)
+            assert "node-a (spongebob)" in plain(box)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
 
 
 def test_console_port_uses_live_then_configured_then_detail_evidence() -> None:

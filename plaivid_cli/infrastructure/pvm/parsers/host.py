@@ -42,9 +42,13 @@ def parse_sball_status(root: ET.Element) -> ParseResult[HostStatus | None]:
     cpu_pct, cpu_count = _average_cpu(usage)
     total = _int(info.findtext("total_memory")) if info is not None else None
     free = _int(info.findtext("free_memory")) if info is not None else None
+    node_id = (node.findtext("id") or "").strip() or None
+    if node_id is None and usage is not None:
+        node_id = (usage.findtext("node_id") or "").strip() or None
     status = HostStatus(
         name=node.findtext("name"),
         ip=node.findtext("ip"),
+        node_id=node_id,
         sball_state=node.findtext("sball-state"),
         node_state=node.findtext("node-state"),
         version=usage.findtext("release_info/version") if usage is not None else None,
