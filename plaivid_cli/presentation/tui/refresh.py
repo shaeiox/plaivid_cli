@@ -8,6 +8,7 @@ from textual import on, work
 from textual.css.query import NoMatches
 from textual.widgets import (
     Button,
+    DataTable,
     Input,
     Static,
     TabbedContent,
@@ -35,14 +36,14 @@ class RefreshMixin:
 
     @on(Button.Pressed, "#audit-toggle")
     def show_audit(self) -> None:
-        panel = self.query_one("#audit-panel", Static)
+        panel = self.query_one("#audit-panel", DataTable)
         panel.display = not panel.display
         if panel.display:
             self._request_audit("audit-panel")
 
     @on(Button.Pressed, "#desktop-audit-toggle")
     def show_desktop_audit(self) -> None:
-        panel = self.query_one("#desktop-audit-panel", Static)
+        panel = self.query_one("#desktop-audit-panel", DataTable)
         panel.display = not panel.display
         if panel.display:
             self._request_audit("desktop-audit-panel")

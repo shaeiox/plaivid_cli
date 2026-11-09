@@ -87,10 +87,9 @@ class SessionMixin:
         self.query_one("#desktop-selected-label", Static).update("—")
         self.query_one("#desktop-detail", Static).update("Select a Desktop to inspect its details.")
         self.query_one("#desktop-action-status", Static).update("No operation submitted.")
-        self.query_one("#desktop-audit-panel", Static).update(
-            "Read-only audit\nWaiting for session…"
-        )
-        self.query_one("#desktop-audit-panel", Static).display = False
+        desktop_audit = self.query_one("#desktop-audit-panel", DataTable)
+        desktop_audit.clear()
+        desktop_audit.display = False
         self._inventory_section = None
         self._inventory = None
         self._inventory_generation = None
@@ -107,8 +106,9 @@ class SessionMixin:
         self.query_one("#inventory-quality", Static).update("Not collected")
         self.query_one("#detail-box", Static).update("Select a VM to inspect its details.")
         self.query_one("#action-status", Static).update("No operation submitted.")
-        self.query_one("#audit-panel", Static).update("Read-only audit\nWaiting for session…")
-        self.query_one("#audit-panel", Static).display = False
+        vm_audit = self.query_one("#audit-panel", DataTable)
+        vm_audit.clear()
+        vm_audit.display = False
         self.query_one("#host-banner", Static).update("")
         self.query_one("#host-status", Static).update("Waiting for collection…")
         for panel in METRIC_PANEL_IDS:

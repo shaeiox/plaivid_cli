@@ -146,10 +146,10 @@ TUI_CSS = """
         #desktop-scope, #vm-scope { height: 1; color: $p-muted; }
         #desktop-detail-scroll { height: 10; margin-top: 1;
                                  border: round $p-border; background: $p-panel; }
-        #desktop-audit-panel { display: none; height: auto; min-height: 7;
+        #desktop-audit-panel { display: none; height: 10;
                                border: round $p-border; background: $p-panel; padding: 1; }
         #desktop-detail { height: auto; background: $p-panel; padding: 1; }
         #desktop-action-status { height: auto; color: $p-yellow; }
-        #audit-panel { display: none; height: auto; min-height: 7;
+        #audit-panel { display: none; height: 10;
                        border: round $p-border; background: $p-panel; padding: 1; }
         """

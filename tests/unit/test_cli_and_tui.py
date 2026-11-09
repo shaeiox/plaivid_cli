@@ -6,7 +6,8 @@ import threading
 from pathlib import Path
 
 import pytest
-from textual.widgets import Select, TabbedContent
+from rich.text import Text
+from textual.widgets import Button, DataTable, Select, TabbedContent
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
@@ -15,6 +16,7 @@ from plaivid_cli.application.session import SessionManager, SessionStore
 from plaivid_cli.config import load_settings
 from plaivid_cli.domain.models import (
     Action,
+    AuditEntry,
     CollectionStatus,
     HostMetrics,
     HostStatus,
@@ -409,16 +411,161 @@ def test_tui_mounts_dashboard_using_only_fake_local_provider(tmp_path):
             tui.query_one("#tabs", TabbedContent).active = "fleet"
             tui.show_audit()
             await pilot.pause(0.1)
-            assert "No audit rows" in str(tui.query_one("#audit-panel").render())
+            audit_table = tui.query_one("#audit-panel", DataTable)
+            assert audit_table.row_count == 1
+            assert "No audit rows" in audit_table.get_row_at(0)[0].plain
             first_audit_reads = provider.audit.calls
             assert first_audit_reads >= 1
             await pilot.pause(0.2)
             assert provider.audit.calls == first_audit_reads
             assert "operator" in str(tui.query_one("#session-label").render())
+            tui.query_one("#tabs", TabbedContent).active = "desktops"
+            tui.show_desktop_audit()
+            await pilot.pause(0.1)
+            desktop_audit = tui.query_one("#desktop-audit-panel", DataTable)
+            assert desktop_audit.row_count == 1
+            assert "No audit rows" in desktop_audit.get_row_at(0)[0].plain
 
     try:
         asyncio.run(exercise())
     finally:
+        collection.close()
+
+
+
+def test_audit_tables_render_redacted_rows_and_scroll(tmp_path):
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    worker_threads = []
+    entries = tuple(
+        AuditEntry(
+            time=f"2026-01-01 12:00:{i:02}",
+            user="token=secret-user",
+            user_ip="password=secret-ip",
+            product="secret=secret-product",
+            command="/vm/start [literal] --password secret-command",
+            result="authorization=secret-result",
+            succeeded=i % 2 == 0,
+        )
+        for i in range(20)
+    )
+
+    def recent(limit):
+        worker_threads.append(threading.get_ident())
+        assert limit == 20
+        return entries
+
+    provider.audit.recent = recent
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise():
+        async with tui.run_test(size=(120, 55)) as pilot:
+            await pilot.pause(0.2)
+            tabs = tui.query_one("#tabs", TabbedContent)
+            for tab, panel_id, toggle in (
+                ("fleet", "audit-panel", "#audit-toggle"),
+                ("desktops", "desktop-audit-panel", "#desktop-audit-toggle"),
+            ):
+                tabs.active = tab
+                await pilot.pause()
+                table = tui.query_one(f"#{panel_id}", DataTable)
+                assert not table.display
+                tui.query_one(toggle, Button).press()
+                await pilot.pause()
+                for _ in range(30):
+                    await pilot.pause(0.05)
+                    if table.row_count == 20:
+                        break
+                assert table.display and table.row_count == 20
+                assert table.zebra_stripes and table.show_header and table.cursor_type == "none"
+                assert [(c.key.value, c.label.plain, c.width) for c in table.ordered_columns] == [
+                    ("time", "Time", 19), ("user", "User", 15), ("user_ip", "IP", 15),
+                    ("product", "Product", 12), ("command", "Command", 30),
+                    ("result", "Result", 20), ("succeeded", "Status", 12),
+                ]
+                row = table.get_row_at(0)
+                assert all(isinstance(value, Text) for value in row)
+                assert [cell.plain for cell in row] == [
+                    "2026-01-01 12:00:00", "token=[REDACTED]", "password=[REDACTED]",
+                    "secret=[REDACTED]", "/vm/start [literal] --password [REDACTED]",
+                    "authorization=[REDACTED]", "✔ Success",
+                ]
+                assert row[-1].style == "green"
+                assert table.get_row_at(1)[-1].plain == "✘ Failed"
+                assert table.get_row_at(1)[-1].style == "red"
+                assert table.max_scroll_y > 0
+                assert table.max_scroll_x > 0
+                table.focus()
+                await pilot.press("pagedown", "right")
+                await pilot.pause(0.3)
+                assert table.scroll_y > 0 and table.scroll_x > 0
+                tui.query_one(toggle, Button).press()
+                await pilot.pause()
+                assert not table.display
+            assert len(worker_threads) == 2
+            assert all(ident != threading.get_ident() for ident in worker_threads)
+            tui._session_ended("Signed out")
+            for panel_id in ("audit-panel", "desktop-audit-panel"):
+                table = tui.query_one(f"#{panel_id}", DataTable)
+                assert not table.display and table.row_count == 0
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
+
+
+def test_audit_error_and_stale_session_result(tmp_path):
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def recent(limit):
+        assert limit == 20
+        started.set()
+        assert release.wait(3)
+        raise OSError("token=do-not-display")
+
+    provider.audit.recent = recent
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise():
+        async with tui.run_test(size=(120, 55)) as pilot:
+            await pilot.pause(0.2)
+            tui.query_one("#tabs", TabbedContent).active = "fleet"
+            tui.show_audit()
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if started.is_set():
+                    break
+            assert started.is_set()
+            release.set()
+            table = tui.query_one("#audit-panel", DataTable)
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if table.row_count:
+                    break
+            message = table.get_row_at(0)[0].plain
+            assert "Audit unavailable: OSError" in message
+            assert "do-not-display" not in message
+            # Start another read, then sign out while its worker is blocked.
+            release.clear()
+            started.clear()
+            tui.show_audit()
+            tui.show_audit()
+            for _ in range(30):
+                await pilot.pause(0.05)
+                if started.is_set():
+                    break
+            assert started.is_set()
+            tui._session_ended("Signed out")
+            release.set()
+            await pilot.pause(0.2)
+            assert table.row_count == 0 and not table.display
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release.set()
         collection.close()
 
 
