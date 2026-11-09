@@ -59,6 +59,8 @@ class SbellClient:
         command: str,
         params: str = "<params/>",
         token: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> SbellResponse:
         if not _IDENTIFIER.fullmatch(module) or not _IDENTIFIER.fullmatch(command):
             raise ValueError("invalid sbell module or command")
@@ -67,7 +69,11 @@ class SbellClient:
         argv = [*self._executable, module, command, params]
         if token:
             argv.append(token)
-        result = self._runner.run(argv)
+        result = (
+            self._runner.run(argv)
+            if timeout is None
+            else self._runner.run(argv, timeout=timeout)
+        )
         if result.stdout_truncated:
             raise AppError(
                 ErrorKind.PROTOCOL,

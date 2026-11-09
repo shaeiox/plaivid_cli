@@ -63,7 +63,11 @@ class TaskCompleted(TaskMessage):
 
 
 class TaskFailed(TaskMessage):
-    """The target definitely failed, was rejected, or was never dispatched."""
+    """The target definitely failed or was rejected."""
+
+
+class TaskSkipped(TaskMessage):
+    """The target was skipped after an earlier session/daemon batch abort."""
 
 
 class TaskUnknown(TaskMessage):
@@ -130,6 +134,7 @@ __all__ = [
     "TaskMessage",
     "TaskProgress",
     "TaskRegistryReset",
+    "TaskSkipped",
     "TaskStarted",
     "TaskUnknown",
 ]

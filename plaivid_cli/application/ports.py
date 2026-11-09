@@ -43,6 +43,10 @@ class PvmGateway(Protocol):
 
     def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply: ...
 
+    def is_daemon_alive(
+        self, timeout: float = 2.0, *, token: str | None = None
+    ) -> bool: ...
+
 
 class MonitoringGateway(Protocol):
     """Optional read-only extension; existing PvmGateway implementations still work."""

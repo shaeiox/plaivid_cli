@@ -151,11 +151,13 @@ class TaskManager:
 
     # ------------------------------------------------------------------ updates
 
-    def start(self, operation_id: str) -> None:
-        """Mark every queued task of one submission as dispatched."""
+    def start(self, operation_id: str, target_uuid: str | None = None) -> None:
+        """Mark queued task(s) of one submission as actively dispatching."""
         events: list[TaskEvent] = []
         with self._lock:
             for key in self._keys_for(operation_id):
+                if target_uuid is not None and key.target_uuid != target_uuid:
+                    continue
                 record = self._live[key]
                 if record.status is not TaskStatus.QUEUED:
                     continue
@@ -168,10 +170,17 @@ class TaskManager:
                 events.append(TaskEvent(kind="started", record=updated.copy()))
         self._emit(events)
 
-    def progress(self, operation_id: str, target_uuid: str, state: OperationState) -> None:
+    def progress(
+        self,
+        operation_id: str,
+        target_uuid: str,
+        state: OperationState,
+        detail: str = "",
+    ) -> None:
         """Apply one per-target dispatch outcome reported by the coordinator."""
         status = task_status_for(state)
-        message = redact_text(_progress_message(state))
+        raw_message = detail.strip() if detail and detail.strip() else _progress_message(state)
+        message = redact_text(raw_message)
         events: list[TaskEvent] = []
         with self._lock:
             key = next(
@@ -187,11 +196,17 @@ class TaskManager:
             record = self._live[key]
             if record.status.is_terminal:
                 return  # never move a task backwards out of a terminal state
+            now = _now()
+            started_at = (
+                record.started_at
+                if status in {TaskStatus.QUEUED, TaskStatus.SKIPPED}
+                else (record.started_at or now)
+            )
             updated = record.copy(
                 status=status,
                 message=message,
-                started_at=record.started_at or _now(),
-                finished_at=_now() if status.is_terminal else None,
+                started_at=started_at,
+                finished_at=now if status.is_terminal else None,
             )
             if status.is_terminal:
                 self._retire(updated)
@@ -326,6 +341,8 @@ def _event_kind(status: TaskStatus) -> str:
         return "completed"
     if status is TaskStatus.UNKNOWN:
         return "unknown"
+    if status is TaskStatus.SKIPPED:
+        return "skipped"
     if status is TaskStatus.RUNNING:
         return "progress"
     return "failed"
@@ -335,13 +352,13 @@ def _progress_message(state: OperationState) -> str:
     return {
         OperationState.QUEUED: "queued",
         OperationState.DISPATCHING: "dispatching…",
-        OperationState.RUNNING: "awaiting PVM reply…",
+        OperationState.RUNNING: "dispatching…",
         OperationState.SUCCEEDED: "PVM accepted the command",
         OperationState.COMMAND_ACCEPTED_UNCONFIRMED: "accepted; completion unconfirmed",
         OperationState.FAILED: "PVM reported failure",
         OperationState.REJECTED: "rejected before dispatch",
         OperationState.CANCELLED_BEFORE_DISPATCH: "cancelled before dispatch",
-        OperationState.NOT_STARTED: "not dispatched after an earlier failure",
+        OperationState.NOT_STARTED: "skipped after an earlier batch abort",
         OperationState.OUTCOME_UNKNOWN: "outcome unknown; reconcile before retrying",
         OperationState.PARTIAL: "partially applied",
     }.get(state, state.value)

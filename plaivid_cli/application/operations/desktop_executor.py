@@ -21,9 +21,13 @@ from plaivid_cli.domain.models import (
     SectionSnapshot,
     TargetOutcome,
 )
-from plaivid_cli.domain.policies import batch_stop_reason, outcome_stops_batch
+from plaivid_cli.domain.policies import (
+    DAEMON_OFFLINE_REASON,
+    batch_stop_reason,
+    outcome_stops_batch,
+)
 
-from .results import _aggregate_message, aggregate_state
+from .results import ProgressSink, _aggregate_message, aggregate_state, report_progress
 
 
 class PlanFactory(Protocol):
@@ -38,18 +42,6 @@ class PlanFactory(Protocol):
 
 
 DispatchOne = Callable[..., TargetOutcome]
-
-#: Per-target progress callback, identical to the VM path: ``(uuid, state)``.
-ProgressSink = Callable[[str, OperationState], None]
-
-
-def _report(sink: ProgressSink | None, target_uuid: str, state: OperationState) -> None:
-    if sink is None:
-        return
-    try:
-        sink(target_uuid, state)
-    except Exception:
-        pass
 
 
 class DesktopOperationExecutor:
@@ -112,27 +104,36 @@ class DesktopOperationExecutor:
             try:
                 for item in targets:
                     if stop_reason is not None:
+                        skipped_msg = (
+                            DAEMON_OFFLINE_REASON
+                            if stop_reason == DAEMON_OFFLINE_REASON
+                            else f"not dispatched: {stop_reason}"
+                        )
                         outcomes.append(
                             TargetOutcome(
                                 item.uuid,
                                 OperationState.NOT_STARTED,
-                                f"not dispatched: {stop_reason}",
+                                skipped_msg,
                             )
                         )
-                        _report(on_progress, item.uuid, OperationState.NOT_STARTED)
+                        report_progress(
+                            on_progress, item.uuid, OperationState.NOT_STARTED, skipped_msg
+                        )
                         continue
                     outcome = self._dispatch_one(token, action, item, on_progress=on_progress)
                     outcomes.append(outcome)
-                    # Scoped continuation (ADR 0012) — identical policy to the VM
-                    # path; the two loops must never diverge.
-                    if is_bulk and outcome_stops_batch(outcome):
-                        stop_reason = batch_stop_reason(outcome)
+                    daemon_alive = outcome.code != "DAEMON_OFFLINE"
+                    # Scoped continuation (ADR 0012 / 0015) — identical policy to
+                    # the VM path; the two loops must never diverge.
+                    if is_bulk and outcome_stops_batch(outcome, daemon_alive=daemon_alive):
+                        stop_reason = batch_stop_reason(outcome, daemon_alive=daemon_alive)
             finally:
                 self._collection.end_mutation(plan.target_uuids, section_name="desktops")
-            try:
-                self._collection.collect_once(token, sections=("desktops",))
-            except Exception:
-                pass  # The result remains an accepted/uncertain command, not an observed transition.
+            if stop_reason != DAEMON_OFFLINE_REASON:
+                try:
+                    self._collection.collect_once(token, sections=("desktops",))
+                except Exception:
+                    pass  # The result remains an accepted/uncertain command, not an observed transition.
             state = aggregate_state(tuple(outcomes))
             return OperationResult(
                 operation_id=str(uuidlib.uuid4()),

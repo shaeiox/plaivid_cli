@@ -31,6 +31,7 @@ class TaskStatus(StrEnum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     REJECTED = "REJECTED"
+    SKIPPED = "SKIPPED"
     UNKNOWN = "UNKNOWN"
 
     @property
@@ -45,7 +46,7 @@ _TERMINAL_STATUS = {
     OperationState.FAILED: TaskStatus.FAILED,
     OperationState.REJECTED: TaskStatus.REJECTED,
     OperationState.CANCELLED_BEFORE_DISPATCH: TaskStatus.REJECTED,
-    OperationState.NOT_STARTED: TaskStatus.REJECTED,
+    OperationState.NOT_STARTED: TaskStatus.SKIPPED,
     OperationState.PARTIAL: TaskStatus.UNKNOWN,
 }
 

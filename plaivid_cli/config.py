@@ -68,6 +68,7 @@ class Settings:
     audit_database: Path
     log_level: str
     host_status_interval: float = 2.0
+    action_timeout: float = 10.0
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -91,6 +92,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         sbell_argv=_argv(env, "PLAIVID_SBELL", "sudo sbell"),
         running_vms_argv=_argv(env, "PLAIVID_RUNNING_VMS", "pvm-running-vms"),
         process_timeout=_positive_float(env, "PLAIVID_CMD_TIMEOUT", "30"),
+        action_timeout=_positive_float(env, "PLAIVID_ACTION_TIMEOUT", "10"),
         max_output_bytes=max_output,
         refresh_interval=_positive_float(env, "PLAIVID_REFRESH", "3"),
         host_status_interval=_positive_float(env, "PLAIVID_HOST_STATUS_INTERVAL", "2"),

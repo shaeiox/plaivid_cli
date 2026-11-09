@@ -60,7 +60,10 @@ def test_sink_reports_one_success_per_target() -> None:
         on_progress=sink,
     )
     assert result.state is OperationState.SUCCEEDED
-    assert sink.calls == [(UUID_A, OperationState.SUCCEEDED)]
+    assert sink.calls == [
+        (UUID_A, OperationState.RUNNING),
+        (UUID_A, OperationState.SUCCEEDED),
+    ]
     collection.close()
 
 
@@ -81,7 +84,9 @@ def test_bulk_sink_reports_every_target_in_dispatch_order() -> None:
         on_progress=sink,
     )
     assert sink.calls == [
+        (UUID_A, OperationState.RUNNING),
         (UUID_A, OperationState.SUCCEEDED),
+        (UUID_C, OperationState.RUNNING),
         (UUID_C, OperationState.SUCCEEDED),
     ]
     collection.close()
@@ -103,11 +108,11 @@ def test_bulk_stop_reports_session_scoped_failure_and_not_started_for_the_remain
         plan=plan,
         on_progress=sink,
     )
-    # A session-scoped failure aborts the batch; the sink reports one failed
-    # and one never dispatched.
+    # A session-scoped failure aborts the batch; UUID_C never enters RUNNING.
     assert result.state is OperationState.FAILED
     assert provider.dispatched == [(Action.STOP, UUID_A)]
     assert sink.calls == [
+        (UUID_A, OperationState.RUNNING),
         (UUID_A, OperationState.FAILED),
         (UUID_C, OperationState.NOT_STARTED),
     ]
@@ -137,7 +142,9 @@ def test_bulk_stop_continues_reporting_after_target_scoped_failure() -> None:
     assert result.state is OperationState.PARTIAL
     assert provider.dispatched == [(Action.STOP, UUID_A), (Action.STOP, UUID_C)]
     assert sink.calls == [
+        (UUID_A, OperationState.RUNNING),
         (UUID_A, OperationState.FAILED),
+        (UUID_C, OperationState.RUNNING),
         (UUID_C, OperationState.SUCCEEDED),
     ]
     collection.close()
@@ -164,6 +171,7 @@ def test_unknown_process_error_is_reported_as_unknown_and_stops_the_bulk() -> No
         on_progress=sink,
     )
     assert [state for _, state in sink.calls] == [
+        OperationState.RUNNING,
         OperationState.OUTCOME_UNKNOWN,
         OperationState.NOT_STARTED,
     ]
@@ -208,7 +216,7 @@ def test_a_broken_sink_never_aborts_or_alters_the_operation() -> None:
         on_progress=broken,
     )
     assert result.state is OperationState.SUCCEEDED
-    assert attempts == [UUID_A, UUID_C]
+    assert attempts == [UUID_A, UUID_A, UUID_C, UUID_C]
     assert provider.dispatched == [(Action.PAUSE, UUID_A), (Action.PAUSE, UUID_C)]
     assert aggregate_state(result.targets) is OperationState.SUCCEEDED
     collection.close()

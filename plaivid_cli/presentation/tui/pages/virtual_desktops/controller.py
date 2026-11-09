@@ -227,7 +227,6 @@ class DesktopMixin:
         if session is None or epoch != self._session_epoch:
             self.tasks.abandon(operation_id, "session ended before dispatch")
             return
-        self.tasks.start(operation_id)
         try:
             result = self.operations.execute_desktop(
                 session.token,
@@ -236,8 +235,8 @@ class DesktopMixin:
                 section,
                 is_bulk=plan.is_bulk,
                 plan=plan,
-                on_progress=lambda target_uuid, state: self.tasks.progress(
-                    operation_id, target_uuid, state
+                on_progress=lambda target_uuid, state, detail="": self.tasks.progress(
+                    operation_id, target_uuid, state, detail
                 ),
             )
         except AppError as exc:

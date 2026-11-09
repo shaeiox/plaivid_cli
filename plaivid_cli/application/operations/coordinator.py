@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid as uuidlib
-from collections.abc import Callable
 from datetime import UTC, datetime
 
 from plaivid_cli.application.collection import CollectionCoordinator, CollectionSuperseded
@@ -22,26 +22,19 @@ from plaivid_cli.domain.models import (
     TargetOutcome,
     VMRecord,
 )
-from plaivid_cli.domain.policies import batch_stop_reason, outcome_stops_batch
+from plaivid_cli.domain.policies import (
+    COMMAND_TIMEOUT_CODE,
+    DAEMON_OFFLINE_REASON,
+    batch_stop_reason,
+    outcome_stops_batch,
+)
 from plaivid_cli.domain.redaction import redact_text
 
 from .desktop_executor import DesktopOperationExecutor
 from .planner import OperationPlanner
-from .results import _aggregate_message, aggregate_state
+from .results import ProgressSink, _aggregate_message, aggregate_state, report_progress
 
-#: Per-target progress callback: ``(target_uuid, state)``. The sink is notified
-#: before and after each dispatch so a view can show live per-target status. A
-#: sink exception is swallowed: presentation must never corrupt a mutation.
-ProgressSink = Callable[[str, OperationState], None]
-
-
-def _report(sink: ProgressSink | None, target_uuid: str, state: OperationState) -> None:
-    if sink is None:
-        return
-    try:
-        sink(target_uuid, state)
-    except Exception:
-        pass
+logger = logging.getLogger("plaivid")
 
 
 class OperationCoordinator:
@@ -205,31 +198,40 @@ class OperationCoordinator:
         try:
             for record in targets:
                 if stop_reason is not None:
+                    skipped_msg = (
+                        DAEMON_OFFLINE_REASON
+                        if stop_reason == DAEMON_OFFLINE_REASON
+                        else f"not dispatched: {stop_reason}"
+                    )
                     outcomes.append(
                         TargetOutcome(
                             record.uuid,
                             OperationState.NOT_STARTED,
-                            f"not dispatched: {stop_reason}",
+                            skipped_msg,
                         )
                     )
-                    _report(on_progress, record.uuid, OperationState.NOT_STARTED)
+                    report_progress(
+                        on_progress, record.uuid, OperationState.NOT_STARTED, skipped_msg
+                    )
                     continue
                 outcomes.append(self._dispatch_one(token, action, record, on_progress=on_progress))
                 outcome = outcomes[-1]
-                # Scoped continuation (ADR 0012): a failure that belongs to this
-                # one target is recorded and the batch proceeds; only a failure
-                # of the session/wire stops the remaining targets.
-                if is_bulk and outcome_stops_batch(outcome):
-                    stop_reason = batch_stop_reason(outcome)
+                daemon_alive = outcome.code != "DAEMON_OFFLINE"
+                # Scoped continuation (ADR 0012 / 0015): target-scoped errors
+                # and per-target timeouts with a live daemon proceed; session or
+                # daemon-offline failures abort remaining targets immediately.
+                if is_bulk and outcome_stops_batch(outcome, daemon_alive=daemon_alive):
+                    stop_reason = batch_stop_reason(outcome, daemon_alive=daemon_alive)
         finally:
             self._collection.end_mutation(target_ids)
 
-        # Reconcile through the same serialized read lane. This records current
-        # observations but does not promote command acceptance to completion.
-        try:
-            self._collection.collect_once(token, sections=("inventory",))
-        except Exception:
-            pass
+        # Reconcile through the same serialized read lane unless the daemon was
+        # just proven offline (avoiding an extra 30 s read timeout).
+        if stop_reason != DAEMON_OFFLINE_REASON:
+            try:
+                self._collection.collect_once(token, sections=("inventory",))
+            except Exception:
+                pass
         aggregate = aggregate_state(tuple(outcomes))
         return OperationResult(
             operation_id=operation_id,
@@ -241,6 +243,20 @@ class OperationCoordinator:
             message=_aggregate_message(aggregate, outcomes),
         )
 
+    def _check_daemon_alive(self, token: str, timeout: float = 2.0) -> bool:
+        probe = getattr(self._provider, "is_daemon_alive", None)
+        if probe is None:
+            return True
+        try:
+            return bool(probe(timeout=timeout, token=token))
+        except TypeError:
+            try:
+                return bool(probe(timeout))
+            except Exception:
+                return False
+        except Exception:
+            return False
+
     def _dispatch_one(
         self,
         token: str,
@@ -249,8 +265,41 @@ class OperationCoordinator:
         *,
         on_progress: ProgressSink | None = None,
     ) -> TargetOutcome:
+        report_progress(on_progress, record.uuid, OperationState.RUNNING, "dispatching…")
         outcome = self._dispatch_outcome(token, action, record)
-        _report(on_progress, record.uuid, outcome.state)
+        if outcome.code == COMMAND_TIMEOUT_CODE or outcome.state in {
+            OperationState.FAILED,
+            OperationState.OUTCOME_UNKNOWN,
+        }:
+            daemon_alive = self._check_daemon_alive(token)
+            timeout_s = f"{self._settings.action_timeout:g}s"
+            if not daemon_alive:
+                detail = (
+                    f"command timed out ({timeout_s}): {DAEMON_OFFLINE_REASON}"
+                    if outcome.code == COMMAND_TIMEOUT_CODE
+                    else DAEMON_OFFLINE_REASON
+                )
+                logger.error("Target %s: %s", record.uuid, detail)
+                outcome = TargetOutcome(
+                    record.uuid,
+                    OperationState.FAILED,
+                    detail,
+                    dispatched=outcome.dispatched,
+                    errno=outcome.errno,
+                    code="DAEMON_OFFLINE",
+                )
+            elif outcome.code == COMMAND_TIMEOUT_CODE:
+                detail = f"command timed out ({timeout_s}), daemon healthy"
+                logger.warning("Target %s: %s", record.uuid, detail)
+                outcome = TargetOutcome(
+                    record.uuid,
+                    OperationState.OUTCOME_UNKNOWN,
+                    detail,
+                    dispatched=True,
+                    errno=outcome.errno,
+                    code=COMMAND_TIMEOUT_CODE,
+                )
+        report_progress(on_progress, record.uuid, outcome.state, outcome.message)
         return outcome
 
     def _dispatch_outcome(
@@ -266,6 +315,7 @@ class OperationCoordinator:
                     str(exc),
                     dispatched=False,
                     errno=exc.errno,
+                    code=exc.code,
                 )
             if exc.code == "PROCESS_START_FAILED":
                 return TargetOutcome(
@@ -274,6 +324,7 @@ class OperationCoordinator:
                     str(exc),
                     dispatched=False,
                     errno=exc.errno,
+                    code=exc.code,
                 )
             return TargetOutcome(
                 record.uuid,
@@ -281,6 +332,7 @@ class OperationCoordinator:
                 str(exc),
                 dispatched=True,
                 errno=exc.errno,
+                code=exc.code,
             )
         except Exception as exc:
             return TargetOutcome(

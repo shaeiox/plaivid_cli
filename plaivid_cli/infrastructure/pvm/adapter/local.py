@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import replace
@@ -26,7 +27,12 @@ from plaivid_cli.domain.models import (
 from plaivid_cli.domain.overview import DashboardSample, LocalHostSample, NicSample, PhysicalNic
 from plaivid_cli.infrastructure.diagnostics import redact_text
 from plaivid_cli.infrastructure.local_monitor import LinuxMonitor, sballd_pid_file_present
-from plaivid_cli.infrastructure.process import ProcessError, ProcessRunner, ProcessStartError
+from plaivid_cli.infrastructure.process import (
+    ProcessError,
+    ProcessRunner,
+    ProcessStartError,
+    ProcessTimeout,
+)
 from plaivid_cli.infrastructure.pvm.overview import parse_dashboard, parse_nic_list
 from plaivid_cli.infrastructure.pvm.parsers import (
     parse_metrics,
@@ -60,17 +66,27 @@ class LocalPvmAdapter:
         running_vms_argv: Sequence[str],
         *,
         allow_credential_argv: bool = False,
+        action_timeout: float = 10.0,
     ) -> None:
         if not running_vms_argv or any(not part for part in running_vms_argv):
             raise ValueError("pvm-running-vms executable must be a non-empty argv")
+        if not math.isfinite(action_timeout) or action_timeout <= 0:
+            raise ValueError("action_timeout must be finite and positive")
         self._sbell = sbell
         self._runner = process_runner
         self._running_argv = tuple(running_vms_argv)
         self._allow_credential_argv = allow_credential_argv
+        self._action_timeout = action_timeout
         self._local_monitor = LinuxMonitor()
 
     def _call(
-        self, module: str, command: str, params: str = "<params/>", token: str | None = None
+        self,
+        module: str,
+        command: str,
+        params: str = "<params/>",
+        token: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> SbellResponse:
         if token and not self._allow_credential_argv:
             raise AppError(
@@ -79,9 +95,11 @@ class LocalPvmAdapter:
                 code="CREDENTIAL_ARGV_ACK_REQUIRED",
             )
         try:
-            return self._sbell.call(module, command, params, token)
+            return self._sbell.call(module, command, params, token, timeout=timeout)
         except ProcessStartError as exc:
             raise AppError(ErrorKind.PROCESS, str(exc), code="PROCESS_START_FAILED") from exc
+        except ProcessTimeout as exc:
+            raise AppError(ErrorKind.PROCESS, str(exc), code="PVM_COMMAND_TIMEOUT") from exc
         except ProcessError as exc:
             raise AppError(ErrorKind.PROCESS, str(exc), code="PVM_PROCESS_ERROR") from exc
 
@@ -264,8 +282,42 @@ class LocalPvmAdapter:
         return SourceResult(samples, status, "local sysfs")
 
     def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply:
-        response = self._call("vm", action.value, _action_params(action, uuid), token)
+        response = self._call(
+            "vm",
+            action.value,
+            _action_params(action, uuid),
+            token,
+            timeout=self._action_timeout,
+        )
         return response.reply()
+
+    def is_daemon_alive(
+        self, timeout: float = 2.0, *, token: str | None = None
+    ) -> bool:
+        """Probe ``sballd`` responsiveness with a short bounded deadline."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be finite and positive")
+        try:
+            if token and self._allow_credential_argv:
+                response = self._call(
+                    "user", "whoami", "<params/>", token, timeout=timeout
+                )
+            else:
+                response = self._sbell.call(
+                    "user", "whoami", "<params/>", None, timeout=timeout
+                )
+        except (AppError, ProcessError, ValueError):
+            return False
+        if response.ok:
+            return True
+        # An unauthenticated or expired-token whoami returns status="failed"
+        # with an sballd errno (e.g. 39), proving sballd answered over its
+        # socket; errno 108 means sbell could not connect to the UNIX socket.
+        return (
+            response.status == "failed"
+            and response.errno is not None
+            and response.errno != "108"
+        )
 
     def authenticate_argv_warning(self) -> str:
         return "sbell credentials and tokens are passed in process arguments; this is not verified safe"

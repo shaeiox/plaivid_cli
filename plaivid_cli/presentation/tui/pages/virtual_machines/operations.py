@@ -98,7 +98,6 @@ class VMOperationMixin:
         if session is None:
             self.tasks.abandon(operation_id, "sign in before submitting an operation")
             return
-        self.tasks.start(operation_id)
         try:
             result = self.operations.execute(
                 session.token,
@@ -107,8 +106,8 @@ class VMOperationMixin:
                 section,
                 is_bulk=selection.is_bulk,
                 plan=plan,
-                on_progress=lambda target_uuid, state: self.tasks.progress(
-                    operation_id, target_uuid, state
+                on_progress=lambda target_uuid, state, detail="": self.tasks.progress(
+                    operation_id, target_uuid, state, detail
                 ),
             )
         except AppError as exc:

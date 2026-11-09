@@ -49,3 +49,15 @@ def test_host_status_interval_defaults_to_two_seconds_and_is_configurable() -> N
     for bad in ("0", "-1", "nan", "inf"):
         with pytest.raises(ConfigurationError, match="finite positive"):
             load_settings({"PLAIVID_HOST_STATUS_INTERVAL": bad})
+
+
+def test_action_timeout_defaults_to_ten_seconds_while_cmd_timeout_stays_thirty() -> None:
+    defaults = load_settings({})
+    assert defaults.action_timeout == 10.0
+    assert defaults.process_timeout == 30.0
+    custom = load_settings({"PLAIVID_ACTION_TIMEOUT": "6.5", "PLAIVID_CMD_TIMEOUT": "45"})
+    assert custom.action_timeout == 6.5
+    assert custom.process_timeout == 45.0
+    for bad in ("0", "-5", "nan", "inf"):
+        with pytest.raises(ConfigurationError, match="finite positive"):
+            load_settings({"PLAIVID_ACTION_TIMEOUT": bad})

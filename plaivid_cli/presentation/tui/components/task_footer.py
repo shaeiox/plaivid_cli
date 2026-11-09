@@ -27,17 +27,20 @@ _STATE_GLYPH = {
     TaskStatus.SUCCEEDED: "✓",
     TaskStatus.FAILED: "✗",
     TaskStatus.REJECTED: "⊘",
+    TaskStatus.SKIPPED: "–",
     TaskStatus.UNKNOWN: "?",
 }
 
 # TaskStatus -> palette attribute. Unknown is warning-coloured, never error-
-# coloured: an unestablished outcome is not a definite failure.
+# coloured: an unestablished outcome is not a definite failure. Skipped rows
+# use muted style so unattempted targets are never mistaken for rejections.
 _STATE_COLOUR = {
     TaskStatus.QUEUED: "muted",
     TaskStatus.RUNNING: "primary",
     TaskStatus.SUCCEEDED: "success",
     TaskStatus.FAILED: "error",
     TaskStatus.REJECTED: "warning",
+    TaskStatus.SKIPPED: "muted",
     TaskStatus.UNKNOWN: "warning",
 }
 
@@ -156,7 +159,11 @@ class TaskViewFooter(DataTable):
         if record.status is TaskStatus.RUNNING:
             elapsed = _elapsed(record.elapsed_seconds(now=now))
             return f"{elapsed} · {safe}" if safe else elapsed
-        if record.status.is_terminal and record.finished_at is not None:
+        if (
+            record.status.is_terminal
+            and record.finished_at is not None
+            and record.started_at is not None
+        ):
             elapsed = _elapsed(record.elapsed_seconds(now=now))
             return f"{elapsed} · {safe}" if safe else elapsed
         return safe
@@ -176,11 +183,14 @@ class TaskViewFooter(DataTable):
     def _active_count(self) -> int:
         return sum(not record.status.is_terminal for record in self._rows.values())
 
+    def _running_count(self) -> int:
+        return sum(record.status is TaskStatus.RUNNING for record in self._rows.values())
+
     def _sync_timer(self) -> None:
         """Run the elapsed clock only while something is actually running."""
-        if self._active_count() and self._elapsed_timer is None:
+        if self._running_count() and self._elapsed_timer is None:
             self._elapsed_timer = self.set_interval(1.0, self._tick_elapsed)
-        elif not self._active_count():
+        elif not self._running_count():
             self._stop_timer()
 
     def _stop_timer(self) -> None:
@@ -195,7 +205,7 @@ class TaskViewFooter(DataTable):
     def _tick_elapsed(self) -> None:
         now = datetime.now(UTC)
         for record in list(self._rows.values()):
-            if record.status.is_terminal:
+            if record.status is not TaskStatus.RUNNING:
                 continue
             if not self._column_keys:
                 return

@@ -91,6 +91,13 @@ class FailureScope(StrEnum):
     SESSION = "session"
 
 
+#: Error code raised when an action trigger exceeds ``PLAIVID_ACTION_TIMEOUT``.
+COMMAND_TIMEOUT_CODE = "PVM_COMMAND_TIMEOUT"
+
+#: Sentinel stop reason used when the fast daemon liveness probe fails.
+DAEMON_OFFLINE_REASON = "Daemon Offline"
+
+
 def classify_failure(errno: str | None, *, default: FailureScope = FailureScope.SESSION) -> FailureScope:
     """Classify a PVM failure from its sbell errno.
 
@@ -102,12 +109,21 @@ def classify_failure(errno: str | None, *, default: FailureScope = FailureScope.
     return default
 
 
-def is_target_scoped_error(outcome: TargetOutcome) -> bool:
-    """True when this outcome must not abort the rest of its batch."""
-    if not outcome.dispatched:
-        # Nothing reached the PVM: a transport/policy/process failure is never
-        # about one target's state.
+def is_target_scoped_error(outcome: TargetOutcome, *, daemon_alive: bool = True) -> bool:
+    """True when this outcome must not abort the rest of its batch.
+
+    When ``daemon_alive`` is ``False``, no failure is target-scoped: ``sballd``
+    itself is unreachable and the remaining batch must fast-abort. When
+    ``daemon_alive`` is ``True``, both documented target-state rejections
+    (``errno 146``) and per-target action timeouts (``PVM_COMMAND_TIMEOUT``) are
+    isolated to the current target so subsequent targets proceed immediately.
+    """
+    if not daemon_alive or not outcome.dispatched:
+        # Nothing reached a responsive PVM: a transport/policy/process/daemon
+        # failure is never about one target's state.
         return False
+    if outcome.code == COMMAND_TIMEOUT_CODE:
+        return True
     return classify_failure(outcome.errno, default=FailureScope.SESSION) is FailureScope.TARGET
 
 
@@ -121,16 +137,22 @@ STOP_STATES: frozenset[OperationState] = frozenset(
 )
 
 
-def outcome_stops_batch(outcome: TargetOutcome) -> bool:
+def outcome_stops_batch(outcome: TargetOutcome, *, daemon_alive: bool = True) -> bool:
     """True when this outcome must abort the rest of a bulk batch."""
-    return outcome.state in STOP_STATES and not is_target_scoped_error(outcome)
+    if not daemon_alive:
+        return True
+    return outcome.state in STOP_STATES and not is_target_scoped_error(
+        outcome, daemon_alive=daemon_alive
+    )
 
 
-def batch_stop_reason(outcome: TargetOutcome) -> str:
+def batch_stop_reason(outcome: TargetOutcome, *, daemon_alive: bool = True) -> str:
     """Short, operator-safe reason recorded on targets skipped by a stop.
 
     Shared by both executors so the VM and Desktop paths cannot diverge.
     """
+    if not daemon_alive:
+        return DAEMON_OFFLINE_REASON
     if outcome.state is OperationState.OUTCOME_UNKNOWN:
         return "earlier target left an unknown outcome that must be reconciled"
     return "an earlier target failed in a way that affects the whole session"

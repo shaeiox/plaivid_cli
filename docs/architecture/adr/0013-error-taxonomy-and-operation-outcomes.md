@@ -42,15 +42,21 @@ Return all per-target outcomes, safe causes, and counts plus one aggregate:
 - `COMMAND_ACCEPTED_UNCONFIRMED` if any target has that status and none is `OUTCOME_UNKNOWN`; it remains visible in the overall summary.
 - `OUTCOME_UNKNOWN` if any target is unknown; this has precedence over ordinary partial/failure summaries and stays visible in aggregate counts.
 
-The implementation policy is sequential with **scoped continuation**. Because a bulk request sends one PVM command per target, a failure confined to one target must not stop the batch; only a failure of the session, the request contract, or the local transport does. ADR 0012 owns the policy; this ADR defines the reporting it produces.
+The implementation policy is sequential with **scoped continuation and daemon liveness probing** (ADR 0012, ADR 0015). Because a bulk request sends one PVM command per target, a failure or trigger timeout confined to one target while `sballd` is healthy must not stop the batch; only a daemon outage, session/contract failure, or non-timeout transport failure aborts remaining targets.
 
-| Failure scope | Evidence | Batch behaviour | Remaining targets |
-| --- | --- | --- | --- |
-| Target | PVM answered with a target-state rejection (`errno` 146) | continue | attempted normally |
-| Session | `errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, or any undispatched failure | stop | `NOT_STARTED` |
-| Indeterminate | `OUTCOME_UNKNOWN`, transport failure, unrecognised `errno` | stop | `NOT_STARTED` |
+| Failure scope | Evidence | Target outcome | Batch behaviour | Remaining targets (Task Board) |
+| --- | --- | --- | --- | --- |
+| Target state | `errno` 146 + `is_daemon_alive() == True` | `FAILED` | continue | attempted normally |
+| Target timeout | `code == PVM_COMMAND_TIMEOUT` + `is_daemon_alive() == True` | `OUTCOME_UNKNOWN` (`command timed out (10s), daemon healthy`) | continue | attempted normally |
+| Daemon offline | Timeout or error + `is_daemon_alive() == False` | `FAILED` (`Daemon Offline`) | fast-abort | `NOT_STARTED` → `– SKIPPED` (`Daemon Offline`) |
+| Session / contract | `errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, or undispatched failure | `FAILED` / `REJECTED` / `OUTCOME_UNKNOWN` | stop | `NOT_STARTED` → `– SKIPPED` |
+| Indeterminate | Non-timeout `OUTCOME_UNKNOWN`, unexpected status, unrecognised `errno` | `OUTCOME_UNKNOWN` / `FAILED` | stop | `NOT_STARTED` → `– SKIPPED` |
 
-Each `NOT_STARTED` target carries the reason the batch stopped, so an operator can tell a mixed batch from an aborted one. A mixed batch aggregates to `PARTIAL` when at least one target succeeded, and to `FAILED` when none did; `OUTCOME_UNKNOWN` keeps its precedence over both.
+### Task Board vocabulary (`TaskStatus`)
+
+On the interactive Task Board (`domain/models/tasks.py`, `TaskViewFooter`), queued targets remain `· QUEUED` until actively dispatched to `sbell` (`▶ RUNNING`), and `OperationState.NOT_STARTED` maps to `TaskStatus.SKIPPED` (rendered as `– SKIPPED` in muted style) rather than `⊘ REJECTED`. `REJECTED` is reserved strictly for pre-dispatch policy/admission rejections and explicit cancellations before dispatch. Authoritative per-target outcome details (such as `"command timed out (10s), daemon healthy"` and `"Daemon Offline"`) propagate directly into `TaskManager.progress()` and render on `TaskViewFooter`.
+
+Each `NOT_STARTED` target carries the reason the batch stopped, so an operator can tell a mixed batch from an aborted one. A mixed batch aggregates to `PARTIAL` when at least one target succeeded (with no `OUTCOME_UNKNOWN`), and to `FAILED` when none did; `OUTCOME_UNKNOWN` keeps its top precedence over both so a timed-out target is never silently re-run.
 
 Since current PVM response semantics are unverified, even a positive-looking response maps to `OUTCOME_UNKNOWN` and therefore still stops bulk dispatch. A later evidence-backed `COMMAND_ACCEPTED_UNCONFIRMED` mapping requires an owner decision on whether bulk may continue past that state. Do not retry automatically.
 

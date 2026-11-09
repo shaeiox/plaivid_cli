@@ -207,3 +207,103 @@ def test_dashboard_uses_existing_token_gate_and_preserves_requested_xml() -> Non
     else:
         raise AssertionError("dashboard must retain the existing token gate")
     assert len(runner.calls) == 1
+
+
+def test_dispatch_action_uses_fast_action_timeout_while_reads_use_default() -> None:
+    seen_timeouts: list[tuple[tuple[str, ...], float | None]] = []
+
+    class RecordingRunner(FakeRunner):
+        def run(self, argv, *, timeout=None):
+            seen_timeouts.append((tuple(argv), timeout))
+            return super().run(argv, timeout=timeout)
+
+    runner = RecordingRunner()
+    adapter = LocalPvmAdapter(
+        SbellClient(("sudo", "sbell"), runner),
+        runner,
+        ("pvm-running-vms",),
+        allow_credential_argv=True,
+        action_timeout=7.5,
+    )
+    adapter.list_objects("fake-token")
+    adapter.dispatch_action("fake-token", Action.STOP, UUID_A)
+    assert seen_timeouts[0][1] is None  # read delegates to ProcessRunner default (30s)
+    assert seen_timeouts[1][1] == 7.5   # lifecycle action uses fast trigger timeout
+
+
+def test_process_timeout_is_translated_to_pvm_command_timeout_code() -> None:
+    from plaivid_cli.infrastructure.process import ProcessTimeout
+
+    class TimingOutRunner(FakeRunner):
+        def run(self, argv, *, timeout=None):
+            raise ProcessTimeout(reaped=True)
+
+    runner = TimingOutRunner()
+    adapter = LocalPvmAdapter(
+        SbellClient(("sudo", "sbell"), runner),
+        runner,
+        ("pvm-running-vms",),
+        allow_credential_argv=True,
+    )
+    try:
+        adapter.dispatch_action("fake-token", Action.STOP, UUID_A)
+    except AppError as exc:
+        assert exc.code == "PVM_COMMAND_TIMEOUT"
+    else:
+        raise AssertionError("ProcessTimeout must raise AppError(code='PVM_COMMAND_TIMEOUT')")
+
+
+def test_is_daemon_alive_uses_two_second_probe_and_distinguishes_socket_failure() -> None:
+    from plaivid_cli.infrastructure.process import ProcessTimeout
+
+    deadlines: list[float | None] = []
+    mode = "alive"
+
+    class ProbeRunner(FakeRunner):
+        def run(self, argv, *, timeout=None):
+            deadlines.append(timeout)
+            if mode == "timeout":
+                raise ProcessTimeout(reaped=True)
+            if mode == "socket_dead":
+                return ProcessResult(
+                    1,
+                    "<response><status>failed</status><description>"
+                    "<errno>108</errno><what>socket refused</what>"
+                    "</description></response>",
+                    "",
+                    False,
+                    False,
+                    0.01,
+                )
+            if mode == "unauth_alive":
+                return ProcessResult(
+                    0,
+                    "<response><status>failed</status><description>"
+                    "<errno>39</errno><what>UnAuthorized</what>"
+                    "</description></response>",
+                    "",
+                    False,
+                    False,
+                    0.01,
+                )
+            return super().run(argv, timeout=timeout)
+
+    runner = ProbeRunner()
+    adapter = LocalPvmAdapter(
+        SbellClient(("sudo", "sbell"), runner),
+        runner,
+        ("pvm-running-vms",),
+        allow_credential_argv=True,
+    )
+    assert adapter.is_daemon_alive() is True
+    assert deadlines[-1] == 2.0
+
+    mode = "unauth_alive"
+    assert adapter.is_daemon_alive() is True
+
+    mode = "socket_dead"
+    assert adapter.is_daemon_alive() is False
+
+    mode = "timeout"
+    assert adapter.is_daemon_alive(timeout=1.5, token="fake-token") is False
+    assert deadlines[-1] == 1.5

@@ -91,7 +91,7 @@ def test_target_ref_rejects_invalid_uuid() -> None:
         (OperationState.FAILED, TaskStatus.FAILED),
         (OperationState.REJECTED, TaskStatus.REJECTED),
         (OperationState.CANCELLED_BEFORE_DISPATCH, TaskStatus.REJECTED),
-        (OperationState.NOT_STARTED, TaskStatus.REJECTED),
+        (OperationState.NOT_STARTED, TaskStatus.SKIPPED),
         (OperationState.OUTCOME_UNKNOWN, TaskStatus.UNKNOWN),
         (OperationState.PARTIAL, TaskStatus.UNKNOWN),
         (OperationState.QUEUED, TaskStatus.QUEUED),

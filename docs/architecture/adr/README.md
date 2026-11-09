@@ -31,6 +31,7 @@ No ADR authorizes production access. The existing OpenSpec Change is `implement-
 | [0012](0012-security-and-mutation-safety.md) | Security and Mutation Safety Policy | Implemented locally; credential transport blocked | Credential argv threat-model acceptance; PVM action/authorization semantics. |
 | [0013](0013-error-taxonomy-and-operation-outcomes.md) | Error Taxonomy and Operation Outcomes | Implemented locally | Positive/negative response semantics remain pending PVM evidence. |
 | [0014](0014-collection-scheduling-and-freshness-policy.md) | Collection Scheduling and Freshness Policy | Implemented locally | Product-approved freshness/cadence budgets and host load evidence. |
+| [0015](0015-fast-action-timeout-and-daemon-liveness-probe.md) | Two-Phase Fast Action Trigger, Daemon Liveness Probe, and Task Board `SKIPPED` Semantics | Implemented locally | Host action-trigger timeout budgets remain pending PVM evidence. |
 
 ## Ownership and implementation notes
 

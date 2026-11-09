@@ -44,6 +44,9 @@ class TargetOutcome:
     #: Retained so failure scope (target vs. session) is classifiable without
     #: parsing display text.
     errno: str | None = None
+    #: Structured application error code (e.g. ``PVM_COMMAND_TIMEOUT``,
+    #: ``PROCESS_START_FAILED``) when dispatch raised an ``AppError``.
+    code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

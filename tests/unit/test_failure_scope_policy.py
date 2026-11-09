@@ -275,12 +275,14 @@ def test_progress_sink_reports_every_target_under_scoped_continuation() -> None:
         plan=plan,
         on_progress=lambda uuid, state: seen.append((uuid, state)),
     )
-    assert [state for _, state in seen] == [
-        OperationState.FAILED,
-        OperationState.SUCCEEDED,
-        OperationState.SUCCEEDED,
+    assert seen == [
+        (selection.uuids[0], OperationState.RUNNING),
+        (selection.uuids[0], OperationState.FAILED),
+        (selection.uuids[1], OperationState.RUNNING),
+        (selection.uuids[1], OperationState.SUCCEEDED),
+        (selection.uuids[2], OperationState.RUNNING),
+        (selection.uuids[2], OperationState.SUCCEEDED),
     ]
-    assert [uuid for uuid, _ in seen] == list(selection.uuids)
     collection.close()
 
 

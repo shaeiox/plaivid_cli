@@ -2,7 +2,48 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
+
 from plaivid_cli.domain.models import OperationState, TargetOutcome
+
+#: Per-target progress callback: ``(target_uuid, state[, detail])``. The sink is
+#: notified before (``RUNNING``) and after each dispatch so a view can show live
+#: sequential per-target status. Both 2-arg and 3-arg callables are accepted, and
+#: any sink exception is swallowed so presentation never corrupts a mutation.
+ProgressSink = Callable[..., None]
+
+
+def _accepts_detail(sink: ProgressSink) -> bool:
+    try:
+        params = tuple(inspect.signature(sink).parameters.values())
+    except (TypeError, ValueError):
+        return True
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return True
+    positional = [
+        p
+        for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    return len(positional) >= 3
+
+
+def report_progress(
+    sink: ProgressSink | None,
+    target_uuid: str,
+    state: OperationState,
+    detail: str = "",
+) -> None:
+    if sink is None:
+        return
+    try:
+        if _accepts_detail(sink):
+            sink(target_uuid, state, detail)
+        else:
+            sink(target_uuid, state)
+    except Exception:
+        pass
 
 
 def aggregate_state(outcomes: tuple[TargetOutcome, ...]) -> OperationState:

@@ -45,6 +45,7 @@ def build_runtime(settings: Settings) -> Runtime:
         runner,
         settings.running_vms_argv,
         allow_credential_argv=settings.allow_credential_argv,
+        action_timeout=settings.action_timeout,
     )
     collection = CollectionCoordinator(provider, refresh_interval=settings.refresh_interval)
     audit = ReadOnlyAuditAdapter(settings.audit_database)

@@ -56,6 +56,7 @@ from .messages import (
     TaskMessage,
     TaskProgress,
     TaskRegistryReset,
+    TaskSkipped,
     TaskStarted,
     TaskUnknown,
 )
@@ -75,6 +76,7 @@ _MESSAGE_FOR_KIND = {
     "progress": TaskProgress,
     "completed": TaskCompleted,
     "failed": TaskFailed,
+    "skipped": TaskSkipped,
     "unknown": TaskUnknown,
 }
 
@@ -354,6 +356,10 @@ class PlaividTui(
 
     @on(TaskFailed)
     def task_failed(self, event: TaskFailed) -> None:
+        self._apply_task_message(event)
+
+    @on(TaskSkipped)
+    def task_skipped(self, event: TaskSkipped) -> None:
         self._apply_task_message(event)
 
     @on(TaskUnknown)
