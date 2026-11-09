@@ -95,6 +95,83 @@ def test_collection_last_good_and_one_read_per_refresh() -> None:
         collection.close()
 
 
+def test_running_summary_tracks_inventory_refresh_selection_and_logout(tmp_path) -> None:
+    provider, collection, application, operations, sessions, _ = runtime(tmp_path)
+    statuses = (
+        ("RUNNING", None),
+        ("Started", None),
+        (None, "sTaRtEd"),
+        ("stopped", "RUNNING"),
+        ("running", "started"),  # Both match, but this desktop counts once.
+        ("stopped", "stopped"),
+        ("active", "on"),  # Other seemingly positive values are not running.
+        (None, None),
+        ("", "unknown"),
+    )
+    records = tuple(
+        VirtualDesktop(
+            f"00000000-0000-4000-8000-{index:012x}",
+            f"desktop-{index}",
+            local_status=local,
+            cluster_status=cluster,
+        )
+        for index, (local, cluster) in enumerate(statuses, 1)
+    )
+    current = [records]
+    provider.list_desktops = lambda token: SourceResult(
+        current[0], CollectionStatus.CURRENT, "desktops"
+    )
+    tui = PlaividTui(application, operations, sessions)
+
+    async def exercise() -> None:
+        async with tui.run_test(size=(120, 45)) as pilot:
+            async def wait_for_label(expected: str) -> None:
+                for _ in range(100):
+                    if str(tui.query_one("#desktop-running-label", Static).render()) == expected:
+                        return
+                    await pilot.pause(0.05)
+                assert str(tui.query_one("#desktop-running-label", Static).render()) == expected
+
+            await pilot.pause(0.2)
+            label = tui.query_one("#desktop-running-label", Static)
+            assert str(label.render()) == "—"
+            assert "Running" in str(label.parent.query_one(".metric-title", Static).render())
+            tui.query_one("#tabs", TabbedContent).active = "desktops"
+            await wait_for_label("5/9")
+            assert str(tui.query_one("#desktop-count", Static).render()) == "9"
+
+            # The highlighted UUID and details still change independently of the count.
+            table = tui.query_one("#desktop-table", DataTable)
+            table.move_cursor(row=1)
+            await pilot.pause(0.1)
+            assert tui._desktop_selected == records[1].uuid
+            assert records[1].uuid in str(tui.query_one("#desktop-detail", Static).render())
+            assert str(label.render()) == "5/9"
+            tui.query_one("#desktop-search", Input).value = "desktop-2"
+            await pilot.pause(0.1)
+            assert table.row_count == 1
+            assert str(label.render()) == "5/9"  # Search filters the table, not the total.
+
+            current[0] = (records[5], records[6])
+            tui._request_refresh()
+            await wait_for_label("0/2")
+            current[0] = ()
+            tui._request_refresh()
+            await wait_for_label("—")
+            assert str(tui.query_one("#desktop-count", Static).render()) == "0"
+
+            current[0] = (records[0],)
+            tui._request_refresh()
+            await wait_for_label("1/1")
+            tui._session_ended("test logout")
+            assert str(label.render()) == "—"
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        collection.close()
+
+
 @pytest.mark.parametrize("width", [80, 120])
 def test_page_search_uuid_selection_and_direct_action(tmp_path, width) -> None:
     provider, collection, application, operations, sessions, _ = runtime(tmp_path)

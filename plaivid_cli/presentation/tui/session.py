@@ -84,7 +84,7 @@ class SessionMixin:
         self.query_one("#desktop-all", Checkbox).value = False
         self.query_one("#desktop-quality", Static).update("Not collected")
         self.query_one("#desktop-count", Static).update("—")
-        self.query_one("#desktop-selected-label", Static).update("—")
+        self.query_one("#desktop-running-label", Static).update("—")
         self.query_one("#desktop-detail", Static).update("Select a Desktop to inspect its details.")
         self.query_one("#desktop-action-status", Static).update("No operation submitted.")
         desktop_audit = self.query_one("#desktop-audit-panel", DataTable)

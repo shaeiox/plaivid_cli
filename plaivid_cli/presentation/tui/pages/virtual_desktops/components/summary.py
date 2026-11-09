@@ -1,4 +1,4 @@
-"""Virtual Desktop count, selection, inventory, and refresh summary."""
+"""Virtual Desktop count, runtime, inventory, and refresh summary."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ class DesktopSummary(Horizontal):
             palette=self._palette,
         )
         yield MetricTile(
-            title="Selected",
-            value_id="desktop-selected-label",
+            title="Running",
+            value_id="desktop-running-label",
             initial="—",
             palette=self._palette,
         )

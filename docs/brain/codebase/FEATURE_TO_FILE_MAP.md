@@ -172,7 +172,7 @@ There are **16 feature/capability maps** in this document.
 
 ### Feature: Virtual Desktop inventory and lifecycle actions
 
-- **Description:** Desktop tab mirroring the VM page's summary/search/action/audit layout, with checked bulk subsets, an all-inventory fallback, its own conservative refresh cadence, and six actions.
+- **Description:** Desktop tab mirroring the VM page's summary/search/action/audit layout, with an unfiltered running/total summary (local or cluster `running`/`started`), checked bulk subsets, an all-inventory fallback, its own conservative refresh cadence, and six actions.
 - **Entry point:** `plaivid_cli/presentation/tui/pages/virtual_desktops/page.py::VirtualDesktopPage`.
 - **Main implementation:** `plaivid_cli/presentation/tui/pages/virtual_desktops/controller.py`, `plaivid_cli/application/operations/desktop_executor.py`.
 - **Supporting modules:** `plaivid_cli/infrastructure/pvm/desktops.py`, `plaivid_cli/infrastructure/pvm/adapter/requests.py`, `plaivid_cli/presentation/tui/pages/virtual_desktops/policy.py`, `plaivid_cli/presentation/tui/pages/virtual_desktops/components/summary.py`, `plaivid_cli/presentation/tui/pages/virtual_desktops/components/inventory.py`, `plaivid_cli/presentation/tui/pages/virtual_desktops/components/details.py`.

@@ -61,7 +61,24 @@ class DesktopMixin:
         self.query_one("#desktop-count", Static).update(
             str(len(self._desktops)) if section.has_value else "—"
         )
+        self._update_running_count()
         self._filter_desktops()
+
+    def _update_running_count(self) -> None:
+        """Show running desktops across the unfiltered inventory."""
+        total = len(self._desktops)
+        if not total:
+            text = "—"
+        else:
+            running_statuses = {"running", "started"}
+            # Either observed runtime field is sufficient; count each desktop once.
+            running = sum(
+                1 for desktop in self._desktops.values()
+                if (desktop.local_status or "").lower() in running_statuses
+                or (desktop.cluster_status or "").lower() in running_statuses
+            )
+            text = f"{running}/{total}"
+        self.query_one("#desktop-running-label", Static).update(text)
 
     @on(Input.Changed, "#desktop-search")
     def desktop_search_changed(self) -> None:
@@ -137,9 +154,6 @@ class DesktopMixin:
         )
         checked = len(self._desktop_checked & set(self._desktops))
         scope = f"{'All unfiltered Desktops' if all_targets else 'Selected Desktop'} · {len(uuids)} target(s) · {checked} checked"
-        self.query_one("#desktop-selected-label", Static).update(
-            (self._desktop_selected or "—")[:8]
-        )
         self.query_one("#desktop-scope", Static).update(scope)
         record = self._desktops.get(self._desktop_selected or "")
         if record is None or self._desktop_selected not in self._desktop_rows:
