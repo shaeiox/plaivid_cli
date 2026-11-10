@@ -177,6 +177,12 @@ class PlaividTui(
         self._desktop_min_generation = application.collection.snapshot.generation
         self._desktop_rows: tuple[str, ...] = ()
         self._desktop_cells: dict[str, tuple[str, ...]] = {}
+        # Operator-chosen column sort: (column_index, descending) or None for the
+        # page's own default order. The tables are sorted in Python (not with
+        # DataTable.sort) so this state stays the single source of row order and
+        # ``_table_order``/``_desktop_rows`` cannot drift from what is on screen.
+        self._vm_sort: tuple[int, bool] | None = None
+        self._desktop_sort: tuple[int, bool] | None = None
 
     def _group_box(self, box, group: str, title: str) -> None:
         """Title and border of a card, coloured by its group (plain when colour is off)."""
@@ -442,6 +448,14 @@ class PlaividTui(
     @on(DataTable.RowHighlighted, "#fleet-table")
     def row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         VirtualMachinesMixin.row_highlighted(self, event)
+
+    @on(DataTable.HeaderSelected, "#fleet-table")
+    def vm_header_clicked(self, event: DataTable.HeaderSelected) -> None:
+        VirtualMachinesMixin.vm_header_selected(self, event)
+
+    @on(DataTable.HeaderSelected, "#desktop-table")
+    def desktop_header_clicked(self, event: DataTable.HeaderSelected) -> None:
+        DesktopMixin.desktop_header_selected(self, event)
 
     @on(Select.Changed, "#bulk-actions")
     def bulk_action_selected(self, event: Select.Changed) -> None:

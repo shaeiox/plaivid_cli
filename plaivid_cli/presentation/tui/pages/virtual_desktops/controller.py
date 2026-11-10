@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid as uuidlib
 
 from textual import on, work
+from textual.containers import Vertical
 from textual.widgets import (
     Button,
     Checkbox,
@@ -26,6 +27,13 @@ from plaivid_cli.domain.models import (
 )
 from plaivid_cli.domain.models.tasks import TargetRef
 from plaivid_cli.domain.redaction import redact_text
+from plaivid_cli.presentation.tui.components.sorting import (
+    DESKTOP_SORT_COLUMNS,
+    column_value,
+    describe_sort,
+    next_sort_state,
+    sort_records,
+)
 from plaivid_cli.presentation.tui.messages import OperationFinished
 
 
@@ -88,14 +96,52 @@ class DesktopMixin:
     def desktop_scope_changed(self) -> None:
         self._render_desktop_detail()
 
+    def desktop_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        """Sort the Desktop table from a column-header click.
+
+        Registered only on the App with a ``#desktop-table`` selector; see
+        ``VMSelectionMixin.vm_header_selected`` for why it is not decorated here.
+        """
+        self.action_sort_desktops_by_column(event.column_index)
+
+    def action_sort_desktops_by_column(self, column: int) -> None:
+        """Cycle the Desktop table's sort column (ascending -> descending -> default)."""
+        previous = self._desktop_sort
+        self._desktop_sort = next_sort_state(previous, column, DESKTOP_SORT_COLUMNS)
+        if self._desktop_sort != previous:
+            self._filter_desktops()
+
+    def _desktop_sort_key(self, column: int):
+        """Comparable value per sortable column; absent values stay last."""
+        by_column = {
+            1: lambda item: column_value(item.name, item.uuid),
+            2: lambda item: column_value(item.uuid, item.uuid, fold=False),
+            3: lambda item: column_value(item.cluster_status, item.uuid),
+            4: lambda item: column_value(item.os_type, item.uuid),
+            5: lambda item: column_value(item.vcpu, item.uuid, numeric=True),
+        }
+        return by_column[column]
+
+    def _show_desktop_sort_title(self) -> None:
+        """Name the active sort in the panel title, so order is never implicit."""
+        if not self.is_mounted(self.query_one("#desktop-list", Vertical)):
+            return
+        detail = describe_sort(self._desktop_sort, DESKTOP_SORT_COLUMNS)
+        title = "Desktop list" if not detail else f"Desktop list · {detail}"
+        self._group_box(self.query_one("#desktop-list", Vertical), "vms", title)
+
     def _filter_desktops(self) -> None:
         if not self.is_mounted(self.query_one("#desktop-table", DataTable)):
             return
         query = self.query_one("#desktop-search", Input).value.strip().casefold()
-        records = sorted(
-            (item for item in self._desktops.values() if query in item.name.casefold()),
-            key=lambda item: (item.name.casefold(), item.uuid),
+        outcome = sort_records(
+            [item for item in self._desktops.values() if query in item.name.casefold()],
+            self._desktop_sort,
+            lambda item: (item.name.casefold(), item.uuid),
+            {column: self._desktop_sort_key(column) for column in DESKTOP_SORT_COLUMNS},
         )
+        records = outcome.records
+        self._desktop_sort = outcome.applied
         rows = {
             item.uuid: (
                 redact_text(item.name),
@@ -128,6 +174,7 @@ class DesktopMixin:
                             update_width=True,
                         )
         self._desktop_rows, self._desktop_cells = order, rows
+        self._show_desktop_sort_title()
         if self._desktop_selected not in rows:
             self._desktop_selected = order[0] if order else None
         if self._desktop_selected:
