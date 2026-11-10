@@ -19,6 +19,8 @@ def test_settings_parse_trusted_argv_and_user_state_dir() -> None:
     assert settings.running_vms_argv == ("/usr/sbin/pvm-running-vms",)
     assert settings.allow_credential_argv is True
     assert settings.process_timeout == 12
+    assert settings.max_concurrency == 3
+    assert load_settings({"PLAIVID_MAX_CONCURRENCY": "5"}).max_concurrency == 5
 
 
 def test_invalid_deadlines_and_empty_commands_are_rejected() -> None:
@@ -26,6 +28,9 @@ def test_invalid_deadlines_and_empty_commands_are_rejected() -> None:
         load_settings({"PLAIVID_CMD_TIMEOUT": "0"})
     with pytest.raises(ConfigurationError, match="PLAIVID_SBELL"):
         load_settings({"PLAIVID_SBELL": "  "})
+    for value in ("0", "-1", "1.5", "not-an-int"):
+        with pytest.raises(ConfigurationError, match="PLAIVID_MAX_CONCURRENCY"):
+            load_settings({"PLAIVID_MAX_CONCURRENCY": value})
 
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])

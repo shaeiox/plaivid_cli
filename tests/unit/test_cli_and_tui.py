@@ -133,7 +133,9 @@ class FakeAudit:
 
 
 def runtime(tmp_path: Path):
-    settings = load_settings({"PLAIVID_STATE_DIR": str(tmp_path)})
+    settings = load_settings(
+        {"PLAIVID_STATE_DIR": str(tmp_path), "PLAIVID_MAX_CONCURRENCY": "1"}
+    )
     provider = FakeProvider()
     collection = CollectionCoordinator(provider, refresh_interval=100)
     audit = FakeAudit()
@@ -496,8 +498,17 @@ def test_audit_tables_render_redacted_rows_and_scroll(tmp_path):
                 assert table.max_scroll_y > 0
                 assert table.max_scroll_x > 0
                 table.focus()
-                await pilot.press("pagedown", "right")
-                await pilot.pause(0.3)
+                await pilot.pause()
+                await pilot.press("pagedown")
+                for _ in range(10):
+                    await pilot.pause(0.05)
+                    if table.scroll_y > 0:
+                        break
+                await pilot.press("right")
+                for _ in range(10):
+                    await pilot.pause(0.05)
+                    if table.scroll_x > 0:
+                        break
                 assert table.scroll_y > 0 and table.scroll_x > 0
                 tui.query_one(toggle, Button).press()
                 await pilot.pause()

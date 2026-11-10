@@ -9,7 +9,7 @@
 
 1. **Undifferentiated 30s subprocess ceiling:** Previously, all `sbell` invocations—fast read queries (`sball/show`, `user/objects`) and VM lifecycle actions (`vm/stop` graceful guest ACPI shutdown)—shared `PLAIVID_CMD_TIMEOUT` (`30.0s`). When VM #1 in a 100-VM batch hung during guest shutdown, waiting 30s stalled batch throughput, and killing the local `sbell` client produced a generic `PVM_PROCESS_ERROR` mapped to `OUTCOME_UNKNOWN` (`errno=None`).
 2. **Over-broad batch abort on per-target timeout:** Because `OUTCOME_UNKNOWN` lacked a timeout error code and `errno` was `None`, the batch policy treated one slow guest VM identically to a broken session, immediately aborting VMs #2..#100. Conversely, blindly continuing on *every* timeout without checking daemon health would stall a 100-VM batch for `100 × timeout` when `sballd` itself was offline or wedged.
-3. **Misleading Task Board states:** `OperationState.NOT_STARTED` was collapsed onto `TaskStatus.REJECTED` (`⊘ REJECTED`), all queued targets in a batch were marked `▶ RUNNING` at `t = 0s` instead of sequentially, and generic progress strings overwrote authoritative `TargetOutcome.message` details.
+3. **Misleading Task Board states:** `OperationState.NOT_STARTED` was collapsed onto `TaskStatus.REJECTED` (`⊘ REJECTED`), queued targets could be shown as `▶ RUNNING` before an actual dispatch began, and generic progress strings overwrote authoritative `TargetOutcome.message` details.
 
 ## Decision
 
@@ -24,17 +24,17 @@ Adopt a **Two-Phase Fast Trigger + Daemon Liveness Probe + Scoped Fault Isolatio
 ### 2. Fast 2.0s daemon liveness probe (`is_daemon_alive`)
 
 - Implement `LocalPvmAdapter.is_daemon_alive(timeout: float = 2.0, *, token: str | None = None) -> bool` using a bounded `2.0s` `sbell user whoami` probe.
-- When a lifecycle dispatch returns cleanly (`SUCCEEDED`), advance immediately to the next target with zero probe overhead.
+- Lifecycle targets are dispatched by the bounded rolling pool configured with `PLAIVID_MAX_CONCURRENCY` (default `3`); clean success (`SUCCEEDED`) does not incur a liveness probe. Each batch retains one operation-level mutation barrier and planned-order result reporting.
 - When a target returns `PVM_COMMAND_TIMEOUT` or an error (`FAILED` / `OUTCOME_UNKNOWN`), invoke `is_daemon_alive(timeout=2.0)`:
   - **Daemon Alive (`True`):**
-    - On `PVM_COMMAND_TIMEOUT`: record `OUTCOME_UNKNOWN` on the current target with message `"command timed out (10s), daemon healthy"` (preserving `OUTCOME_UNKNOWN` aggregate precedence and ADR 0012's ban on automatic retries of that target) and **immediately continue** to the next target in the batch.
-    - On target-scoped PVM rejection (`errno 146`): record `FAILED` and **immediately continue** to the next target.
-    - On session/contract/unrecognised errors (`errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, non-timeout transport failure): fail closed and stop remaining targets.
+    - On `PVM_COMMAND_TIMEOUT`: record `OUTCOME_UNKNOWN` on that target with message `"command timed out (10s), daemon healthy"` (never auto-retry it), but continue scheduling unrelated targets.
+    - On a dispatched non-session rejection, including VM-state or disk/storage errors: record `FAILED` for that target and continue scheduling siblings.
+    - On explicit session/contract errors (`errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, or another classified session code): stop submitting new targets. Cancel futures not yet running, allow in-flight calls to settle, and mark only never-dispatched targets `NOT_STARTED`.
   - **Daemon Offline (`False`):**
     - Set the current target to `OperationState.FAILED` (`code="DAEMON_OFFLINE"`, detail `"Daemon Offline"` / `"command timed out (10s): Daemon Offline"`).
-    - Set `stop_reason = "Daemon Offline"` and **fast-abort** all remaining queued targets to `OperationState.NOT_STARTED` with message `"Daemon Offline"`, skipping the post-loop reconciliation read so no further timeout cycles are wasted against a dead daemon.
+    - Set the shared stop event; no further target is submitted. Allow already-running calls to settle, mark only undispatched/cancelled-before-start targets `NOT_STARTED` with message `"Daemon Offline"`, and skip post-operation reconciliation against a dead daemon.
 
-### 3. Truthful Task Board vocabulary and sequential progress
+### 3. Truthful Task Board vocabulary and parallel progress
 
 - Add `TaskStatus.SKIPPED = "SKIPPED"` in `domain/models/tasks.py`, map `OperationState.NOT_STARTED -> TaskStatus.SKIPPED`, and render it in `TaskViewFooter` as `– SKIPPED` in `muted` palette style (reserving `⊘ REJECTED` for true policy/admission rejections and pre-dispatch cancellations).
 - Keep admitted batch targets in `TaskStatus.QUEUED` (`· QUEUED`, `started_at=None`) until `_dispatch_one()` actively begins dispatching that specific target (`OperationState.RUNNING` → `▶ RUNNING`), so only the in-flight target ticks an elapsed clock.
@@ -43,7 +43,7 @@ Adopt a **Two-Phase Fast Trigger + Daemon Liveness Probe + Scoped Fault Isolatio
 ## Consequences
 
 - Sending lifecycle triggers across large batches is bounded by `10s` per hung guest rather than `30s`, and one hung guest OS no longer aborts healthy siblings.
-- A dead or wedged `sballd` daemon is detected within `≤ 12s` (`10s` action trigger + `2s` liveness probe) on target #1, aborting targets #2..#N in microseconds with clear `– SKIPPED · Daemon Offline` rows.
+- A dead or wedged `sballd` daemon is detected within `≤ 12s` (`10s` action trigger + `2s` liveness probe) when a worker encounters it. No new targets are submitted after detection; the at-most-`max_concurrency` in-flight targets settle, and later undispatched targets receive clear `– SKIPPED · Daemon Offline` rows.
 - `OUTCOME_UNKNOWN` remains top-precedence in `OperationResult.state` whenever any target timed out while `sballd` was healthy, preventing silent blind retries.
 
 ## Validation

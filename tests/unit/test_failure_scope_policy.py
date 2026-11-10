@@ -7,6 +7,8 @@ the session (or the wire) stops the remaining targets.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from plaivid_cli.application.services import as_inventory
@@ -67,9 +69,16 @@ def test_session_scoped_errno_is_classified_as_session(errno: str) -> None:
 
 
 @pytest.mark.parametrize("errno", [None, "", "  ", "999999", "not-a-number"])
-def test_unknown_errno_fails_closed_to_session_scope(errno) -> None:
-    """An unrecognised failure must never be assumed safe to continue past."""
-    assert classify_failure(errno) is FailureScope.SESSION
+def test_unknown_dispatched_errno_defaults_to_target_scope(errno) -> None:
+    """Unknown PVM errnos can describe target-local disk/storage failures."""
+    assert classify_failure(errno) is FailureScope.TARGET
+
+
+def test_explicit_session_errnos_and_local_process_codes_remain_session_scoped() -> None:
+    for errno in SESSION_SCOPED_ERRNOS:
+        assert classify_failure(errno) is FailureScope.SESSION
+    assert classify_failure(None, code="PROCESS_START_FAILED") is FailureScope.SESSION
+    assert classify_failure(None, code="DAEMON_OFFLINE") is FailureScope.SESSION
 
 
 def test_target_scoped_predicate_requires_a_dispatch() -> None:
@@ -82,9 +91,10 @@ def test_target_scoped_predicate_requires_a_dispatch() -> None:
     assert is_target_scoped_error(not_dispatched) is False
 
 
-def test_outcome_without_errno_is_not_target_scoped() -> None:
-    outcome = TargetOutcome(UUID_A, OperationState.OUTCOME_UNKNOWN, "boom", dispatched=True)
-    assert is_target_scoped_error(outcome) is False
+def test_dispatched_outcome_without_errno_is_target_scoped_when_daemon_is_healthy() -> None:
+    outcome = TargetOutcome(UUID_A, OperationState.OUTCOME_UNKNOWN, "target command error", dispatched=True)
+    assert is_target_scoped_error(outcome, daemon_alive=True) is True
+    assert is_target_scoped_error(outcome, daemon_alive=False) is False
 
 
 def test_bulk_must_stop_ignores_successes_and_target_scoped_failures() -> None:
@@ -99,6 +109,76 @@ def test_bulk_must_stop_ignores_successes_and_target_scoped_failures() -> None:
 
 
 # ------------------------------------------------------- batch continuation
+
+
+def test_disk_failure_with_unknown_errno_is_target_scoped_and_batch_continues() -> None:
+    provider, collection, application, operations, _, section = make_application(
+        max_concurrency=3
+    )
+    selection = application.resolve_targets(as_inventory(section), ("all",))
+    calls: list[str] = []
+
+    def dispatch(token, action, uuid):
+        calls.append(uuid)
+        if uuid == selection.uuids[0]:
+            # Synthetic unknown errno only; the repository has no verified
+            # numeric errno for an actual PVM disk failure.
+            return PvmReply("failed", None, "999999", "virtual disk is corrupt")
+        return SUCCESS
+
+    provider.dispatch_action = dispatch  # type: ignore[method-assign]
+    provider.is_daemon_alive = lambda timeout=2.0, *, token=None: True  # type: ignore[attr-defined]
+    result = operations.execute(
+        "token", Action.START, selection.records, section, is_bulk=True
+    )
+
+    assert tuple(item.uuid for item in result.targets) == selection.uuids
+    assert [item.state for item in result.targets] == [
+        OperationState.FAILED,
+        OperationState.SUCCEEDED,
+        OperationState.SUCCEEDED,
+    ]
+    assert result.targets[0].errno == "999999"
+    assert set(calls) == set(selection.uuids)
+    assert result.state is OperationState.PARTIAL
+    collection.close()
+
+
+def test_session_failure_stops_refill_and_skips_undispatched_targets() -> None:
+    provider, collection, application, operations, _, section = make_application(
+        max_concurrency=3, extra_targets=3
+    )
+    selection = application.resolve_targets(as_inventory(section), ("all",))
+    release_inflight = threading.Event()
+    calls: list[str] = []
+    call_lock = threading.Lock()
+
+    def dispatch(token, action, uuid):
+        with call_lock:
+            calls.append(uuid)
+        if uuid == selection.uuids[0]:
+            return PvmReply("failed", None, "39", "session expired")
+        release_inflight.wait(2)
+        return SUCCESS
+
+    def offline(timeout=2.0, *, token=None):
+        release_inflight.set()
+        return False
+
+    provider.dispatch_action = dispatch  # type: ignore[method-assign]
+    provider.is_daemon_alive = offline  # type: ignore[attr-defined]
+    result = operations.execute(
+        "token", Action.START, selection.records, section, is_bulk=True
+    )
+
+    assert len(calls) <= 3
+    assert len(result.targets) == len(selection.records)
+    assert tuple(item.uuid for item in result.targets) == selection.uuids
+    assert result.targets[0].code == "DAEMON_OFFLINE"
+    skipped = [item for item in result.targets if item.state is OperationState.NOT_STARTED]
+    assert len(skipped) >= len(selection.records) - 3
+    assert all("Daemon Offline" in item.message for item in skipped)
+    collection.close()
 
 
 def test_target_scoped_failure_lets_the_rest_of_the_batch_run() -> None:
@@ -172,7 +252,7 @@ def _raise_session_error(token, action, uuid):
 
 
 def test_session_scoped_failure_aborts_and_marks_the_remainder_not_started() -> None:
-    provider, collection, application, operations, _, section = make_application()
+    provider, collection, application, operations, _, section = make_application(max_concurrency=1)
     provider.dispatch_action = _raise_session_error  # type: ignore[method-assign]
     result, _ = _run_bulk(provider, application, operations, section)
     states = [item.state for item in result.targets]
@@ -186,7 +266,7 @@ def test_session_scoped_failure_aborts_and_marks_the_remainder_not_started() -> 
 
 
 def test_session_abort_dispatches_only_the_first_target() -> None:
-    provider, collection, application, operations, _, section = make_application()
+    provider, collection, application, operations, _, section = make_application(max_concurrency=1)
 
     calls = []
 
@@ -200,23 +280,26 @@ def test_session_abort_dispatches_only_the_first_target() -> None:
     collection.close()
 
 
-def test_unrecognised_errno_aborts_the_batch() -> None:
-    provider, collection, application, operations, _, section = make_application()
-    provider.replies = [PvmReply("failed", None, "4242", "unknown failure"), SUCCESS, SUCCESS]
+def test_unrecognised_errno_is_isolated_to_the_dispatched_target() -> None:
+    provider, collection, application, operations, _, section = make_application(max_concurrency=1)
+    provider.replies = [PvmReply("failed", None, "4242", "target storage failure"), SUCCESS, SUCCESS]
     result, _ = _run_bulk(provider, application, operations, section)
-    assert [item.state for item in result.targets][1:] == [
-        OperationState.NOT_STARTED,
-        OperationState.NOT_STARTED,
+    assert [item.state for item in result.targets] == [
+        OperationState.FAILED,
+        OperationState.SUCCEEDED,
+        OperationState.SUCCEEDED,
     ]
-    assert len(provider.dispatched) == 1
+    assert len(provider.dispatched) == 3
     collection.close()
 
 
-def test_outcome_unknown_aborts_the_batch() -> None:
-    provider, collection, application, operations, _, section = make_application()
+def test_unknown_outcome_aborts_only_when_daemon_is_offline() -> None:
+    provider, collection, application, operations, _, section = make_application(max_concurrency=1)
     provider.replies = [RuntimeError("socket closed"), SUCCESS, SUCCESS]
+    provider.is_daemon_alive = lambda timeout=2.0, *, token=None: False  # type: ignore[attr-defined]
     result, _ = _run_bulk(provider, application, operations, section)
-    assert result.targets[0].state is OperationState.OUTCOME_UNKNOWN
+    assert result.targets[0].state is OperationState.FAILED
+    assert result.targets[0].code == "DAEMON_OFFLINE"
     assert all(item.state is OperationState.NOT_STARTED for item in result.targets[1:])
     assert len(provider.dispatched) == 1
     collection.close()

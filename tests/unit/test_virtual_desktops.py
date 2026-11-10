@@ -393,7 +393,12 @@ def test_desktop_start_dispatches_on_selection_without_dialog(tmp_path) -> None:
             tui.query_one("#desktop-actions", Select).value = Action.START.value
             await pilot.pause(0.25)
             assert provider.dispatched == [(Action.START, UUID_A)]
-            assert "SUCCEEDED" in str(tui.query_one("#desktop-action-status", Static).render())
+            status = tui.query_one("#desktop-action-status", Static)
+            for _ in range(20):
+                if "SUCCEEDED" in str(status.render()):
+                    break
+                await pilot.pause(0.05)
+            assert "SUCCEEDED" in str(status.render())
 
     try:
         asyncio.run(exercise())
@@ -429,7 +434,7 @@ def test_desktop_rejects_partial_stale_and_changed_target_set(tmp_path) -> None:
         collection.close()
 
 
-def test_desktop_bulk_unknown_stops_and_marks_remaining_unattempted(tmp_path) -> None:
+def test_desktop_bulk_unknown_with_healthy_daemon_is_target_scoped(tmp_path) -> None:
     from dataclasses import replace
 
     from plaivid_cli.domain.models import OperationState, PvmReply
@@ -445,8 +450,11 @@ def test_desktop_bulk_unknown_stops_and_marks_remaining_unattempted(tmp_path) ->
         result = operations.execute_desktop("fake", Action.START, items, section,
                                             is_bulk=True, plan=plan)
         assert result.state is OperationState.OUTCOME_UNKNOWN
-        assert [item.state for item in result.targets] == [OperationState.OUTCOME_UNKNOWN, OperationState.NOT_STARTED]
-        assert provider.dispatched == [(Action.START, UUID_A)]
+        assert [item.state for item in result.targets] == [
+            OperationState.OUTCOME_UNKNOWN,
+            OperationState.OUTCOME_UNKNOWN,
+        ]
+        assert {uuid for _, uuid in provider.dispatched} == {UUID_A, UUID_B}
     finally:
         collection.close()
 

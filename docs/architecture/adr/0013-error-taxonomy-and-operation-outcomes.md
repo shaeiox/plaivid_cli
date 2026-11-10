@@ -42,23 +42,23 @@ Return all per-target outcomes, safe causes, and counts plus one aggregate:
 - `COMMAND_ACCEPTED_UNCONFIRMED` if any target has that status and none is `OUTCOME_UNKNOWN`; it remains visible in the overall summary.
 - `OUTCOME_UNKNOWN` if any target is unknown; this has precedence over ordinary partial/failure summaries and stays visible in aggregate counts.
 
-The implementation policy is sequential with **scoped continuation and daemon liveness probing** (ADR 0012, ADR 0015). Because a bulk request sends one PVM command per target, a failure or trigger timeout confined to one target while `sballd` is healthy must not stop the batch; only a daemon outage, session/contract failure, or non-timeout transport failure aborts remaining targets.
+The implementation policy uses **bounded parallel dispatch with scoped continuation and daemon liveness probing** (ADR 0007/0012/0015). A rolling worker pool is limited by `PLAIVID_MAX_CONCURRENCY` (default `3`); outcomes retain planned UUID order. With a healthy daemon, a dispatched error is target-scoped unless it is one of the explicit session errnos/codes below, allowing target-specific disk/storage and VM-state failures to remain local. Session/contract failures stop new submissions, cancel work not yet started, and allow already-running calls to settle before the generation barrier closes. `NOT_STARTED`/`SKIPPED` is reserved for targets never dispatched.
 
 | Failure scope | Evidence | Target outcome | Batch behaviour | Remaining targets (Task Board) |
 | --- | --- | --- | --- | --- |
-| Target state | `errno` 146 + `is_daemon_alive() == True` | `FAILED` | continue | attempted normally |
-| Target timeout | `code == PVM_COMMAND_TIMEOUT` + `is_daemon_alive() == True` | `OUTCOME_UNKNOWN` (`command timed out (10s), daemon healthy`) | continue | attempted normally |
-| Daemon offline | Timeout or error + `is_daemon_alive() == False` | `FAILED` (`Daemon Offline`) | fast-abort | `NOT_STARTED` → `– SKIPPED` (`Daemon Offline`) |
-| Session / contract | `errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, or undispatched failure | `FAILED` / `REJECTED` / `OUTCOME_UNKNOWN` | stop | `NOT_STARTED` → `– SKIPPED` |
-| Indeterminate | Non-timeout `OUTCOME_UNKNOWN`, unexpected status, unrecognised `errno` | `OUTCOME_UNKNOWN` / `FAILED` | stop | `NOT_STARTED` → `– SKIPPED` |
+| Target state / disk / storage | Dispatched error with healthy daemon; includes `errno` 146 and other non-session errnos | `FAILED` | Continue rolling submissions | Attempted normally |
+| Target timeout | `code == PVM_COMMAND_TIMEOUT` + `is_daemon_alive() == True` | `OUTCOME_UNKNOWN` (`command timed out (10s), daemon healthy`) | Continue; never auto-retry timed-out target | Attempted normally |
+| Daemon offline | Timeout/error + `is_daemon_alive() == False` | `FAILED` (`Daemon Offline`) | Stop submissions; settle in-flight calls | Never-submitted targets `NOT_STARTED` → `– SKIPPED` (`Daemon Offline`) |
+| Session / contract | `errno` 39/40/106/107/108/137/185, `PROCESS_START_FAILED`, other explicit session code, or undispatched failure | `FAILED` / `REJECTED` / `OUTCOME_UNKNOWN` | Stop submissions; cancel work not started; settle in-flight calls | Never-dispatched targets `NOT_STARTED` → `– SKIPPED` |
+| Other dispatched unknown | Unexpected status, transport/process error, or unrecognized errno while daemon is healthy | `OUTCOME_UNKNOWN` or `FAILED` | Target-scoped continuation; unknown aggregate precedence retained | Attempted normally |
 
 ### Task Board vocabulary (`TaskStatus`)
 
-On the interactive Task Board (`domain/models/tasks.py`, `TaskViewFooter`), queued targets remain `· QUEUED` until actively dispatched to `sbell` (`▶ RUNNING`), and `OperationState.NOT_STARTED` maps to `TaskStatus.SKIPPED` (rendered as `– SKIPPED` in muted style) rather than `⊘ REJECTED`. `REJECTED` is reserved strictly for pre-dispatch policy/admission rejections and explicit cancellations before dispatch. Authoritative per-target outcome details (such as `"command timed out (10s), daemon healthy"` and `"Daemon Offline"`) propagate directly into `TaskManager.progress()` and render on `TaskViewFooter`.
+On the interactive Task Board (`domain/models/tasks.py`, `TaskViewFooter`), each target remains `· QUEUED` until a worker actually begins that target's dispatch (`▶ RUNNING`); targets are not pre-marked running when the batch is admitted. `OperationState.NOT_STARTED` maps to `TaskStatus.SKIPPED` (rendered as `– SKIPPED` in muted style) rather than `⊘ REJECTED`. `REJECTED` is reserved for pre-dispatch policy/admission rejection and explicit cancellation. Per-target terminal outcomes and safe details propagate through `TaskManager.progress()` and render on `TaskViewFooter`.
 
 Each `NOT_STARTED` target carries the reason the batch stopped, so an operator can tell a mixed batch from an aborted one. A mixed batch aggregates to `PARTIAL` when at least one target succeeded (with no `OUTCOME_UNKNOWN`), and to `FAILED` when none did; `OUTCOME_UNKNOWN` keeps its top precedence over both so a timed-out target is never silently re-run.
 
-Since current PVM response semantics are unverified, even a positive-looking response maps to `OUTCOME_UNKNOWN` and therefore still stops bulk dispatch. A later evidence-backed `COMMAND_ACCEPTED_UNCONFIRMED` mapping requires an owner decision on whether bulk may continue past that state. Do not retry automatically.
+Response acceptance/completion mapping remains evidence-dependent: a positive-looking envelope must not be treated as proof of guest completion without the verified contract/readback required above. If a response is mapped to `OUTCOME_UNKNOWN`, retain that uncertainty in the aggregate and do not retry the target automatically; it does not by itself prevent scheduling unrelated targets while the daemon is healthy. `COMMAND_ACCEPTED_UNCONFIRMED` still requires an owner decision on its aggregate and continuation semantics.
 
 ### Read/mutation freshness and ordering
 
@@ -87,4 +87,4 @@ Exact numeric compatibility remains subject to CLI review, but categories must b
 
 ## Validation required
 
-Fake executable/provider tests for output/exit combinations, definite vs unknown result mapping, partial source collection, scoped continuation (target-scoped failure continues, session-scoped and unrecognised `errno` stop), remaining `NOT_STARTED` reasons, accepted-unconfirmed aggregation, unknown precedence and exit categories. Confirm PVM response/exit/action-ID/completion semantics with authorized target captures before mapping real operations to `SUCCEEDED` or `FAILED`.
+Fake executable/provider tests for output/exit combinations, definite vs unknown result mapping, partial source collection, bounded worker count, deterministic final ordering, target-scoped continuation for VM-state/disk failures, explicit session/daemon stop-refill behavior, in-flight settlement, remaining `NOT_STARTED` reasons, accepted-unconfirmed aggregation, unknown precedence, and exit categories. Confirm PVM concurrent-dispatch support and response/exit/action-ID/completion semantics with authorized target captures before enabling parallelism against a live deployment.

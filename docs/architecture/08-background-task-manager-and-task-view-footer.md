@@ -5,6 +5,8 @@
 **Scope:** `plaivid_cli.presentation.tui`, `plaivid_cli.application.operations`, `plaivid_cli.domain.models`
 **Related:** ADR 0007 (bounded worker & subprocess lifecycle), ADR 0012 (mutation safety), ADR 0013 (outcome taxonomy), ADR 0014 (collection scheduling/freshness)
 
+> **Implementation update (2026-11-10):** This document records the original sequential-dispatch design baseline. The operation group lane and single generation barrier remain, but target dispatch is now bounded-parallel (`PLAIVID_MAX_CONCURRENCY`, default 3) with rolling submission, in-flight settlement, planned-order results, and session/daemon stop-refill behavior. References below to one-at-a-time target dispatch or parallel mutation as a non-goal are historical; see ADRs 0007, 0012, and 0013 for the active contract.
+
 ---
 
 ## 0. TL;DR — two premises in the request need correcting before design

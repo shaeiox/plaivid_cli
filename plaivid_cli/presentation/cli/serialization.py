@@ -18,6 +18,7 @@ def configuration_command(settings: Settings, *, as_json: bool = False) -> int:
         "running_vms_executable": settings.running_vms_argv[0],
         "process_timeout_seconds": settings.process_timeout,
         "action_timeout_seconds": settings.action_timeout,
+        "max_concurrency": settings.max_concurrency,
         "max_output_bytes_per_stream": settings.max_output_bytes,
         "refresh_interval_seconds": settings.refresh_interval,
         "state_directory": str(settings.state_dir),

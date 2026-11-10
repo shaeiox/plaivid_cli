@@ -56,11 +56,14 @@ def bulk_may_dispatch(
 # * TARGET scope -> the PVM answered cleanly about this VM (e.g. errno 146
 #   "VM is in an invalid state"). Every other target is unaffected, so the batch
 #   continues and the failure is reported per target.
-# * SESSION scope -> the credential/session is unusable. Every remaining request
-#   would fail identically, so the batch stops and the remainder is NOT_STARTED.
+# * SESSION scope -> the credential/session/daemon is unusable. Stop scheduling
+#   new targets; already-dispatched work is allowed to settle.
+# * TARGET scope -> any other error from a dispatched target while the daemon is
+#   responsive. This deliberately includes unrecognized PVM errnos so disk and
+#   other target-local errors cannot abort unrelated targets.
 #
-# ADR 0012/0013 carry the precise rules. Keep this list conservative: an unknown
-# or unverified errno is treated as session-scoped so the app fails closed.
+# Explicit session errnos/codes are the fail-closed boundary. Pre-dispatch
+# failures are never target-scoped, regardless of any attached errno.
 
 #: sbell errnos that describe one target and must not abort a batch.
 TARGET_SCOPED_ERRNOS: frozenset[str] = frozenset(
@@ -69,8 +72,8 @@ TARGET_SCOPED_ERRNOS: frozenset[str] = frozenset(
     }
 )
 
-#: sbell errnos that make every subsequent request fail. Listed explicitly for
-#: documentation and tests; anything not target-scoped is session-scoped anyway.
+#: sbell errnos that make every subsequent request fail. A non-session,
+#: dispatched failure falls back to target scope once the daemon is known healthy.
 SESSION_SCOPED_ERRNOS: frozenset[str] = frozenset(
     {
         "39",   # UnAuthorized: no/invalid session
@@ -80,6 +83,16 @@ SESSION_SCOPED_ERRNOS: frozenset[str] = frozenset(
         "108",  # Local sbell permission denied (UNIX socket)
         "137",  # Username/Password is not correct
         "185",  # sessions exceeds the threshold
+    }
+)
+
+
+SESSION_SCOPED_CODES: frozenset[str] = frozenset(
+    {
+        "PROCESS_START_FAILED",
+        "DAEMON_OFFLINE",
+        "CREDENTIAL_ARGV_ACK_REQUIRED",
+        "WORKER_FAILURE",
     }
 )
 
@@ -98,33 +111,44 @@ COMMAND_TIMEOUT_CODE = "PVM_COMMAND_TIMEOUT"
 DAEMON_OFFLINE_REASON = "Daemon Offline"
 
 
-def classify_failure(errno: str | None, *, default: FailureScope = FailureScope.SESSION) -> FailureScope:
-    """Classify a PVM failure from its sbell errno.
+def classify_failure(
+    errno: str | None,
+    *,
+    code: str | None = None,
+    default: FailureScope = FailureScope.TARGET,
+) -> FailureScope:
+    """Classify a dispatched failure using explicit session identifiers.
 
-    An absent or unrecognised errno falls back to ``default`` (session scope) so
-    an unexpected failure never silently continues a batch.
+    A healthy daemon plus an error that is not known to be session-wide is
+    treated as target-scoped. This includes previously unknown PVM errnos, which
+    is required to isolate target-specific storage/disk failures. Callers must
+    reject undispatched failures and daemon-offline outcomes before this helper.
     """
+    if errno is not None and errno.strip() in SESSION_SCOPED_ERRNOS:
+        return FailureScope.SESSION
+    if code is not None and code.strip() in SESSION_SCOPED_CODES:
+        return FailureScope.SESSION
     if errno is not None and errno.strip() in TARGET_SCOPED_ERRNOS:
         return FailureScope.TARGET
     return default
 
 
 def is_target_scoped_error(outcome: TargetOutcome, *, daemon_alive: bool = True) -> bool:
-    """True when this outcome must not abort the rest of its batch.
+    """True when a failure is isolated to a dispatched target.
 
-    When ``daemon_alive`` is ``False``, no failure is target-scoped: ``sballd``
-    itself is unreachable and the remaining batch must fast-abort. When
-    ``daemon_alive`` is ``True``, both documented target-state rejections
-    (``errno 146``) and per-target action timeouts (``PVM_COMMAND_TIMEOUT``) are
-    isolated to the current target so subsequent targets proceed immediately.
+    Session/auth/contract errnos and local process-start failures stop further
+    submission. Any other dispatched error is target-scoped only while the
+    daemon liveness probe is healthy. Healthy-daemon action timeouts remain
+    uncertain but do not block other targets; they are never retried.
     """
     if not daemon_alive or not outcome.dispatched:
-        # Nothing reached a responsive PVM: a transport/policy/process/daemon
-        # failure is never about one target's state.
         return False
-    if outcome.code == COMMAND_TIMEOUT_CODE:
-        return True
-    return classify_failure(outcome.errno, default=FailureScope.SESSION) is FailureScope.TARGET
+    scope = classify_failure(
+        outcome.errno,
+        code=outcome.code,
+        default=FailureScope.TARGET,
+    )
+    return scope is FailureScope.TARGET
 
 
 #: Outcome states that end a batch unless the failure is target-scoped.

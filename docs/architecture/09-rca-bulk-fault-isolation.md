@@ -1,6 +1,6 @@
 # RCA — Bulk action fault isolation (stop-on-first-error)
 
-**Status:** Analysis complete; **implemented** — see §10.
+**Status:** Original sequential-engine RCA; scoped error isolation was implemented in §10. Bounded parallel dispatch was implemented on 2026-11-10; its active contract supersedes the sequential-loop descriptions below (see ADRs 0007, 0012, and 0013 and `docs/architecture/10-rca-parallel-bulk-operations.md`).
 **Date:** 2026-11-08
 **Scope:** `application/operations/coordinator.py`, `application/operations/desktop_executor.py`,
 `infrastructure/pvm/`, `docs/SBELL-SABAD.md`, ADR 0012/0013

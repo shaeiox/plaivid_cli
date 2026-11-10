@@ -1,4 +1,4 @@
-"""Serialized execution workflow for virtual-desktop lifecycle actions."""
+"""Bounded-parallel execution workflow for virtual-desktop lifecycle actions."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from plaivid_cli.domain.models import (
     ErrorKind,
     OperationPlan,
     OperationResult,
-    OperationState,
     SectionSnapshot,
     TargetOutcome,
 )
@@ -27,7 +26,8 @@ from plaivid_cli.domain.policies import (
     outcome_stops_batch,
 )
 
-from .results import ProgressSink, _aggregate_message, aggregate_state, report_progress
+from .bulk_dispatch import execute_bounded_batch
+from .results import ProgressSink, _aggregate_message, aggregate_state
 
 
 class PlanFactory(Protocol):
@@ -45,7 +45,7 @@ DispatchOne = Callable[..., TargetOutcome]
 
 
 class DesktopOperationExecutor:
-    """Run Desktop actions sequentially behind the shared lifecycle lane."""
+    """Run Desktop batches in a bounded pool behind the shared lifecycle lane."""
 
     def __init__(
         self,
@@ -54,12 +54,16 @@ class DesktopOperationExecutor:
         closing: threading.Event,
         create_plan: PlanFactory,
         dispatch_one: DispatchOne,
+        max_concurrency: int = 3,
     ) -> None:
         self._collection = collection
         self._lane = lane
         self._closing = closing
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be positive")
         self._create_plan = create_plan
         self._dispatch_one = dispatch_one
+        self._max_concurrency = max_concurrency
 
     def execute(
         self,
@@ -99,36 +103,36 @@ class DesktopOperationExecutor:
                     ErrorKind.POLICY, "Desktop inventory changed before dispatch"
                 ) from exc
             started = datetime.now(UTC)
-            outcomes: list[TargetOutcome] = []
-            stop_reason: str | None = None
             try:
-                for item in targets:
-                    if stop_reason is not None:
-                        skipped_msg = (
-                            DAEMON_OFFLINE_REASON
-                            if stop_reason == DAEMON_OFFLINE_REASON
-                            else f"not dispatched: {stop_reason}"
-                        )
-                        outcomes.append(
-                            TargetOutcome(
-                                item.uuid,
-                                OperationState.NOT_STARTED,
-                                skipped_msg,
-                            )
-                        )
-                        report_progress(
-                            on_progress, item.uuid, OperationState.NOT_STARTED, skipped_msg
-                        )
-                        continue
-                    outcome = self._dispatch_one(token, action, item, on_progress=on_progress)
-                    outcomes.append(outcome)
-                    daemon_alive = outcome.code != "DAEMON_OFFLINE"
-                    # Scoped continuation (ADR 0012 / 0015) — identical policy to
-                    # the VM path; the two loops must never diverge.
-                    if is_bulk and outcome_stops_batch(outcome, daemon_alive=daemon_alive):
-                        stop_reason = batch_stop_reason(outcome, daemon_alive=daemon_alive)
+                outcomes = execute_bounded_batch(
+                    targets,
+                    lambda item: self._dispatch_one(
+                        token, action, item, on_progress=on_progress
+                    ),
+                    max_concurrency=self._max_concurrency,
+                    is_bulk=is_bulk,
+                    must_stop=lambda outcome: outcome_stops_batch(
+                        outcome, daemon_alive=outcome.code != "DAEMON_OFFLINE"
+                    ),
+                    stop_reason_for=lambda outcome: batch_stop_reason(
+                        outcome, daemon_alive=outcome.code != "DAEMON_OFFLINE"
+                    ),
+                    on_progress=on_progress,
+                )
             finally:
                 self._collection.end_mutation(plan.target_uuids, section_name="desktops")
+            stop_reason = (
+                DAEMON_OFFLINE_REASON
+                if any(outcome.code == "DAEMON_OFFLINE" for outcome in outcomes)
+                else next(
+                    (
+                        batch_stop_reason(outcome)
+                        for outcome in outcomes
+                        if is_bulk and outcome_stops_batch(outcome)
+                    ),
+                    None,
+                )
+            )
             if stop_reason != DAEMON_OFFLINE_REASON:
                 try:
                     self._collection.collect_once(token, sections=("desktops",))

@@ -36,6 +36,17 @@ def _positive_float(env: Mapping[str, str], name: str, default: str) -> float:
     return value
 
 
+def _positive_int(env: Mapping[str, str], name: str, default: str) -> int:
+    raw = env.get(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} must be an integer") from exc
+    if value <= 0:
+        raise ConfigurationError(f"{name} must be a positive integer")
+    return value
+
+
 def _optional_positive_float(env: Mapping[str, str], name: str) -> float | None:
     raw = env.get(name)
     if raw is None or not raw.strip():
@@ -69,6 +80,7 @@ class Settings:
     log_level: str
     host_status_interval: float = 2.0
     action_timeout: float = 10.0
+    max_concurrency: int = 3
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -93,6 +105,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         running_vms_argv=_argv(env, "PLAIVID_RUNNING_VMS", "pvm-running-vms"),
         process_timeout=_positive_float(env, "PLAIVID_CMD_TIMEOUT", "30"),
         action_timeout=_positive_float(env, "PLAIVID_ACTION_TIMEOUT", "10"),
+        max_concurrency=_positive_int(env, "PLAIVID_MAX_CONCURRENCY", "3"),
         max_output_bytes=max_output,
         refresh_interval=_positive_float(env, "PLAIVID_REFRESH", "3"),
         host_status_interval=_positive_float(env, "PLAIVID_HOST_STATUS_INTERVAL", "2"),

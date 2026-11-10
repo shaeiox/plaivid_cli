@@ -76,7 +76,7 @@ the operator's intent; there is no extra confirmation or `--approve` flag.
 The application still binds exact canonical UUIDs to a current inventory
 generation and freshness limit before dispatch.
 
-Bulk operations are fail-closed until `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is set to an approved finite positive value. Bulk inventory must be complete and current. Replies follow the documented sbell/sabad envelope (`docs/SBELL-SABAD.md` §3): `status=success` is reported as `SUCCEEDED`, and `status=failed` as `FAILED` with its `errno` and PVM message. Transport errors, timeouts, and unrecognised statuses are `OUTCOME_UNKNOWN`; they stop bulk processing and must not be blindly retried. The VM state itself is re-read by the post-action inventory refresh. The CLI exit categories are `0` successful read or verified operation, `1` failure, `2` rejected, `3` partial, and `4` outcome unknown (including any future acceptance without verified completion).
+Bulk operations are fail-closed until `PLAIVID_MAX_INVENTORY_AGE_SECONDS` is set to an approved finite positive value. Bulk inventory must be complete and current. Targets are dispatched with bounded parallelism (`PLAIVID_MAX_CONCURRENCY`, default `3`) while one generation-checked mutation barrier covers the whole batch. Session/daemon failures stop new submissions and allow in-flight calls to settle; never-dispatched targets are reported as skipped. A dispatched failure on a healthy daemon is isolated to its target unless it has a known session-scoped errno/code, so disk/storage errors do not automatically block other VMs. Unknown outcomes remain visible and are never retried automatically. The CLI exit categories are `0` successful read or verified operation, `1` failure, `2` rejected, `3` partial, and `4` outcome unknown.
 
 Use `--json` on supported inventory, host, detail, audit, and lifecycle commands for structured output. JSON preserves section status, source, generation, quality issues, and per-target results. Help and version do not launch PVM tools.
 
@@ -105,6 +105,8 @@ The table below is a quick reference for the **active runtime**. For every suppo
 | `PLAIVID_USER` | `manage` | Default interactive username. |
 | `PLAIVID_STATE_DIR` | `$XDG_STATE_HOME/plaivid` or `~/.local/state/plaivid` | Private local token cache directory. |
 | `PLAIVID_CMD_TIMEOUT` | `30` | Positive per-child deadline in seconds. |
+| `PLAIVID_ACTION_TIMEOUT` | `10` | Positive trigger deadline for lifecycle actions. |
+| `PLAIVID_MAX_CONCURRENCY` | `3` | Positive integer cap on concurrent per-target lifecycle dispatch. |
 | `PLAIVID_MAX_OUTPUT_BYTES` | `1048576` | Retained output cap per stream. |
 | `PLAIVID_REFRESH` | `3` | Default TUI refresh cadence in seconds (Overview control accepts whole seconds 1–60; its expensive PVM reads remain slower). |
 | `PLAIVID_MAX_INVENTORY_AGE_SECONDS` | unset | Required positive age bound for bulk mutation admission. |

@@ -1,4 +1,4 @@
-"""Serialized lifecycle dispatch with inventory safeguards and uncertain outcomes."""
+"""Bounded-parallel lifecycle dispatch with inventory and outcome safeguards."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from plaivid_cli.domain.policies import (
 )
 from plaivid_cli.domain.redaction import redact_text
 
+from .bulk_dispatch import execute_bounded_batch
 from .desktop_executor import DesktopOperationExecutor
 from .planner import OperationPlanner
 from .results import ProgressSink, _aggregate_message, aggregate_state, report_progress
@@ -38,7 +39,7 @@ logger = logging.getLogger("plaivid")
 
 
 class OperationCoordinator:
-    """Own lifecycle dispatch serialization, barriers, and result accounting."""
+    """Own operation admission, mutation barriers, and bounded batch accounting."""
 
     def create_plan(
         self,
@@ -73,7 +74,12 @@ class OperationCoordinator:
         self._lane = threading.Lock()
         self._closing = threading.Event()
         self._desktop_executor = DesktopOperationExecutor(
-            collection, self._lane, self._closing, self.create_desktop_plan, self._dispatch_one
+            collection,
+            self._lane,
+            self._closing,
+            self.create_desktop_plan,
+            self._dispatch_one,
+            max_concurrency=settings.max_concurrency,
         )
 
     def close(self) -> None:
@@ -193,37 +199,36 @@ class OperationCoordinator:
                 "inventory changed or expired immediately before dispatch; review a new plan",
                 code="OPERATION_PLAN_STALE",
             ) from exc
-        outcomes: list[TargetOutcome] = []
-        stop_reason: str | None = None
         try:
-            for record in targets:
-                if stop_reason is not None:
-                    skipped_msg = (
-                        DAEMON_OFFLINE_REASON
-                        if stop_reason == DAEMON_OFFLINE_REASON
-                        else f"not dispatched: {stop_reason}"
-                    )
-                    outcomes.append(
-                        TargetOutcome(
-                            record.uuid,
-                            OperationState.NOT_STARTED,
-                            skipped_msg,
-                        )
-                    )
-                    report_progress(
-                        on_progress, record.uuid, OperationState.NOT_STARTED, skipped_msg
-                    )
-                    continue
-                outcomes.append(self._dispatch_one(token, action, record, on_progress=on_progress))
-                outcome = outcomes[-1]
-                daemon_alive = outcome.code != "DAEMON_OFFLINE"
-                # Scoped continuation (ADR 0012 / 0015): target-scoped errors
-                # and per-target timeouts with a live daemon proceed; session or
-                # daemon-offline failures abort remaining targets immediately.
-                if is_bulk and outcome_stops_batch(outcome, daemon_alive=daemon_alive):
-                    stop_reason = batch_stop_reason(outcome, daemon_alive=daemon_alive)
+            outcomes = execute_bounded_batch(
+                targets,
+                lambda record: self._dispatch_one(
+                    token, action, record, on_progress=on_progress
+                ),
+                max_concurrency=self._settings.max_concurrency,
+                is_bulk=is_bulk,
+                must_stop=lambda outcome: outcome_stops_batch(
+                    outcome, daemon_alive=outcome.code != "DAEMON_OFFLINE"
+                ),
+                stop_reason_for=lambda outcome: batch_stop_reason(
+                    outcome, daemon_alive=outcome.code != "DAEMON_OFFLINE"
+                ),
+                on_progress=on_progress,
+            )
         finally:
             self._collection.end_mutation(target_ids)
+        stop_reason = (
+            DAEMON_OFFLINE_REASON
+            if any(outcome.code == "DAEMON_OFFLINE" for outcome in outcomes)
+            else next(
+                (
+                    batch_stop_reason(outcome)
+                    for outcome in outcomes
+                    if is_bulk and outcome_stops_batch(outcome)
+                ),
+                None,
+            )
+        )
 
         # Reconcile through the same serialized read lane unless the daemon was
         # just proven offline (avoiding an extra 30 s read timeout).

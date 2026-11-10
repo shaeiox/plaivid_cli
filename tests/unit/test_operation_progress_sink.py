@@ -150,7 +150,7 @@ def test_bulk_stop_continues_reporting_after_target_scoped_failure() -> None:
     collection.close()
 
 
-def test_unknown_process_error_is_reported_as_unknown_and_stops_the_bulk() -> None:
+def test_unknown_process_error_is_target_scoped_when_daemon_is_healthy() -> None:
     provider, collection, application, operations, _, _ = make_application()
     selection, section, plan = _plan_for(
         application, operations, ("state:running",), Action.RESET
@@ -173,7 +173,8 @@ def test_unknown_process_error_is_reported_as_unknown_and_stops_the_bulk() -> No
     assert [state for _, state in sink.calls] == [
         OperationState.RUNNING,
         OperationState.OUTCOME_UNKNOWN,
-        OperationState.NOT_STARTED,
+        OperationState.RUNNING,
+        OperationState.OUTCOME_UNKNOWN,
     ]
     assert result.state is OperationState.OUTCOME_UNKNOWN
     collection.close()

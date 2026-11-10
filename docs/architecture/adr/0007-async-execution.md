@@ -15,7 +15,7 @@
 Use bounded, app-lifetime-owned work; no thread/task per widget and no separate executor/scheduler framework.
 
 - **Read work:** `Application.CollectionCoordinator` owns admission and lifetime of one bounded read-worker lane. At most one active read per configured bound and one pending refresh intent per identical logical key; duplicate in-flight requests share a result. Screens can stop waiting when they close, but do not own or destroy the underlying process.
-- **Mutation work:** `Application.OperationCoordinator` owns mutation admission, serialization, operation result state, and lifetime of dispatched mutation work. A modal/screen closing or a user navigating away cannot discard a dispatched operation's result tracking. Mutations are not canceled or retried by canceling a UI task.
+- **Mutation work:** `Application.OperationCoordinator` owns operation-group admission, the shared mutation lane, operation result state, and lifetime of dispatched mutation work. Within one validated bulk operation, it uses a bounded target worker pool (`PLAIVID_MAX_CONCURRENCY`, default `3`) to dispatch independent target requests concurrently. One operation-level collection mutation barrier remains open until all in-flight workers settle; it is entered and exited exactly once per batch. A session/daemon failure stops new submissions, cancels pool work that has not begun, waits for already-running requests, and reports only undispatched targets as `NOT_STARTED`. A modal/screen closing or a user navigating away cannot discard a dispatched operation's result tracking. Mutations are not canceled or retried by canceling a UI task.
 - **OS processes:** the Infrastructure runner owns each child from spawn through bounded pipe drain, deadline, and reap. On POSIX it starts a new session and kills the isolated process group on timeout/reader cleanup; the fake grandchild regression test verifies that local behavior. This does not prove how a target `sudo`/PVM wrapper behaves. Output is bounded, argv is used without a shell, and the inherited child environment is allowlisted by default.
 - **Bootstrap:** sole composition root constructs and closes the coordinators/provider and initiates orderly shutdown. It does not implement another queue, cadence, or operation state machine (ADR 0011).
 - Textual receives results on its UI thread through its own supported worker/message mechanism; it does not receive direct widget mutations from background threads.
@@ -30,7 +30,7 @@ Do not automatically retry mutations. Async subprocess may be prototyped only if
 
 ## Consequences
 
-- UI responsiveness is separate from PVM concurrency; initial source calls remain serialized until safe concurrency is evidenced.
+- UI responsiveness is separate from PVM concurrency. Read-source calls remain serialized; lifecycle mutations are bounded-parallel within one operation according to `PLAIVID_MAX_CONCURRENCY` (default `3`). Deployment owners must validate the configured level against their PVM/sballd version; the local subprocess tests do not establish daemon-side concurrency guarantees.
 - Thread cancellation is cooperative; process lifetime remains Infrastructure-owned.
 - Application-level unknown outcomes survive navigation and shutdown reporting.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator, aggregate_state
@@ -22,6 +23,11 @@ from plaivid_cli.domain.models import (
 UUID_A = "481e458c-c6ba-4fe7-88f6-26a59e416568"
 UUID_B = "800b0429-d82a-4e26-a5e2-225990172e6e"
 UUID_C = "cee2b41d-c6c7-4202-9ff4-1510589294c9"
+EXTRA_UUIDS = (
+    "d7f70921-6f39-4e68-b466-41ec9ae18f01",
+    "e5d50843-9aab-4f06-9e67-2eb0f13b27ac",
+    "f29452a8-b1b2-40af-a2a4-13e0f7ec44de",
+)
 
 
 class FakeProvider:
@@ -73,12 +79,24 @@ class FakeProvider:
         return result
 
 
-def make_application(*, max_age: bool = True, process_failure: bool = False):
+def make_application(
+    *,
+    max_age: bool = True,
+    process_failure: bool = False,
+    max_concurrency: int = 1,
+    extra_targets: int = 0,
+):
     provider = FakeProvider()
+    if extra_targets:
+        provider.objects += tuple(
+            ObjectVM(EXTRA_UUIDS[index], f"extra-{index}", state="stopped")
+            for index in range(extra_targets)
+        )
     provider.fail_process_collection = process_failure
-    settings = load_settings(
-        {"PLAIVID_MAX_INVENTORY_AGE_SECONDS": "30"} if max_age else {}
-    )
+    environment = {"PLAIVID_MAX_CONCURRENCY": str(max_concurrency)}
+    if max_age:
+        environment["PLAIVID_MAX_INVENTORY_AGE_SECONDS"] = "30"
+    settings = load_settings(environment)
     collection = CollectionCoordinator(provider)
     application = PlaividApplication(provider, collection, settings)
     operations = OperationCoordinator(provider, collection, settings)
@@ -247,6 +265,70 @@ def test_bulk_continues_after_target_scoped_pvm_failure():
     collection.close()
 
 
+def test_bulk_dispatches_three_targets_concurrently_and_keeps_result_order():
+    provider, collection, application, operations, _, section = make_application(
+        max_concurrency=3
+    )
+    selection = application.resolve_targets(as_inventory(section), ("all",))
+    assert len(selection.records) >= 3
+    rendezvous = threading.Barrier(3)
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+    started_at: list[float] = []
+
+    def concurrent_dispatch(token, action, uuid):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+            started_at.append(time.monotonic())
+            provider.dispatched.append((action, uuid))
+        try:
+            rendezvous.wait(timeout=2)
+            return PvmReply("success")
+        finally:
+            with lock:
+                active -= 1
+
+    provider.dispatch_action = concurrent_dispatch  # type: ignore[method-assign]
+    begin_calls = 0
+    end_calls = 0
+    begin_mutation = collection.begin_mutation
+    end_mutation = collection.end_mutation
+
+    def counted_begin(*args, **kwargs):
+        nonlocal begin_calls
+        begin_calls += 1
+        return begin_mutation(*args, **kwargs)
+
+    def counted_end(*args, **kwargs):
+        nonlocal end_calls
+        end_calls += 1
+        return end_mutation(*args, **kwargs)
+
+    collection.begin_mutation = counted_begin  # type: ignore[method-assign]
+    collection.end_mutation = counted_end  # type: ignore[method-assign]
+    progress: list[tuple[str, OperationState]] = []
+    result = operations.execute(
+        "token",
+        Action.START,
+        selection.records,
+        section,
+        is_bulk=True,
+        on_progress=lambda uuid, state: progress.append((uuid, state)),
+    )
+
+    assert max_active == 3
+    assert max(started_at) - min(started_at) < 1.0
+    assert tuple(item.uuid for item in result.targets) == selection.uuids
+    assert [item.state for item in result.targets] == [OperationState.SUCCEEDED] * 3
+    running_targets = {uuid for uuid, state in progress if state is OperationState.RUNNING}
+    assert running_targets == set(selection.uuids)
+    assert (begin_calls, end_calls) == (1, 1)
+    collection.close()
+
+
 def test_bulk_all_successful_replies_dispatch_every_target():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
@@ -259,7 +341,7 @@ def test_bulk_all_successful_replies_dispatch_every_target():
     collection.close()
 
 
-def test_transport_exception_after_dispatch_stays_unknown_and_stops_bulk():
+def test_transport_exception_after_dispatch_stays_unknown_and_isolates_when_daemon_is_healthy():
     provider, collection, application, operations, _, section = make_application()
     selection = application.resolve_targets(as_inventory(section), ("all",))
     provider.replies = [RuntimeError("socket closed")]
@@ -268,9 +350,12 @@ def test_transport_exception_after_dispatch_stays_unknown_and_stops_bulk():
     )
     assert result.targets[0].state is OperationState.OUTCOME_UNKNOWN
     assert result.targets[0].dispatched
-    assert all(item.state is OperationState.NOT_STARTED for item in result.targets[1:])
+    assert [item.state for item in result.targets[1:]] == [
+        OperationState.SUCCEEDED,
+        OperationState.SUCCEEDED,
+    ]
     assert result.state is OperationState.OUTCOME_UNKNOWN
-    assert len(provider.dispatched) == 1
+    assert len(provider.dispatched) == 3
     collection.close()
 
 

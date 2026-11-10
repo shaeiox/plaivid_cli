@@ -8,8 +8,8 @@ from collections.abc import Callable
 from plaivid_cli.domain.models import OperationState, TargetOutcome
 
 #: Per-target progress callback: ``(target_uuid, state[, detail])``. The sink is
-#: notified before (``RUNNING``) and after each dispatch so a view can show live
-#: sequential per-target status. Both 2-arg and 3-arg callables are accepted, and
+#: notified from the worker when a target begins (``RUNNING``) and after its
+#: dispatch settles, so a view can show live per-target status. Both 2-arg and
 #: any sink exception is swallowed so presentation never corrupts a mutation.
 ProgressSink = Callable[..., None]
 
