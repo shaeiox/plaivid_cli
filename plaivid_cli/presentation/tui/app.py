@@ -31,6 +31,7 @@ from plaivid_cli.domain.models import (
     PvmSession,
     SectionSnapshot,
     TaskEvent,
+    VMDetail,
     VMRecord,
 )
 from plaivid_cli.domain.redaction import redact_text
@@ -127,8 +128,17 @@ class PlaividTui(
         self._inventory_section: SectionSnapshot[object] | None = None
         self._inventory: InventoryData | None = None
         self._records: dict[str, VMRecord] = {}
+        # Local node identity, cached from host sections to decorate the VM pane's Host value.
+        self._local_node_name: str | None = None
+        self._local_node_id: str | None = None
+        self._local_hostname: str | None = None
         self._selected_uuid: str | None = None
-        self._detail_base = "Select a VM to inspect its details."
+        # Selected-VM detail: the record always paints, the asynchronous read and
+        # its in-flight/failed state paint on top of it.
+        self._detail_record: VMRecord | None = None
+        self._detail_loaded: VMDetail | None = None
+        self._detail_uuid: str | None = None
+        self._detail_status = None
         self._refresh_timer = None
         # Per-target admission replaces the former global boolean. The listener
         # runs on whichever thread published the event (UI thread for admission,
@@ -180,6 +190,9 @@ class PlaividTui(
         self.query_one("#logout", Button).tooltip = "Logout"
         self._group_box(self.query_one("#vm-list", Vertical), "vms", "VM list")
         self._group_box(self.query_one("#desktop-list", Vertical), "vms", "Desktop list")
+        self.query_one("#detail-scroll", VerticalScroll).border_title = group_title(
+            "vms", "Selected VM", self._palette
+        )
         table = self.query_one("#fleet-table", DataTable)
         self._table_columns = table.add_columns(
             "✓", "#", "VM name", "Object state", "Process", "vCPU", "Memory"

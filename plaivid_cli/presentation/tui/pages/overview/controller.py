@@ -11,8 +11,11 @@ from textual.widgets import Static
 from plaivid_cli.domain.models import (
     ApplicationSnapshot,
     CollectionStatus,
+    HostMetrics,
+    HostStatus,
     InventoryData,
 )
+from plaivid_cli.domain.overview import LocalHostSample
 from plaivid_cli.presentation.charts import (
     CPU_MIN_SCALE,
     LOAD_COLOURS,
@@ -32,6 +35,13 @@ from plaivid_cli.presentation.tui.pages.overview.components import (
 
 from ...components.status import section_status as _section_status
 from .presenter import card_statuses, cards, nic_details
+
+
+def _section_value(section):
+    """Current value, or the last good one while a section is stale/failed."""
+    if section is None:
+        return None
+    return section.value if section.value is not None else section.last_good_value
 
 
 class OverviewMixin:
@@ -173,7 +183,24 @@ class OverviewMixin:
         network = self.query_one("#network-box", NetworkCard)
         self._put("nic-detail", detail, setter=network.set_detail)
 
+    def _remember_local_identity(self, snapshot: ApplicationSnapshot) -> None:
+        """Cache this node's name/id and hostname for the VM pane's ``Host`` label.
+
+        The hostname is only appended by ``describe_host`` when a VM's node is
+        proven local, so a remote node never borrows this machine's name.
+        """
+        status = _section_value(snapshot.section("host_status"))
+        metrics = _section_value(snapshot.section("host_metrics"))
+        local = _section_value(snapshot.section("local_host"))
+        hostname = metrics.hostname if isinstance(metrics, HostMetrics) else None
+        if not hostname and isinstance(local, LocalHostSample):
+            hostname = local.hostname
+        self._local_node_name = status.name if isinstance(status, HostStatus) else None
+        self._local_node_id = status.node_id if isinstance(status, HostStatus) else None
+        self._local_hostname = hostname
+
     def _publish_snapshot(self, snapshot: ApplicationSnapshot) -> None:
+        self._remember_local_identity(snapshot)
         self._render_desktops(snapshot.section("desktops"))
         self._render_overview(snapshot)
         inventory_section = snapshot.section("inventory")

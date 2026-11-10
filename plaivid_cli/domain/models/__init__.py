@@ -14,8 +14,15 @@ from .host import (
     TemperatureReading,
     UserSession,
     VMDetail,
+    describe_host,
 )
-from .inventory import InventoryData, ObjectVM, ProcessObservation, VMRecord
+from .inventory import (
+    InventoryData,
+    ObjectVM,
+    ProcessObservation,
+    VMRecord,
+    resolve_console_port,
+)
 from .operations import (
     ActionPolicy,
     OperationPlan,
@@ -72,5 +79,7 @@ __all__ = [
     "VMDetail",
     "VMRecord",
     "canonical_uuid",
+    "describe_host",
+    "resolve_console_port",
     "task_status_for",
 ]

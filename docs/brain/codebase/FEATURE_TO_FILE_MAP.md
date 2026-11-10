@@ -156,13 +156,13 @@ There are **16 feature/capability maps** in this document.
 
 ### Feature: VM inventory page (search, multi-select, detail, bulk scope)
 
-- **Description:** Local search without PVM reads, UUID-stable selection, checked-row-first action targeting, all-target toggle, selected-VM detail panel.
+- **Description:** Local search without PVM reads, UUID-stable selection, checked-row-first action targeting, all-target toggle, selected-VM detail panel (aligned, colour-coded, scrollable, with explicit loading/failure states; native node and console port from the inventory read, console kind from the on-demand detail read, hostname appended only for the proven local node).
 - **Entry point:** `plaivid_cli/presentation/tui/pages/virtual_machines/page.py::VirtualMachinePage`.
 - **Main implementation:** `plaivid_cli/presentation/tui/pages/virtual_machines/selection.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/controller.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/inventory.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/details.py`.
 - **Supporting modules:** `plaivid_cli/presentation/tui/components/checkable_table.py`, `plaivid_cli/presentation/tui/components/inventory_toolbar.py`, `plaivid_cli/presentation/tui/components/formatting.py`, `plaivid_cli/presentation/tui/pages/virtual_machines/components/summary.py`.
 - **Shared dependencies:** `plaivid_cli/application/services.py`, `plaivid_cli/domain/models/inventory.py`, `plaivid_cli/presentation/theme.py`.
 - **Data models:** `InventoryData`, `VMRecord`, `VMDetail`, `SectionSnapshot`.
-- **Tests:** `tests/unit/test_cli_and_tui.py`, `tests/unit/test_multi_select.py`, `tests/unit/test_architecture_boundaries.py`.
+- **Tests:** `tests/unit/test_cli_and_tui.py`, `tests/unit/test_multi_select.py`, `tests/unit/test_vm_detail_panel.py`, `tests/unit/test_architecture_boundaries.py`.
 - **Related contracts:** [`../contracts/MODULE_CONTRACTS.md`](../contracts/MODULE_CONTRACTS.md), [`../contracts/API_CONTRACTS.md`](../contracts/API_CONTRACTS.md).
 - **Potential impact areas:** selection state on `PlaividTui`, scope labels, `CheckRequested` messages, sibling-page import ban.
 - **Files that should NOT be modified:** `plaivid_cli/presentation/tui/pages/virtual_desktops/` (separate page), `plaivid_cli/legacy/vms.py`.

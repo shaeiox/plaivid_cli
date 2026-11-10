@@ -25,6 +25,24 @@ def test_object_inventory_parses_defined_facts_only() -> None:
     assert result.value[0].vcpu == 4
     assert result.value[0].mem_mb == 8192
     assert result.value[0].state == "started"
+    # The node is a native object fact, so it is available before any Enter read.
+    assert result.value[0].host == "node-a"
+    assert result.value[1].host is None
+
+
+def test_object_inventory_parses_the_host_verbatim_and_rejects_blank_ones() -> None:
+    root = ET.fromstring(
+        "<description>"
+        "<pvm_vmm_obj><uuid>481e458c-c6ba-4fe7-88f6-26a59e416568</uuid>"
+        "<name>padded</name><virtual_machine><cluster><host> node-a </host></cluster>"
+        "</virtual_machine></pvm_vmm_obj>"
+        "<pvm_vmm_obj><uuid>2b8ec16f-c2db-43d9-b65c-12077dbdc5b8</uuid>"
+        "<name>blank</name><virtual_machine><cluster><host/></cluster>"
+        "</virtual_machine></pvm_vmm_obj>"
+        "</description>"
+    )
+    values = parse_object_inventory(root).value
+    assert [item.host for item in values] == ["node-a", None]
 
 
 def test_duplicate_and_invalid_object_uuids_mark_partial_and_are_excluded() -> None:
@@ -48,6 +66,7 @@ def test_running_process_rows_are_separate_and_unmatched_rows_are_retained() -> 
     merged = merge_inventory(objects.value, result.value, process_available=True)
     first = next(row for row in merged.records if row.name == "test-vm")
     assert first.object.state == "started"
+    assert first.object.host == "node-a"  # the join never rewrites object facts
     assert first.process is not None and first.process.pid == 1234
     assert len(merged.unmatched_process_rows) == 1
     assert all(row.name != "process-only" for row in merged.records)
@@ -75,12 +94,37 @@ def test_sball_parser_reads_real_resource_usage_shape() -> None:
     assert result.value.sball_state == "quorate"
     assert result.value.node_state == "up"
     assert result.value.version == "7.2.16"
+    assert result.value.node_id == "1"
     assert result.value.load1 == 1.080566
     assert result.value.load15 == 0.932617
     assert result.value.cpu_count == 24
     assert result.value.ram_total_bytes == 33392357376
     assert result.value.ram_used_bytes == 33392357376 - 25488154624
     assert result.value.storage_total_bytes == 31525343232
+
+
+def test_sball_parser_reads_the_node_id_without_requiring_it() -> None:
+    from_id = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<id>2</id><name>node-b</name><resource_usage><release_info><version>7.2.16</version>"
+        "</release_info></resource_usage></node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(from_id).value.node_id == "2"
+
+    from_usage = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<name>node-c</name><resource_usage><node_id>3</node_id>"
+        "<release_info><version>7.2.16</version></release_info></resource_usage>"
+        "</node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(from_usage).value.node_id == "3"
+
+    missing = ET.fromstring(
+        "<description><sball-config><cluster><node>"
+        "<name>node-d</name><resource_usage><release_info><version>7.2.16</version>"
+        "</release_info></resource_usage></node></cluster></sball-config></description>"
+    )
+    assert parse_sball_status(missing).value.node_id is None
 
 
 def test_sball_parser_is_partial_when_resource_usage_is_missing() -> None:

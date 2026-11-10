@@ -31,11 +31,14 @@ Method: [Unslop](../.agents/skills/unslop/SKILL.md) by Damir Sokolovsky, CC BY 4
 - [x] 7. Verify keyboard navigation, readable status without color, logout/focus and responsive resizing on all pages with Textual Pilot.
 - [x] 8. **Last feature task:** add local name search to the VM page like Virtual Desktops. Preserve full UUID selection, move hidden selection to the first visible match or clear it, leave Apply to all unfiltered, and never read PVM per keystroke.
 - [x] 9. Update visual-system documentation, run pytest/Ruff/Pyright/build/diff checks, and report any unverified real-host appearance or behavior.
+- [x] 10. Replace the flat selected-VM detail string with an aligned, colour-coded Rich grid: state
+  badges reuse the table's classification, the UUID stays complete, Enter reports loading/failure,
+  and the pane scrolls instead of clipping. See `docs/TUI_VM_DETAIL_PANE_RCA.md`.
 
 The user requested implementation to start now; no separate design approval wait is required. Each task is small enough to test before the next one. No automatic action confirmation is reintroduced.
 
 ## Verification and limits
 
-Local verification: 146 passing tests including search/UUID/bulk safety, login/logout state, keyboard focus, 80↔120-column resize and 16/256/truecolor/no-color palette tests; Ruff and Pyright clean; package build and `git diff --check` clean. No live PVM operation or on-host visual acceptance was performed. The Desktop action protocol still needs separate authorized validation.
+Local verification: 351 passing tests including search/UUID/bulk safety, login/logout state, keyboard focus, 80↔120-column resize, 16/256/truecolor/no-color palette tests and the structured detail pane (alignment, badges, redaction, clipping, loading/failure); Ruff clean (Pyright was not re-run for the later detail-pane change); package build and `git diff --check` clean. No live PVM operation or on-host visual acceptance was performed. The Desktop action protocol still needs separate authorized validation.
 
 The skill's web-only image, browser typography and animation passes are intentionally inapplicable to this terminal application; the real sample history and collection-state rail are its visual content. No invented data, extra collectors or motion were added.

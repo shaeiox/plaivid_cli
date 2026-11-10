@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from rich.text import Text
 from textual.widgets import Button, DataTable, Select, TabbedContent
+from tui_plain import plain
 
 from plaivid_cli.application.collection import CollectionCoordinator
 from plaivid_cli.application.operations import OperationCoordinator
@@ -279,7 +280,7 @@ def test_tui_redacts_sensitive_pvm_names_and_descriptions(tmp_path):
         async with tui.run_test() as pilot:
             await pilot.pause(0.2)
             visible = str(tui.query_one("#fleet-table").render())
-            detail = str(tui.query_one("#detail-box").render())
+            detail = plain(tui.query_one("#detail-box"))
             assert "synthetic-tui-secret" not in visible + detail
             assert "synthetic-description-secret" not in visible + detail
             assert "[REDACTED]" in detail
@@ -637,7 +638,7 @@ def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
                 assert calls == initial_calls
                 assert table.row_count == 1
                 assert tui._selected_uuid == UUID_B
-                assert UUID_B in str(tui.query_one("#detail-box", Static).render())
+                assert UUID_B in plain(tui.query_one("#detail-box", Static))
                 assert "1 shown" in str(tui.query_one("#vm-scope", Static).render())
                 assert table.virtual_size.width <= table.region.width
                 # A changed input must re-render even if the inventory generation has not changed.
@@ -646,7 +647,7 @@ def test_vm_search_is_local_and_all_targets_ignore_filter(tmp_path):
                 search.value = "missing"
                 await pilot.pause(0.05)
                 assert table.row_count == 0 and tui._selected_uuid is None
-                assert "No matching VMs" in str(tui.query_one("#detail-box", Static).render())
+                assert "No matching VMs" in plain(tui.query_one("#detail-box", Static))
                 tui._begin_action(Action.START)
                 assert not provider.dispatched
                 search.value = "beta"

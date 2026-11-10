@@ -52,6 +52,7 @@ def parse_object_inventory(root: ET.Element) -> ParseResult[tuple[ObjectVM, ...]
         vcpu = _parse_vcpu(machine.find("hardware/cpu")) if machine is not None else None
         mem = _int(machine.findtext("hardware/memory/size")) if machine is not None else None
         port = _int(machine.findtext("hardware/console/port")) if machine is not None else None
+        host = machine.findtext("cluster/host") if machine is not None else None
         candidates.append(
             ObjectVM(
                 uuid=uuid,
@@ -61,6 +62,7 @@ def parse_object_inventory(root: ET.Element) -> ParseResult[tuple[ObjectVM, ...]
                 mem_mb=mem,
                 description=(obj.findtext("description") or "").strip(),
                 configured_port=port,
+                host=host,
             )
         )
 
