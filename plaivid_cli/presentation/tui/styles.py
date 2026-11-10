@@ -1,8 +1,12 @@
 """Semantic CSS for the Textual dashboard."""
 
 TUI_CSS = """
-        Screen { background: $p-bg; color: $p-text; }
-        #shell { height: 1fr; padding: 0 1; background: $p-bg; }
+        /* One inset owns the whole app's breathing room: Screen padding keeps
+           the topbar, tab body, key hints and Footer off the terminal edges.
+           #shell then carries no padding of its own, or the horizontal inset
+           would be applied twice. */
+        Screen { background: $p-bg; color: $p-text; padding: 1 2; }
+        #shell { height: 1fr; padding: 0; background: $p-bg; }
         #topbar { height: 2; padding: 0 1; margin: 0 0 1 0;
                   background: $p-panel; border-bottom: solid $p-border; }
         #brand { width: 1fr; content-align: left middle; }
@@ -47,13 +51,15 @@ TUI_CSS = """
         TabbedContent Tab { color: $p-muted; background: $p-panel; }
         TabbedContent Tab.-active { color: $p-bg; background: $p-blue; text-style: bold; }
         TabbedContent Tab:focus { text-style: bold; }
-        TabPane { padding: 0 1; background: $p-bg; }
+        /* Screen already insets the body by 2 columns; a pane inset on top of it
+           would triple the gutter and clip a long VM name at 80 columns. */
+        TabPane { padding: 0; background: $p-bg; }
         Footer { background: $p-panel; color: $p-text; }
         #notice { height: 1; color: $p-muted; padding: 0 1; }
 
         /* Task board: hidden while idle so the tuned layout is unchanged; it
            takes flow space (not dock) above the key hints when tasks exist. */
-        #task-footer { display: none; height: 6; max-height: 50%;
+        #task-footer { display: none; height: 5; max-height: 50%;
                        background: $p-panel; border-top: solid $p-border;
                        scrollbar-color: $p-border; }
         #task-footer.-visible { display: block; }
@@ -108,32 +114,34 @@ TUI_CSS = """
         .cols-1 #metrics-commands, .cols-2 #metrics-commands { width: 100%; border-left: none;
                                                               border-top: solid $p-border;
                                                               padding: 1 0 0 0; margin-top: 1; }
-        #fleet-summary { height: 5; margin-top: 1; align-vertical: middle; }
-        .metric-card { width: 1fr; height: 5; margin-right: 1; padding: 0 1;
-                       border-left: solid $p-border; background: $p-surface; }
-        .metric-card:focus-within { border-left: solid $p-blue; }
+        /* Summary tiles: two text rows in three terminal rows. The old height: 5
+           left three dead rows per tile and pushed the list/details panes down. */
+        #fleet-summary { height: 3; margin-top: 0; align-vertical: middle; }
+        .metric-card { width: 1fr; height: 3; min-height: 3; margin-right: 1; padding: 0 1;
+                       border: none; border-top: solid $p-border; background: $p-surface; }
+        .metric-card:focus-within { border-top: solid $p-blue; }
         .metric-title { color: $p-muted; text-style: bold; }
         .metric-value { color: $p-cyan; text-style: bold; }
         #refresh-button { width: 11; min-width: 11; margin: 0 0 0 1; }
-        #vm-list { height: 1fr; min-height: 13; border: round $p-border;
+        #vm-list { height: 1fr; min-height: 9; border: round $p-border;
                    background: $p-panel; }
         #vm-toolbar { height: 3; padding: 0 1; align-vertical: middle; background: $p-panel; }
         #bulk-actions { width: 20; }
         #select-all { width: auto; margin-left: 2; }
         #audit-toggle { width: 11; min-width: 11; margin-left: 2; }
-        #fleet-table { height: 1fr; min-height: 8; background: $p-surface;
+        #fleet-table { height: 1fr; min-height: 6; background: $p-surface;
                        border: round $p-border; }
         DataTable > .datatable--header { background: $p-panel; color: $p-text; text-style: bold; }
         DataTable:focus > .datatable--cursor { background: $p-blue; color: $p-bg; }
         /* Content-driven up to a cap: a short record keeps room for the Audit
            panel, a long description scrolls instead of pushing rows off-screen. */
-        #detail-scroll { height: auto; max-height: 12; margin-top: 1; border: round $p-border;
+        #detail-scroll { height: auto; max-height: 11; margin-top: 1; border: round $p-border;
                          background: $p-panel; padding: 0 1; scrollbar-color: $p-border; }
         #detail-box { height: auto; min-height: 9; background: $p-panel; }
         #action-status { height: 1; color: $p-yellow; }
-        #desktop-summary { height: 5; margin-top: 1; align-vertical: middle; }
+        #desktop-summary { height: 3; margin-top: 0; align-vertical: middle; }
         #desktop-refresh { width: 11; min-width: 11; margin: 0 0 0 1; }
-        #desktop-list { height: 1fr; min-height: 13; border: round $p-border;
+        #desktop-list { height: 1fr; min-height: 9; border: round $p-border;
                         background: $p-panel; }
         #desktop-toolbar { height: 3; padding: 0 1; align-vertical: middle;
                            background: $p-panel; }
@@ -144,15 +152,15 @@ TUI_CSS = """
                                       border: none; background: $p-surface; }
         #desktop-search:focus, #vm-search:focus { border: none; background: $p-surface;
                                                   color: $p-blue; text-style: underline; }
-        #desktop-table { height: 1fr; min-height: 8; background: $p-surface;
+        #desktop-table { height: 1fr; min-height: 6; background: $p-surface;
                          border: round $p-border; }
         #desktop-scope, #vm-scope { height: 1; color: $p-muted; }
-        #desktop-detail-scroll { height: 10; margin-top: 1;
+        #desktop-detail-scroll { height: auto; max-height: 11; margin-top: 1;
                                  border: round $p-border; background: $p-panel; }
-        #desktop-audit-panel { display: none; height: 10;
+        #desktop-audit-panel { display: none; height: 8; max-height: 30%;
                                border: round $p-border; background: $p-panel; padding: 1; }
         #desktop-detail { height: auto; background: $p-panel; padding: 1; }
         #desktop-action-status { height: auto; color: $p-yellow; }
-        #audit-panel { display: none; height: 10;
+        #audit-panel { display: none; height: 8; max-height: 30%;
                        border: round $p-border; background: $p-panel; padding: 1; }
         """

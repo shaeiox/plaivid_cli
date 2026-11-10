@@ -308,7 +308,7 @@ TaskViewFooter, #task-footer {
 
 **Why flow, not `dock: bottom`.** `#shell` is a `Vertical` with a `1fr` tab area. A docked child would be positioned relative to the *screen* and overlay `#notice`/`Footer` (both height 1, both asserted by tests). Flow placement lets Textual shrink the `1fr` region instead, which is exactly the layout behaviour we want. `max-height: 50%` prevents the footer from eating the whole screen at 40 rows.
 
-**Layout-budget check** (must be verified, not assumed): at 80×40 the tab area currently gets ≈35 rows; a 5-row footer leaves ≈30. `#fleet-table` has `min-height: 8` and `#desktop-list` `min-height: 13` (`styles.py`), so 30 is safe — but the existing 80/120-column regression test (`test_tui_theme.py::test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120`) must be re-run, and `display: none` when idle keeps the status quo byte-for-byte for the login screen.
+**Layout-budget check** (must be verified, not assumed): at 80×40 the tab area gets ≈30 rows (the `Screen { padding: 1 2 }` inset and the 3-row summary tiles removed a further 2+3 rows). `#fleet-table` has `min-height: 6` and `#desktop-list`/`#vm-list` `min-height: 9` (`styles.py`), so 30 is safe — but the existing 80/120-column regression test (`test_tui_theme.py::test_both_pages_use_custom_theme_and_visible_controls_at_80_and_120`) must be re-run, and `display: none` when idle keeps the status quo byte-for-byte for the login screen.
 
 ### 4.3 Component contract
 
