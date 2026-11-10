@@ -80,6 +80,7 @@ class SessionMixin:
         self._desktop_checked.clear()
         self._desktop_rows = ()
         self._desktop_cells.clear()
+        self._desktop_sort = None
         self.query_one("#desktop-table", DataTable).clear(columns=False)
         self.query_one("#desktop-search", Input).value = ""
         self.query_one("#desktop-all", Checkbox).value = False
@@ -101,6 +102,7 @@ class SessionMixin:
         self._vm_checked.clear()
         self._table_order = ()
         self._table_content.clear()
+        self._vm_sort = None
         self.query_one("#fleet-table", DataTable).clear(columns=False)
         self.query_one("#vm-count", Static).update("—")
         self.query_one("#process-count", Static).update("—")

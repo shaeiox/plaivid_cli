@@ -17,6 +17,15 @@ class CheckableTable(DataTable):
             self.key = key
 
     async def _on_click(self, event: events.Click) -> None:
+        """Claim only the checkbox cell; let the base class own every other click.
+
+        Textual dispatches the naming-convention handler down the MRO, so this
+        override *and* ``DataTable._on_click`` both run for one click. Forwarding
+        with ``super()`` would therefore make the base class post every message
+        twice — a duplicated ``HeaderSelected`` advanced a header-click sort two
+        steps per click. The base handler runs on its own, so this one must not
+        call it.
+        """
         meta = event.style.meta
         if meta.get("column") == 0 and "row" in meta and not meta.get("out_of_bounds", False):
             rows = self.ordered_rows
@@ -24,5 +33,3 @@ class CheckableTable(DataTable):
             if 0 <= index < len(rows):
                 key = rows[index].key
                 self.post_message(self.CheckRequested(self, str(getattr(key, "value", key))))
-            return
-        await super()._on_click(event)

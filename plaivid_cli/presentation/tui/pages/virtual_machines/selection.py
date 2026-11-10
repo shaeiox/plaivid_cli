@@ -5,6 +5,7 @@ from __future__ import annotations
 from rich.console import Group, RenderableType
 from rich.text import Text
 from textual import on, work
+from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Checkbox, DataTable, Input, Static
 from textual.widgets._data_table import CellDoesNotExist
@@ -16,6 +17,13 @@ from plaivid_cli.presentation.theme import state_text
 
 from ...components import CheckableTable
 from ...components import display as _display
+from ...components.sorting import (
+    VM_SORT_COLUMNS,
+    column_value,
+    describe_sort,
+    next_sort_state,
+    sort_records,
+)
 from .components import (
     DetailPlaceholder,
     build_detail_placeholder,
@@ -104,12 +112,52 @@ class VMSelectionMixin:
         # Column 2 is the object state (VM page) or cluster status (Virtual Desktops page).
         return state_text(cell, self._palette) if column == 2 else Text(cell)
 
+    def _show_vm_sort_title(self) -> None:
+        """Name the active sort in the panel title, so order is never implicit."""
+        detail = describe_sort(self._vm_sort, VM_SORT_COLUMNS)
+        title = "VM list" if not detail else f"VM list · {detail}"
+        self._group_box(self.query_one("#vm-list", Vertical), "vms", title)
+
+    def vm_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        """Sort the VM table from a column-header click.
+
+        Registered only on the App (with a ``#fleet-table`` selector): decorating
+        it here as well would fire the ascending/descending cycle twice per click
+        and would also react to the Desktop table's headers.
+        """
+        self.action_sort_by_column(event.column_index)
+
+    def action_sort_by_column(self, column: int) -> None:
+        """Cycle the table's sort column (ascending -> descending -> default)."""
+        previous = self._vm_sort
+        self._vm_sort = next_sort_state(previous, column, VM_SORT_COLUMNS)
+        if self._vm_sort != previous:
+            self._filter_vms()
+
+    def _vm_sort_key(self, column: int):
+        """Comparable value per sortable column; absent values stay last."""
+        by_column = {
+            2: lambda item: column_value(item.name, item.uuid),
+            3: lambda item: column_value(item.state, item.uuid),
+            4: lambda item: column_value(item.process_seen, item.uuid, numeric=True),
+            5: lambda item: column_value(item.vcpu, item.uuid, numeric=True),
+            6: lambda item: column_value(item.mem_mb, item.uuid, numeric=True),
+        }
+        return by_column[column]
+
     def _filter_vms(self) -> None:
         query = self.query_one("#vm-search", Input).value.strip().casefold()
-        records = sorted(
-            (record for record in self._records.values() if query in record.name.casefold()),
-            key=lambda item: (0 if item.process_seen else 1, item.name.casefold(), item.uuid),
+        outcome = sort_records(
+            [record for record in self._records.values() if query in record.name.casefold()],
+            self._vm_sort,
+            # Default: VMs with observed process evidence first, then by name. This
+            # is an evidence ordering, not an alphabetical one, so it is restored
+            # only when no column sort is active.
+            lambda item: (0 if item.process_seen else 1, item.name.casefold(), item.uuid),
+            {column: self._vm_sort_key(column) for column in VM_SORT_COLUMNS},
         )
+        records = outcome.records
+        self._vm_sort = outcome.applied
         rows = {
             record.uuid: (
                 str(index),
@@ -143,6 +191,7 @@ class VMSelectionMixin:
                             update_width=True,
                         )
         self._table_order, self._table_content = order, rows
+        self._show_vm_sort_title()
         all_targets = self.query_one("#select-all", Checkbox).value
         count = len(self._records) if all_targets else int(bool(order))
         self.query_one("#vm-scope", Static).update(
