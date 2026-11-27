@@ -6,6 +6,10 @@ The Engine is an independently installable project. Its import package is `pvm_c
 
 The Engine exclusively owns auth/session state, canonical VM target resolution, local PVM reads, the approved `sbell` integration, process execution, and lifecycle mutation safeguards. The Textual UI connects only through the local Unix-domain JSON-RPC protocol. No HTTP(S), nginx/httpd, `sabad` client, or raw `sballd` protocol is used.
 
+Startup follows one explicit path: `pvm_control_engine.__main__` calls `bootstrap.main`, which parses CLI options, loads configuration, resolves socket/UID policy, and calls `composition.build_runtime`. That shallow composition function creates the adapters, coordinators and application services, then delegates the fixed `sbell` command/action registrations to `commands.registry.build_command_registry`. The returned `EngineRuntime` owns `serve()` and idempotent `close()`. Bootstrap installs a SIGTERM handler that requests server shutdown, preserves the established exit/error policy, restores the prior handler, and closes the runtime in `finally`. If composition fails after coordinator creation, it closes the coordinators before re-raising.
+
+Evidence: `pvm_control_engine/src/pvm_control_engine/__main__.py`, `bootstrap.py::main`, `bootstrap.py::_run_runtime`, `composition.py::build_runtime`, `composition.py::EngineRuntime`, `infrastructure/sbell/commands/registry.py::build_command_registry`; startup/lifecycle regressions are covered in `pvm_control_engine/tests/unit/test_pvm_control_engine.py`.
+
 Run the Engine under the local account authorized for PVM access. The socket defaults to `$XDG_RUNTIME_DIR/pvm-control-engine.sock` or the Engine state directory, is created with restrictive parent/socket permissions, and accepts only the Engine UID by default. `--allow-uid` and group-writable mode are opt-in and share the same Engine session; do not use them for mutually untrusted users.
 
 ## IPC contract: `plaivid.engine.v1`

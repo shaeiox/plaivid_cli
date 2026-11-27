@@ -10,7 +10,7 @@
 │   └── scripts/                         UI-specific setup tooling
 ├── pvm_control_engine/                  pvm-control-engine project root
 │   ├── pyproject.toml                   Engine distribution metadata
-│   ├── src/pvm_control_engine/          Engine package
+│   ├── src/pvm_control_engine/          Engine package; `bootstrap.py` CLI policy, `composition.py` runtime wiring
 │   ├── tests/                           Engine unit and IPC contract tests
 │   └── docs/                            Engine README and architecture/host validation
 ├── docs/brain/                          repository-wide maps/contracts/workflows

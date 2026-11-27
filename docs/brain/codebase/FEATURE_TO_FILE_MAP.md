@@ -1,13 +1,13 @@
 # Feature-to-file map
 
 ### Feature: Engine local lifecycle and authentication
-- **Main implementation:** `pvm_control_engine/src/pvm_control_engine/bootstrap.py`, `pvm_control_engine/src/pvm_control_engine/auth/`
-- **Supporting modules:** `pvm_control_engine/src/pvm_control_engine/infrastructure/sbell/commands/user/`
+- **Main implementation:** `pvm_control_engine/src/pvm_control_engine/bootstrap.py`, `pvm_control_engine/src/pvm_control_engine/composition.py`, `pvm_control_engine/src/pvm_control_engine/auth/`
+- **Supporting modules:** `pvm_control_engine/src/pvm_control_engine/infrastructure/sbell/commands/user/`, `pvm_control_engine/src/pvm_control_engine/infrastructure/sbell/commands/registry.py`
 - **Shared dependencies:** Python standard library, local configured sbell
 - **Data models:** `pvm_control_engine/src/pvm_control_engine/domain/models/session.py`
 - **Tests:** `pvm_control_engine/tests/unit/test_pvm_control_engine.py`
 - **Related contracts:** `pvm_control_engine/docs/ARCHITECTURE.md`
-- **Potential impact areas:** UI connect/logout states; Engine session cache
+- **Potential impact areas:** UI connect/logout states; Engine session cache; socket serving and cleanup lifecycle
 - **Files that should NOT be modified:** `UI/tui/src/plaivid_ui/engine_client/client.py`
 - **Documentation references:** `pvm_control_engine/README.md`
 

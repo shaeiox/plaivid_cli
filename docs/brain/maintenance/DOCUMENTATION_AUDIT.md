@@ -21,6 +21,14 @@ It checks required two-project/navigation files, local links in current project 
 - Both project sdists and wheels built in isolated build environments. Wheel contents and entry points were inspected. The only sandbox interpreter is Python 3.11.2 while both distributions retain the accepted `>=3.12` floor; supported-runtime installation remains unverified. Both wheels imported and exposed their parsers under Python 3.11 only with `pip --ignore-requires-python`; this is supplemental packaging smoke, not supported-runtime validation.
 - UI-owned socket client ↔ real Engine Unix RPC server smoke test passed for `engine.health` and rejection of an unknown method. The test used a temporary socket and no PVM requests.
 
+## Engine startup refactor verification — 2026-11-27
+
+- Engine startup now follows `__main__` → `bootstrap.main` → `composition.build_runtime` → `EngineRuntime.serve()`; the registry builder owns the fixed command/action instances. `bootstrap._run_runtime` retains signal and exit policy while closing the runtime in `finally`.
+- `pvm_control_engine/tests/unit/test_pvm_control_engine.py`: 95 passed under Python 3.11.2 (supplemental to the declared Python 3.12 floor); Engine Ruff clean; Engine Pyright 0 diagnostics.
+- UI suite: 22 passed; UI Ruff clean; IPC boundary tests: 6 passed; targeted UI Engine-client Pyright: 0 diagnostics.
+- Engine and UI sdists/wheels built successfully with isolated build environments. No supported Python 3.12 interpreter is present, so the supported-runtime install gate remains unverified.
+- `python scripts/validate_brain.py`: PASS after the navigation/architecture updates; 22 required navigation/project files, 38 checked local links, and 84 UI modules boundary-checked.
+
 ## Historical material
 
 Pre-split codebase architecture records, REFACTOR/TASKS notes, product references, and combined UI tests were moved under their owning project in `UI/docs/history/`, `UI/docs/migration/legacy-tests/`, and `pvm_control_engine/docs/`. They remain preserved context; old references to the combined `plaivid_cli` runtime, old UI tabs, or one-package installation are historical and must not override current project READMEs, metadata, `docs/brain/codebase/`, `UI/docs/IPC.md`, or Engine RPC source.

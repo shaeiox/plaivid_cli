@@ -13,10 +13,11 @@ from pathlib import Path
 import pytest
 
 from pvm_control_engine.application.service import EngineService, _safe_value
-from pvm_control_engine.bootstrap import _parse_socket_mode, build_runtime
-from pvm_control_engine.config import load_settings
+from pvm_control_engine.bootstrap import _parse_socket_mode, _socket_path, main
+from pvm_control_engine.composition import EngineRuntime, build_runtime
+from pvm_control_engine.config import ConfigurationError, load_settings
 from pvm_control_engine.domain.errors import AppError
-from pvm_control_engine.domain.models import PvmSession
+from pvm_control_engine.domain.models import Action, PvmSession
 from pvm_control_engine.infrastructure.process import ProcessResult
 from pvm_control_engine.infrastructure.pvm.adapter.local import LocalPvmAdapter
 from pvm_control_engine.infrastructure.pvm.adapter.requests import (
@@ -168,11 +169,93 @@ def test_socket_mode_configuration_is_octal_and_restrictive():
         _parse_socket_mode("0666")
 
 
+def test_socket_path_precedence_preserves_cli_environment_and_state_defaults(monkeypatch):
+    from argparse import Namespace
+
+    settings = load_settings({"PLAIVID_STATE_DIR": "/engine-state"})
+    args = Namespace(socket=None)
+    monkeypatch.setenv("PLAIVID_CONTROL_SOCKET", "/env/engine.sock")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/runtime")
+    assert _socket_path(args, settings) == "/env/engine.sock"
+    args.socket = "/cli/engine.sock"
+    assert _socket_path(args, settings) == "/cli/engine.sock"
+    args.socket = None
+    monkeypatch.delenv("PLAIVID_CONTROL_SOCKET")
+    assert _socket_path(args, settings) == "/runtime/pvm-control-engine.sock"
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    assert _socket_path(args, settings) == "/engine-state/pvm-control-engine.sock"
+
+
+def test_main_passes_socket_and_authorization_options_to_composition(monkeypatch, capsys):
+    import pvm_control_engine.bootstrap as bootstrap
+
+    settings = load_settings({"PLAIVID_STATE_DIR": "/engine-state"})
+    seen = {}
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: settings)
+
+    def fail_after_capture(received_settings, socket_path, **kwargs):
+        seen.update(settings=received_settings, socket_path=socket_path, **kwargs)
+        raise RuntimeError("captured startup settings")
+
+    monkeypatch.setattr(bootstrap, "build_runtime", fail_after_capture)
+    assert main(
+        ["serve", "--socket", "/cli/engine.sock", "--allow-uid", "19", "--allow-uid", "23", "--socket-mode", "0660", "--max-workers", "3"]
+    ) == 2
+    assert seen == {
+        "settings": settings,
+        "socket_path": "/cli/engine.sock",
+        "allowed_uids": {os.getuid(), 19, 23},
+        "max_workers": 3,
+        "socket_mode": 0o660,
+    }
+    assert "captured startup settings" in capsys.readouterr().err
+
+
+def test_runtime_owns_serve_and_closes_each_resource_once():
+    calls = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def close(self):
+            calls.append(f"close:{self.name}")
+
+    class Server(Resource):
+        def serve_forever(self):
+            calls.append("serve")
+
+    runtime = EngineRuntime(object(), Server("server"), Resource("operations"), Resource("collection"))
+    runtime.serve()
+    runtime.close()
+    runtime.close()
+    assert calls == ["serve", "close:server", "close:operations", "close:collection"]
+
+
+def test_runtime_closes_remaining_resources_if_server_close_fails():
+    calls = []
+
+    class FailingServer:
+        def close(self):
+            calls.append("server")
+            raise OSError("close failed")
+
+    class Resource:
+        def close(self):
+            calls.append("resource")
+
+    runtime = EngineRuntime(object(), FailingServer(), Resource(), Resource())
+    with pytest.raises(OSError, match="close failed"):
+        runtime.close()
+    assert calls == ["server", "resource", "resource"]
+
+
 def test_engine_composition_registers_each_permitted_vm_action_without_starting_pvm(tmp_path):
     settings = load_settings({"PLAIVID_STATE_DIR": str(tmp_path / "state")})
     runtime = build_runtime(settings, tmp_path / "engine.sock")
     try:
         assert isinstance(runtime.service.registry.vm_action("kill"), KillVM)
+        assert all(runtime.service.registry.vm_action(action.value) for action in Action)
         assert set(runtime.service.registry.commands) == {
             "user.login",
             "user.whoami",
@@ -190,6 +273,161 @@ def test_engine_composition_registers_each_permitted_vm_action_without_starting_
     finally:
         runtime.close()
     assert not (tmp_path / "engine.sock").exists()
+
+
+def test_composition_failure_closes_coordinators(monkeypatch, tmp_path):
+    import pvm_control_engine.composition as composition
+
+    settings = load_settings({"PLAIVID_STATE_DIR": str(tmp_path / "state")})
+    created = {}
+    real_collection = composition.CollectionCoordinator
+    real_operations = composition.VMOperationCoordinator
+
+    class TrackingCollection(real_collection):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created["collection"] = self
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            super().close()
+
+    class TrackingOperations(real_operations):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created["operations"] = self
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            super().close()
+
+    monkeypatch.setattr(composition, "CollectionCoordinator", TrackingCollection)
+    monkeypatch.setattr(composition, "VMOperationCoordinator", TrackingOperations)
+    monkeypatch.setattr(
+        composition,
+        "build_command_registry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("registry failed")),
+    )
+    with pytest.raises(RuntimeError, match="registry failed"):
+        build_runtime(settings, tmp_path / "engine.sock")
+    assert created["operations"].closed
+    assert created["collection"].closed
+
+
+def test_main_configuration_and_composition_errors_keep_exit_code_two(monkeypatch, capsys):
+    import pvm_control_engine.bootstrap as bootstrap
+
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: (_ for _ in ()).throw(ConfigurationError("bad config")))
+    assert main(["serve"]) == 2
+    assert "pvm-control-engine: bad config" in capsys.readouterr().err
+
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: load_settings({}))
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda *_a, **_k: (_ for _ in ()).throw(OSError("socket failed")))
+    assert main(["serve", "--socket", "/tmp/test-engine.sock"]) == 2
+    assert "pvm-control-engine: socket failed" in capsys.readouterr().err
+
+
+def test_main_serves_forwards_sigterm_and_restores_signal_handler(monkeypatch):
+    import pvm_control_engine.bootstrap as bootstrap
+
+    signals = []
+    old_handler = object()
+    installed_handler = None
+
+    class Server:
+        shutdown_requested = False
+
+        def request_shutdown(self):
+            self.shutdown_requested = True
+
+    class Runtime:
+        server = Server()
+        closed = False
+
+        def serve(self):
+            installed_handler(15, None)
+
+        def close(self):
+            self.closed = True
+
+    runtime = Runtime()
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: load_settings({}))
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda *_a, **_k: runtime)
+    monkeypatch.setattr(bootstrap.signal, "getsignal", lambda _sig: old_handler)
+
+    def set_signal(_sig, handler):
+        nonlocal installed_handler
+        signals.append(handler)
+        if handler is not old_handler:
+            installed_handler = handler
+        return old_handler
+
+    monkeypatch.setattr(bootstrap.signal, "signal", set_signal)
+    assert main(["serve"]) == 0
+    assert runtime.server.shutdown_requested
+    assert runtime.closed
+    assert signals[-1] is old_handler
+
+
+def test_main_signal_setup_failure_still_closes_runtime(monkeypatch):
+    import pvm_control_engine.bootstrap as bootstrap
+
+    class Runtime:
+        server = type("Server", (), {"request_shutdown": lambda self: None})()
+        closed = False
+
+        def serve(self):
+            raise AssertionError("serve must not start if signal setup failed")
+
+        def close(self):
+            self.closed = True
+
+    runtime = Runtime()
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: load_settings({}))
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda *_a, **_k: runtime)
+    monkeypatch.setattr(bootstrap.signal, "getsignal", lambda _sig: None)
+    monkeypatch.setattr(
+        bootstrap.signal,
+        "signal",
+        lambda *_a: (_ for _ in ()).throw(ValueError("signal setup failed")),
+    )
+    with pytest.raises(ValueError, match="signal setup failed"):
+        main(["serve"])
+    assert runtime.closed
+
+
+@pytest.mark.parametrize(
+    ("serve_error", "expected_code", "expected_message"),
+    [(KeyboardInterrupt(), 130, None), (OSError("private detail"), 1, "OSError")],
+)
+def test_main_serving_errors_preserve_exit_and_cleanup(
+    monkeypatch, capsys, serve_error, expected_code, expected_message
+):
+    import pvm_control_engine.bootstrap as bootstrap
+
+    class Runtime:
+        server = type("Server", (), {"request_shutdown": lambda self: None})()
+        closed = False
+
+        def serve(self):
+            raise serve_error
+
+        def close(self):
+            self.closed = True
+
+    runtime = Runtime()
+    monkeypatch.setattr(bootstrap, "load_settings", lambda: load_settings({}))
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda *_a, **_k: runtime)
+    monkeypatch.setattr(bootstrap.signal, "getsignal", lambda _sig: None)
+    monkeypatch.setattr(bootstrap.signal, "signal", lambda *_a: None)
+    assert main(["serve"]) == expected_code
+    assert runtime.closed
+    stderr = capsys.readouterr().err
+    if expected_message:
+        assert expected_message in stderr
+        assert "private detail" not in stderr
 
 
 def test_rpc_methods_work_over_private_unix_socket_and_shutdown_cleans_socket(tmp_path):

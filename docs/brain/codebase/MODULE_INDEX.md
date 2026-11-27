@@ -2,7 +2,8 @@
 
 | Project/module | Status | Owns |
 |---|---|---|
-| `pvm_control_engine/src/pvm_control_engine/bootstrap.py` | **CANONICAL Engine composition/CLI** | Engine CLI, `serve`, local `login`, runtime wiring |
+| `pvm_control_engine/src/pvm_control_engine/bootstrap.py` | **CANONICAL Engine CLI/lifecycle policy** | CLI/configuration boundary, `serve`, local `login`, exit/signal/cleanup policy |
+| `pvm_control_engine/src/pvm_control_engine/composition.py` | **CANONICAL Engine composition/runtime** | Explicit dependency construction; runtime `serve()` and `close()` ownership |
 | `pvm_control_engine/src/pvm_control_engine/application/` | **CANONICAL Engine** | Collection, application service, operation-level orchestration |
 | `pvm_control_engine/src/pvm_control_engine/domain/` | **CANONICAL Engine** | PVM values, validation, result and safety policies |
 | `pvm_control_engine/src/pvm_control_engine/auth/` | **CANONICAL Engine** | Engine-owned session persistence/provider |
