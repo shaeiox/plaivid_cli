@@ -7,7 +7,7 @@ from setuptools.command.build_py import build_py
 
 LEGACY_PACKAGE = "plaivid_cli.legacy"
 RUNTIME_PACKAGES = find_packages(
-    include=["plaivid_cli*"],
+    include=["plaivid_cli*", "pvm_control_engine*"],
     exclude=[f"{LEGACY_PACKAGE}*"],
 )
 

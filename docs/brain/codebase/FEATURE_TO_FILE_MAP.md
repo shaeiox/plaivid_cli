@@ -6,7 +6,7 @@ file list; do not grep the whole repository first. Every path below is verified 
 [`MODULE_INDEX.md`](MODULE_INDEX.md) · [`FILE_CATALOG.md`](FILE_CATALOG.md) ·
 [`ENTRYPOINTS.md`](ENTRYPOINTS.md).
 
-There are **16 feature/capability maps** in this document.
+There are **17 feature/capability maps** in this document.
 
 ---
 
@@ -263,3 +263,17 @@ There are **16 feature/capability maps** in this document.
 - **Potential impact areas:** installed package list, console script availability, version reported to users.
 - **Files that should NOT be modified:** `plaivid_cli/legacy/` (intentionally excluded), `docs/architecture/adr/0010-packaging.md` (historical proposal).
 - **Documentation references:** `README.md`, `docs/architecture/FINAL_IMPLEMENTATION_AUDIT.md`, `docs/architecture/adr/README.md`.
+
+### Feature: Standalone PVM Control Engine and Unix JSON-RPC API
+
+- **Description:** Independent Engine process exposes explicitly allowlisted PVM reads, sessions, and single-VM lifecycle requests over a bounded JSON-RPC 2.0 Unix socket.
+- **Entry point:** `pvm-control-engine` console script → `pvm_control_engine.bootstrap:main`.
+- **Main implementation:** `pvm_control_engine/bootstrap.py`, `pvm_control_engine/application/service.py`, `pvm_control_engine/ipc/server.py`, `pvm_control_engine/ipc/dispatcher.py`.
+- **Supporting modules:** `pvm_control_engine/infrastructure/sbell/commands/`, `pvm_control_engine/application/operations/vm/`, canonical `plaivid_cli/infrastructure/pvm/adapter/local.py`, `plaivid_cli/infrastructure/pvm/sbell.py`, `plaivid_cli/application/operations/coordinator.py`.
+- **Shared dependencies:** `plaivid_cli/config.py`, `plaivid_cli/infrastructure/process.py`, `plaivid_cli/application/session.py`, `plaivid_cli/application/collection/coordinator.py`.
+- **Data models:** Existing `Action`, `canonical_uuid`, `InventoryData`, `VMDetail`, `OperationResult`, and `SectionSnapshot`.
+- **Tests:** `tests/unit/test_pvm_control_engine.py`, `tests/unit/test_distribution.py`, `tests/unit/test_sbell_client.py`, `tests/unit/test_pvm_adapter.py`.
+- **Related contracts:** `docs/PVM_CONTROL_ENGINE.md`, [`../contracts/MODULE_CONTRACTS.md`](../contracts/MODULE_CONTRACTS.md), [`../workflows/TESTING.md`](../workflows/TESTING.md).
+- **Potential impact areas:** socket authorization, request framing/schema, credentials/session cache, PVM calls, operation admission, packaging.
+- **Files that should NOT be modified:** `plaivid_cli/presentation/tui/**`, `plaivid_cli/legacy/`, existing CLI/TUI integration.
+- **Documentation references:** `docs/PVM_CONTROL_ENGINE.md`, `docs/REAL_PVM_VALIDATION.md`, `pyproject.toml`.

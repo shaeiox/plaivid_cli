@@ -23,9 +23,10 @@ dev = [
 
 [project.scripts]
 plaivid = "plaivid_cli.bootstrap:main"
+pvm-control-engine = "pvm_control_engine.bootstrap:main"
 
 [tool.setuptools.packages.find]
-include = ["plaivid_cli*"]
+include = ["plaivid_cli*", "pvm_control_engine*"]
 exclude = ["plaivid_cli.legacy*"]
 
 [tool.pytest.ini_options]
@@ -46,7 +47,7 @@ select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["plaivid_cli"]
+source = ["plaivid_cli", "pvm_control_engine"]
 omit = [
   "plaivid_cli/legacy/*",
   "plaivid_cli/legacy/**/*",
@@ -57,7 +58,7 @@ pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
-include = ["plaivid_cli"]
+include = ["plaivid_cli", "pvm_control_engine"]
 exclude = [
   ".venv",
   "tests",

@@ -18,6 +18,9 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     assert "plaivid_cli.application" in packages
     assert "plaivid_cli.presentation" in packages
     assert "plaivid_cli.infrastructure.pvm" in packages
+    assert "pvm_control_engine" in find_packages(
+        where=str(ROOT), include=["pvm_control_engine*"]
+    )
     for nested in (
         "application.collection",
         "application.operations",
@@ -47,6 +50,7 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     spec.loader.exec_module(module)
     assert module.LEGACY_PACKAGE not in module.RUNTIME_PACKAGES
     assert "plaivid_cli.presentation" in module.RUNTIME_PACKAGES
+    assert "pvm_control_engine" in module.RUNTIME_PACKAGES
     for nested in (
         "presentation.tui.components",
         "presentation.tui.pages.overview.components",

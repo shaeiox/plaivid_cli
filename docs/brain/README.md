@@ -14,8 +14,11 @@ process observations stay separate, and mutation outcomes are never claimed as c
 without evidence. Real-host behavior is **PENDING MANUAL PVM VALIDATION** in
 `docs/REAL_PVM_VALIDATION.md`.
 
-Verified entry point: `plaivid_cli/bootstrap.py::main`; composition root:
-`plaivid_cli/bootstrap.py::build_runtime`. Start with
+Verified CLI entry point: `plaivid_cli/bootstrap.py::main`; composition root:
+`plaivid_cli/bootstrap.py::build_runtime`. The repository also ships an independent
+`pvm-control-engine` process (`pvm_control_engine/bootstrap.py::main`) with JSON-RPC over a
+Unix socket; neither the existing CLI nor TUI connects to it. Its contract is documented in
+[`../PVM_CONTROL_ENGINE.md`](../PVM_CONTROL_ENGINE.md). Start architecture navigation with
 [`architecture/SYSTEM_OVERVIEW.md`](architecture/SYSTEM_OVERVIEW.md).
 
 ## How the knowledge base is organized

@@ -1,0 +1,200 @@
+"""Engine-only composition root and executable entry point."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import signal
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+from plaivid_cli.application.collection import CollectionCoordinator
+from plaivid_cli.application.operations import OperationCoordinator
+from plaivid_cli.application.services import PlaividApplication
+from plaivid_cli.application.session import SessionManager, SessionStore
+from plaivid_cli.config import ConfigurationError, Settings, load_settings
+from plaivid_cli.infrastructure.process import ProcessRunner
+from plaivid_cli.infrastructure.pvm.adapter import LocalPvmAdapter
+from plaivid_cli.infrastructure.pvm.sbell import SbellClient
+from pvm_control_engine.application.operations.vm.common import VMOperationExecutor
+from pvm_control_engine.application.operations.vm.kill_vm import KillVM
+from pvm_control_engine.application.operations.vm.pause_vm import PauseVM
+from pvm_control_engine.application.operations.vm.reset_vm import ResetVM
+from pvm_control_engine.application.operations.vm.resume_vm import ResumeVM
+from pvm_control_engine.application.operations.vm.start_vm import StartVM
+from pvm_control_engine.application.operations.vm.stop_vm import StopVM
+from pvm_control_engine.application.service import EngineService
+from pvm_control_engine.infrastructure.sbell.commands.monitoring.metrics import MonitoringMetrics
+from pvm_control_engine.infrastructure.sbell.commands.network.nic_list import NetworkNicList
+from pvm_control_engine.infrastructure.sbell.commands.sball.show import SballShow
+from pvm_control_engine.infrastructure.sbell.commands.user.login import UserLogin
+from pvm_control_engine.infrastructure.sbell.commands.user.logout import UserLogout
+from pvm_control_engine.infrastructure.sbell.commands.user.objects import UserObjects
+from pvm_control_engine.infrastructure.sbell.commands.user.whoami import UserWhoami
+from pvm_control_engine.infrastructure.sbell.commands.vm.kill import VMKill
+from pvm_control_engine.infrastructure.sbell.commands.vm.pause import VMPause
+from pvm_control_engine.infrastructure.sbell.commands.vm.reset import VMReset
+from pvm_control_engine.infrastructure.sbell.commands.vm.resume import VMResume
+from pvm_control_engine.infrastructure.sbell.commands.vm.start import VMStart
+from pvm_control_engine.infrastructure.sbell.commands.vm.stop import VMStop
+from pvm_control_engine.ipc.dispatcher import RpcDispatcher
+from pvm_control_engine.ipc.server import UnixRpcServer
+
+
+@dataclass(slots=True)
+class EngineRuntime:
+    service: EngineService
+    server: UnixRpcServer
+    operations: OperationCoordinator
+    collection: CollectionCoordinator
+
+    def close(self) -> None:
+        self.server.close()
+        self.operations.close()
+        self.collection.close()
+
+
+def build_runtime(
+    settings: Settings,
+    socket_path: str | Path,
+    *,
+    allowed_uids=None,
+    max_workers: int = 4,
+    socket_mode: int = 0o600,
+) -> EngineRuntime:
+    runner = ProcessRunner(
+        timeout=settings.process_timeout, max_output_bytes=settings.max_output_bytes
+    )
+    sbell = SbellClient(settings.sbell_argv, runner)
+    provider = LocalPvmAdapter(
+        sbell,
+        runner,
+        settings.running_vms_argv,
+        allow_credential_argv=settings.allow_credential_argv,
+        action_timeout=settings.action_timeout,
+    )
+    collection = CollectionCoordinator(provider, refresh_interval=settings.refresh_interval)
+    application = PlaividApplication(provider, collection, settings)
+    operations = OperationCoordinator(provider, collection, settings)
+    store = SessionStore(settings.session_file)
+    sessions = SessionManager(provider, settings, store)
+    executor = VMOperationExecutor(application, operations)
+    commands = {
+        "vm.start": VMStart(StartVM(executor)),
+        "vm.stop": VMStop(StopVM(executor)),
+        "vm.kill": VMKill(KillVM(executor)),
+        "vm.reset": VMReset(ResetVM(executor)),
+        "vm.pause": VMPause(PauseVM(executor)),
+        "vm.resume": VMResume(ResumeVM(executor)),
+    }
+    commands.update(
+        {
+            "user.login": UserLogin(sessions),
+            "user.whoami": UserWhoami(provider),
+            "user.logout": UserLogout(sessions),
+            "user.objects": UserObjects(application),
+            "sball.show": SballShow(application),
+            "monitoring.metrics": MonitoringMetrics(application),
+            "network.nic_list": NetworkNicList(application),
+        }
+    )
+    service = EngineService(
+        application=application,
+        sessions=sessions,
+        session_store=store,
+        provider=provider,
+        commands=commands,
+    )
+    server = UnixRpcServer(
+        socket_path,
+        RpcDispatcher(service),
+        allowed_uids=allowed_uids,
+        max_workers=max_workers,
+        socket_mode=socket_mode,
+    )
+    return EngineRuntime(service, server, operations, collection)
+
+
+def _parse_socket_mode(value: str) -> int:
+    try:
+        mode = int(value, 8)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("socket mode must be 0600 or 0660") from exc
+    if mode not in {0o600, 0o660}:
+        raise argparse.ArgumentTypeError("socket mode must be 0600 or 0660")
+    return mode
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="pvm-control-engine")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    serve = subparsers.add_parser("serve", help="serve JSON-RPC on a Unix-domain socket")
+    serve.add_argument(
+        "--socket",
+        default=None,
+        help="socket path (default: PLAIVID_CONTROL_SOCKET or state directory)",
+    )
+    serve.add_argument(
+        "--allow-uid",
+        type=int,
+        action="append",
+        default=None,
+        help="additional Linux UID authorized to use the socket (repeatable)",
+    )
+    serve.add_argument(
+        "--socket-mode",
+        type=_parse_socket_mode,
+        default=0o600,
+        metavar="0600|0660",
+        help="socket permission mode: 0600 (default) or 0660",
+    )
+    serve.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        choices=range(1, 17),
+        help="maximum simultaneous RPC requests (default: 4)",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        settings = load_settings()
+        socket_path = args.socket or os.environ.get("PLAIVID_CONTROL_SOCKET")
+        if not socket_path:
+            socket_path = str(
+                Path(os.environ.get("XDG_RUNTIME_DIR", settings.state_dir))
+                / "pvm-control-engine.sock"
+            )
+        allowed_uids = {os.getuid(), *(args.allow_uid or [])}
+        runtime = build_runtime(
+            settings,
+            socket_path,
+            allowed_uids=allowed_uids,
+            max_workers=args.max_workers,
+            socket_mode=args.socket_mode,
+        )
+    except (ConfigurationError, ValueError, OSError, RuntimeError) as exc:
+        print(f"pvm-control-engine: {exc}", file=sys.stderr)
+        return 2
+
+    old_handler = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: runtime.server.request_shutdown())
+    try:
+        runtime.server.serve_forever()
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    except OSError as exc:
+        print(
+            f"pvm-control-engine: could not serve configured socket ({type(exc).__name__})",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
+        runtime.close()

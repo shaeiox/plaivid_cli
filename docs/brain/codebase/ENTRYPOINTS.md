@@ -9,6 +9,7 @@ checked by `scripts/validate_brain.py`. Navigation: [`../README.md`](../README.m
 | Entry point | Execution path | Next modules |
 |---|---|---|
 | `plaivid` console script (`[project.scripts]` in `pyproject.toml`) | `plaivid_cli.bootstrap:main` → `plaivid_cli/bootstrap.py::main` | `plaivid_cli/presentation/cli/parser.py::build_parser`, `plaivid_cli/config.py::load_settings`, `plaivid_cli/bootstrap.py::build_runtime`, `plaivid_cli/presentation/cli/dispatch.py::run_command` |
+| `pvm-control-engine serve` console script (`[project.scripts]` in `pyproject.toml`) | `pvm_control_engine.bootstrap:main` → independent Engine composition root and `UnixRpcServer` | `pvm_control_engine/bootstrap.py::build_runtime`, `pvm_control_engine/ipc/server.py::UnixRpcServer`, `pvm_control_engine/ipc/dispatcher.py::RpcDispatcher` |
 | `./plaivid` (checkout launcher) | `from plaivid_cli.bootstrap import main`; `raise SystemExit(main())` | same as console script |
 | `python -m plaivid_cli` | `plaivid_cli/__main__.py` → `bootstrap.main` | same as console script |
 | `plaivid_cli/bootstrap.py::main` | parse → `help` short-circuit or `load_settings` → config/diagnostics short-circuit → `configure_logging` → `build_runtime` → `run_command` → `finally: Runtime.close()` | `plaivid_cli/infrastructure/diagnostics.py::configure_logging`, `plaivid_cli/bootstrap.py::Runtime` |
@@ -70,9 +71,11 @@ Target selectors and the outcome→exit mapping: [`../contracts/API_CONTRACTS.md
 | 1 Hz chart tick | `_chart_tick_due` + `OverviewHistory.prune(time.monotonic())` while Overview is active | `plaivid_cli/presentation/tui/refresh.py::RefreshMixin`, `plaivid_cli/application/overview.py::OverviewHistory` |
 | Collection cadence | `OverviewSchedule` (1–60 s local control, `host_status_interval`, 18 s PVM batch floor) and `MIN_REFRESH_SECONDS = 15.0` for Desktops | `plaivid_cli/application/overview.py::OverviewSchedule`, `plaivid_cli/presentation/tui/pages/virtual_desktops/policy.py::MIN_REFRESH_SECONDS` |
 
-**No OS-level scheduled jobs, daemon, systemd unit, cron entry, or HTTP API endpoint exists in
-this repository.** External "APIs" are the local `sbell` command argv protocol and the
-read-only SQLite audit database; see [`../contracts/API_CONTRACTS.md`](../contracts/API_CONTRACTS.md).
+**No OS-level scheduled jobs, systemd unit, cron entry, or HTTP API endpoint exists in this
+repository.** `pvm-control-engine` is an explicitly started standalone process, not a system
+service. Existing external PVM communication remains the local `sbell` argv protocol; see
+[`../../PVM_CONTROL_ENGINE.md`](../../PVM_CONTROL_ENGINE.md) and
+[`../contracts/API_CONTRACTS.md`](../contracts/API_CONTRACTS.md).
 
 ## Build, test, and documentation entry points
 
