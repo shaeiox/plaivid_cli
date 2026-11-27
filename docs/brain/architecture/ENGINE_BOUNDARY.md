@@ -1,5 +1,16 @@
-# TUI / PVM Control Engine boundary (work in progress)
+# Two-project runtime boundary
 
-Canonical Engine implementation is being moved into `pvm_control_engine/`; the UI distribution source is under `tui/src/plaivid_cli/`. The intended boundary is structured, versioned JSON-RPC 2.0 over a restrictive Unix-domain socket only. There is no HTTP, `sabad`, or direct raw `sballd` IPC.
+```text
+plaivid-ui (plaivid_ui)
+Textual views + UI DTOs + AF_UNIX client
+               │ plaivid.engine.v1 JSON-RPC
+               ▼
+pvm-control-engine (pvm_control_engine)
+auth/session + UUID validation + PVM/sbell/process work + policy
+```
 
-Current status: Engine-owned composition, local socket server, allowlisted dispatcher, bounded framing/workers, UID peer checks, structured DTO serialization, operation planning, and the TUI-side socket transport/one-shot CLI exist. The Textual dashboard has not been migrated and remains coupled to its copied application/session/operation code. Therefore this document does not assert runtime import isolation, full feature parity, or independent installation validation. See `docs/PVM_CONTROL_ENGINE.md` for the method list, launch instructions, session-sharing caveat, and verification limitations.
+The projects install independently from `UI/` and `pvm_control_engine/`. The UI may depend on Textual/Rich and its own local IPC client; it may not import Engine internals, the removed `plaivid_cli` package, or process-launch APIs. It must not execute sbell, call `pvm-running-vms`, read sessions, or implement PVM operations. UI behavior over Engine capabilities uses the fixed Engine allowlist only.
+
+The Engine exclusively owns credential/session handling, canonical target resolution, local PVM and monitoring reads, command identifiers and XML, process execution, audit data, mutation authorization/freshness/concurrency/bulk protections, redaction and uncertain-result semantics. RPC rejects unknown method names and unexpected parameters. There is no HTTP(S), nginx/httpd, sabad, or raw sballd protocol.
+
+The UI-owned client and DTO layer lives in `UI/tui/src/plaivid_ui/engine_client/`; Engine transport and dispatch live in `pvm_control_engine/src/pvm_control_engine/ipc/`. `UI/docs/IPC.md` documents transport and methods. Static AST boundary tests run in `UI/tests/unit/test_ipc_boundary.py`; Engine method dispatch and socket contracts are exercised in `pvm_control_engine/tests/unit/test_pvm_control_engine.py`.

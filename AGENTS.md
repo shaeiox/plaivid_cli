@@ -1,56 +1,32 @@
-# AGENTS.md — mandatory entry point for AI coding agents
+# AGENTS.md — repository entry point
 
-This repository is `plaivid_cli`, a Linux-local CLI/Textual TUI for inspecting and operating
-Plaivid PVM virtual machines through the configured local `sbell` and `pvm-running-vms`
-commands. Read this file first, then work from the project brain in `docs/brain/`.
-The brain is model-independent: it is plain Markdown plus Mermaid, with no vendor service.
+This repository contains exactly two independently installable Python projects for local Plaivid PVM control:
 
-## Mandatory exploration workflow
+- `pvm_control_engine/`: Engine package `pvm_control_engine`, distribution `pvm-control-engine`.
+- `UI/`: UI package `plaivid_ui`, distribution `plaivid-ui`.
 
-1. Read `AGENTS.md` (this file).
-2. Read `docs/brain/README.md`.
-3. Classify the task (feature, bug fix, architecture question, docs, build/release, data model).
-4. Consult the relevant architecture and feature documents via the navigation table in the brain README.
-5. Identify the **canonical** implementation files (`docs/brain/codebase/MODULE_INDEX.md`,
-   `docs/brain/codebase/FEATURE_TO_FILE_MAP.md`). Never start from `plaivid_cli/legacy/`.
-6. Inspect only those source files and the dependencies they actually need.
-7. Inspect related tests (`docs/brain/workflows/TESTING.md`) and contracts
-   (`docs/brain/contracts/MODULE_CONTRACTS.md`).
-8. Write an impact analysis before editing: affected files, contracts, tests, and docs.
-9. Implement changes without violating documented contracts.
-10. Run the appropriate tests (`docs/brain/workflows/TESTING.md`) and the brain audit
-    (`python scripts/validate_brain.py`).
-11. Update affected `docs/brain/` documents when architecture, responsibilities, interfaces,
-    dependencies, or feature mappings change.
+They communicate only over the approved local Unix-domain `plaivid.engine.v1` JSON-RPC interface. The UI must not import Engine internals or the retired `plaivid_cli` package and must not perform PVM/session/sbell/process work. The Engine exclusively owns authentication/session, UUID resolution, PVM reads, sbell commands and local process execution. Read `docs/brain/README.md`, `docs/brain/codebase/REPOSITORY_MAP.md`, and `docs/brain/architecture/ENGINE_BOUNDARY.md` before architecture work; project READMEs and `UI/docs/IPC.md` are the next navigation points.
 
-## Rules
+## Mandatory workflow
 
-- Documentation is the **first navigation source**, not an unquestionable source of truth.
-  Code, configuration, and tests are authoritative. If documentation conflicts with the
-  implementation, verify the code, report the discrepancy in
-  `docs/brain/maintenance/DOCUMENTATION_AUDIT.md`, and do not silently "fix" history.
-- Never assume a documented file still exists without checking it.
-- Never modify legacy or compatibility files when a canonical implementation exists, unless the
-  task explicitly requires it. See `docs/brain/codebase/MODULE_INDEX.md`.
-- Never perform broad repository exploration without a concrete reason.
-- Never silently change architectural contracts. Import boundaries are enforced by
-  `tests/unit/test_architecture_boundaries.py`.
-- Keep documentation synchronized with source changes; do not duplicate knowledge between
-  brain documents (`docs/brain/maintenance/DOCUMENTATION_POLICY.md`).
-- The brain is additive: preserve existing `README.md`, `docs/*.md`,
-  `docs/architecture/adr/`, `openspec/`, and `.agents/skills/unslop/`.
+1. Read this file and `docs/brain/README.md`.
+2. Classify the task; consult current project architecture and contract docs.
+3. Identify canonical files via `docs/brain/codebase/MODULE_INDEX.md` and `FEATURE_TO_FILE_MAP.md`.
+4. Inventory affected source, metadata, tests, imports, docs and entry points.
+5. Write an impact analysis before editing: affected files, contracts, tests and docs.
+6. Preserve user-visible behavior, safety/auth/freshness/concurrency/bulk/redaction/uncertain-outcome semantics.
+7. Keep product files under their owning project; root files are repository governance/tooling only.
+8. Use mocks/fakes and do not run destructive real-host actions.
+9. Run independent project tests/lint/types/builds as relevant and `python scripts/validate_brain.py`.
+10. Update the project maps and contract documentation whenever responsibilities, dependencies or interfaces change.
 
-## Portable skills
+## Architecture constraints
 
-Six reusable skills live in `.agents/skills/`: `codebase-exploration`,
-`architecture-analysis`, `feature-impact-analysis`, `code-navigation`,
-`documentation-maintenance`, `documentation-audit`. Not every agent platform auto-discovers
-this directory. To invoke one portably, read its `SKILL.md` explicitly, for example:
+- Exactly two products; no root app metadata/runtime package or third shared package.
+- UI-owned IPC client and wire DTOs remain under `UI/`; Engine transport/dispatch and all local PVM execution remain under `pvm_control_engine/`.
+- Engine RPC dispatch is explicit and allowlisted. Never add arbitrary command/module/XML/argv dispatch or a redundant shared runtime wrapper.
+- Preserve credential argv default-deny policy, bounded process execution, redaction, no automatic retry on uncertain outcomes, current inventory binding, mutation barriers, bulk limits and approved local-sbell integration.
+- No HTTP/HTTPS, nginx/httpd, sabad, or raw sballd protocol.
+- Do not rewrite the Engine in another language. Do not switch branches, commit, push or merge unless the user explicitly asks.
 
-```text
-read .agents/skills/codebase-exploration/SKILL.md and follow its procedure
-```
-
-Skills reference `docs/brain/`; they do not duplicate it. See
-`docs/brain/maintenance/DOCUMENTATION_AUDIT.md` for the audit workflow and
-`scripts/validate_brain.py` for the read-only validator.
+The project brain is a navigation aid, not a substitute for source/config/tests. If documentation conflicts with the current implementation, verify the source and record the mismatch in `docs/brain/maintenance/DOCUMENTATION_AUDIT.md`. Run `python scripts/validate_brain.py` after map or contract changes. The `.agents/skills/` directory contains portable repository skills; read an applicable `SKILL.md` when useful.

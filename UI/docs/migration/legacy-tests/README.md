@@ -1,0 +1,3 @@
+# Historical combined-project tests
+
+These files preserve the pre-split UI test source for reference. The old suite built a `plaivid_cli` application/runtime and directly constructed the TUI from Engine/application/session internals; that coupling is prohibited by the two-project IPC architecture, so these archived files are intentionally not collected as active tests. Pure presentation tests that can run against UI-owned DTOs have been restored under `UI/tests/unit/` (including palette and quorum display coverage). New integration-facing UI tests should use a fake RPC client and the Engine allowlist boundary. Engine behavior is tested under `pvm_control_engine/tests/`.
