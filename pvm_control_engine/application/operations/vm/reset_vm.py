@@ -1,6 +1,6 @@
 """Reset-VM use case."""
 
-from plaivid_cli.domain.models import Action
+from pvm_control_engine.domain.models import Action
 
 from .common import VMOperationExecutor
 
@@ -11,3 +11,6 @@ class ResetVM:
 
     def execute(self, token: str, vm_uuid: str):
         return self.executor.execute(token, Action.RESET, vm_uuid)
+
+    def execute_many(self, token: str, vm_uuids: tuple[str, ...]):
+        return self.executor.execute_many(token, Action.RESET, vm_uuids)

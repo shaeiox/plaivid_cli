@@ -1,11 +1,17 @@
-"""Shared, policy-preserving VM operation execution."""
+"""Shared, policy-preserving single and bulk VM operation execution."""
 
 from __future__ import annotations
 
-from plaivid_cli.application.operations import OperationCoordinator
-from plaivid_cli.application.services import PlaividApplication
-from plaivid_cli.domain.errors import AppError
-from plaivid_cli.domain.models import Action, ErrorKind, InventoryData, canonical_uuid
+from pvm_control_engine.application.operations import OperationCoordinator
+from pvm_control_engine.application.services import PlaividApplication
+from pvm_control_engine.domain.errors import AppError
+from pvm_control_engine.domain.models import (
+    Action,
+    ErrorKind,
+    InventoryData,
+    OperationResult,
+    canonical_uuid,
+)
 
 
 class VMOperationExecutor:
@@ -13,26 +19,50 @@ class VMOperationExecutor:
         self.application = application
         self.operations = operations
 
-    def execute(self, token: str, action: Action, vm_uuid: str) -> object:
-        try:
-            canonical = canonical_uuid(vm_uuid)
-        except ValueError as exc:
+    def execute(self, token: str, action: Action, vm_uuid: str) -> OperationResult:
+        return self.execute_many(token, action, (vm_uuid,))
+
+    def execute_many(
+        self, token: str, action: Action, vm_uuids: tuple[str, ...]
+    ) -> OperationResult:
+        if not vm_uuids:
             raise AppError(
-                ErrorKind.POLICY, "VM identifier must be a canonical UUID", code="INVALID_UUID"
-            ) from exc
-        if canonical != vm_uuid:
-            raise AppError(
-                ErrorKind.POLICY, "VM identifier must be a canonical UUID", code="INVALID_UUID"
+                ErrorKind.POLICY, "at least one VM UUID is required", code="INVALID_UUID"
             )
+        canonical_ids = tuple(self._canonical_uuid(value) for value in vm_uuids)
+        if len(set(canonical_ids)) != len(canonical_ids):
+            raise AppError(ErrorKind.POLICY, "VM UUIDs must be unique", code="INVALID_UUID")
+        if len(canonical_ids) > 100:
+            raise AppError(
+                ErrorKind.POLICY, "operation target limit exceeded", code="INVALID_TARGET_COUNT"
+            )
+
         _, section = self.application.inventory(token)
         if not isinstance(section.value, InventoryData):
             raise AppError(
                 ErrorKind.POLICY, "current VM inventory is required", code="INVENTORY_UNAVAILABLE"
             )
-        record = next((item for item in section.value.records if item.uuid == canonical), None)
-        if record is None:
+        by_uuid = {record.uuid: record for record in section.value.records}
+        missing = tuple(key for key in canonical_ids if key not in by_uuid)
+        if missing:
             raise AppError(
-                ErrorKind.POLICY, "VM is not present in the current inventory", code="VM_NOT_FOUND"
+                ErrorKind.POLICY, "VM is not present in current inventory", code="VM_NOT_FOUND"
             )
-        plan = self.operations.create_plan(action, (record,), section, is_bulk=False)
-        return self.operations.execute(token, action, (record,), section, is_bulk=False, plan=plan)
+        records = tuple(by_uuid[key] for key in canonical_ids)
+        is_bulk = len(records) > 1
+        plan = self.operations.create_plan(action, records, section, is_bulk=is_bulk)
+        return self.operations.execute(token, action, records, section, is_bulk=is_bulk, plan=plan)
+
+    @staticmethod
+    def _canonical_uuid(value: str) -> str:
+        try:
+            canonical = canonical_uuid(value)
+        except ValueError as exc:
+            raise AppError(
+                ErrorKind.POLICY, "VM identifier must be a canonical UUID", code="INVALID_UUID"
+            ) from exc
+        if canonical != value:
+            raise AppError(
+                ErrorKind.POLICY, "VM identifier must be a canonical UUID", code="INVALID_UUID"
+            )
+        return canonical

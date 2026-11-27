@@ -106,3 +106,7 @@ tree. Verified by an AST import scan; see
 5. Before editing, confirm the file exists and check
    [`../contracts/MODULE_CONTRACTS.md`](../contracts/MODULE_CONTRACTS.md) plus the related tests
    in [`../workflows/TESTING.md`](../workflows/TESTING.md).
+
+## Engine separation transition note
+
+`pvm_control_engine/` contains the Engine-owned runtime and JSON-RPC server. `tui/src/plaivid_cli/engine_client/` contains the TUI-side client. The Textual UI still has direct application coupling, so boundary and capability separation are not complete; see `docs/PVM_CONTROL_ENGINE.md`.

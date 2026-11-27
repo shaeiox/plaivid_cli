@@ -10,14 +10,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from plaivid_cli.application.collection import CollectionCoordinator
-from plaivid_cli.application.operations import OperationCoordinator
-from plaivid_cli.application.services import PlaividApplication
-from plaivid_cli.application.session import SessionManager, SessionStore
-from plaivid_cli.config import ConfigurationError, Settings, load_settings
-from plaivid_cli.infrastructure.process import ProcessRunner
-from plaivid_cli.infrastructure.pvm.adapter import LocalPvmAdapter
-from plaivid_cli.infrastructure.pvm.sbell import SbellClient
+from pvm_control_engine.application.collection import CollectionCoordinator
+from pvm_control_engine.application.operations import OperationCoordinator
 from pvm_control_engine.application.operations.vm.common import VMOperationExecutor
 from pvm_control_engine.application.operations.vm.kill_vm import KillVM
 from pvm_control_engine.application.operations.vm.pause_vm import PauseVM
@@ -26,6 +20,16 @@ from pvm_control_engine.application.operations.vm.resume_vm import ResumeVM
 from pvm_control_engine.application.operations.vm.start_vm import StartVM
 from pvm_control_engine.application.operations.vm.stop_vm import StopVM
 from pvm_control_engine.application.service import EngineService
+from pvm_control_engine.application.services import PlaividApplication
+from pvm_control_engine.application.session import SessionManager, SessionStore
+from pvm_control_engine.config import ConfigurationError, Settings, load_settings
+from pvm_control_engine.infrastructure.audit import ReadOnlyAuditAdapter
+from pvm_control_engine.infrastructure.local.audit import LocalAudit
+from pvm_control_engine.infrastructure.local.host_metrics import LocalHostMetrics
+from pvm_control_engine.infrastructure.local.nic_samples import LocalNicSamples
+from pvm_control_engine.infrastructure.process import ProcessRunner
+from pvm_control_engine.infrastructure.pvm.adapter import LocalPvmAdapter
+from pvm_control_engine.infrastructure.pvm.sbell import SbellClient
 from pvm_control_engine.infrastructure.sbell.commands.monitoring.metrics import MonitoringMetrics
 from pvm_control_engine.infrastructure.sbell.commands.network.nic_list import NetworkNicList
 from pvm_control_engine.infrastructure.sbell.commands.sball.show import SballShow
@@ -76,7 +80,8 @@ def build_runtime(
         action_timeout=settings.action_timeout,
     )
     collection = CollectionCoordinator(provider, refresh_interval=settings.refresh_interval)
-    application = PlaividApplication(provider, collection, settings)
+    audit = ReadOnlyAuditAdapter(settings.audit_database)
+    application = PlaividApplication(provider, collection, settings, audit)
     operations = OperationCoordinator(provider, collection, settings)
     store = SessionStore(settings.session_file)
     sessions = SessionManager(provider, settings, store)
@@ -98,6 +103,9 @@ def build_runtime(
             "sball.show": SballShow(application),
             "monitoring.metrics": MonitoringMetrics(application),
             "network.nic_list": NetworkNicList(application),
+            "local.host_metrics": LocalHostMetrics(application),
+            "local.nic_samples": LocalNicSamples(application),
+            "local.audit": LocalAudit(audit),
         }
     )
     service = EngineService(
@@ -105,6 +113,7 @@ def build_runtime(
         sessions=sessions,
         session_store=store,
         provider=provider,
+        operations=operations,
         commands=commands,
     )
     server = UnixRpcServer(

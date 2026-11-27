@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pvm-control-engine"
+version = "0.1.0"
+description = "Local PVM control engine with JSON-RPC over a Unix socket"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "Plaivid maintainers" }]
+dependencies = []
+
+[project.scripts]
+pvm-control-engine = "pvm_control_engine.bootstrap:main"
+
+[tool.setuptools]
+package-dir = {"pvm_control_engine" = "."}
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["pvm_control_engine*"]
+exclude = ["pvm_control_engine.build*", "pvm_control_engine.tests*", "pvm_control_engine.egg-info*"]

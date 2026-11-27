@@ -22,11 +22,14 @@ dev = [
 ]
 
 [project.scripts]
-plaivid = "plaivid_cli.bootstrap:main"
-pvm-control-engine = "pvm_control_engine.bootstrap:main"
+plaivid = "plaivid_cli.engine_client.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "tui/src"}
 
 [tool.setuptools.packages.find]
-include = ["plaivid_cli*", "pvm_control_engine*"]
+where = ["tui/src"]
+include = ["plaivid_cli*"]
 exclude = ["plaivid_cli.legacy*"]
 
 [tool.pytest.ini_options]

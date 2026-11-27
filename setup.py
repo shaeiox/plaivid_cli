@@ -6,8 +6,10 @@ from setuptools import find_packages, setup
 from setuptools.command.build_py import build_py
 
 LEGACY_PACKAGE = "plaivid_cli.legacy"
+TUI_SOURCE = "tui/src"
 RUNTIME_PACKAGES = find_packages(
-    include=["plaivid_cli*", "pvm_control_engine*"],
+    where=TUI_SOURCE,
+    include=["plaivid_cli*"],
     exclude=[f"{LEGACY_PACKAGE}*"],
 )
 
@@ -24,6 +26,7 @@ class RuntimeBuildPy(build_py):
 if __name__ == "__main__":
     setup(
         packages=RUNTIME_PACKAGES,
+        package_dir={"": TUI_SOURCE},
         include_package_data=False,
         cmdclass={"build_py": RuntimeBuildPy},
     )

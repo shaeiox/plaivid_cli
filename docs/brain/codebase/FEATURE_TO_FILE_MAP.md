@@ -277,3 +277,7 @@ There are **17 feature/capability maps** in this document.
 - **Potential impact areas:** socket authorization, request framing/schema, credentials/session cache, PVM calls, operation admission, packaging.
 - **Files that should NOT be modified:** `plaivid_cli/presentation/tui/**`, `plaivid_cli/legacy/`, existing CLI/TUI integration.
 - **Documentation references:** `docs/PVM_CONTROL_ENGINE.md`, `docs/REAL_PVM_VALIDATION.md`, `pyproject.toml`.
+
+## Engine separation transition note
+
+Engine-owned runtime work is under `pvm_control_engine/`; the TUI socket client is under `tui/src/plaivid_cli/engine_client/`. The Textual UI migration and feature parity remain incomplete. See `docs/PVM_CONTROL_ENGINE.md` for the current contract and limitations.

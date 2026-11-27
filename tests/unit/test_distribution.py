@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[2]
 
 def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     packages = find_packages(
-        where=str(ROOT),
+        where=str(ROOT / "tui" / "src"),
         include=["plaivid_cli*"],
         exclude=["plaivid_cli.legacy*"],
     )
@@ -50,7 +50,8 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     spec.loader.exec_module(module)
     assert module.LEGACY_PACKAGE not in module.RUNTIME_PACKAGES
     assert "plaivid_cli.presentation" in module.RUNTIME_PACKAGES
-    assert "pvm_control_engine" in module.RUNTIME_PACKAGES
+    assert not any(package == "pvm_control_engine" or package.startswith("pvm_control_engine.")
+                   for package in module.RUNTIME_PACKAGES)
     for nested in (
         "presentation.tui.components",
         "presentation.tui.pages.overview.components",

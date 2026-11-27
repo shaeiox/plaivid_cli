@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from plaivid_cli.domain.models import canonical_uuid
+from pvm_control_engine.domain.models import canonical_uuid
 
 
 class ObjectsQuery(StrEnum):

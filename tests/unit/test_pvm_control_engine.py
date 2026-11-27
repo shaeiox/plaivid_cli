@@ -4,25 +4,33 @@ import argparse
 import json
 import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from plaivid_cli.config import load_settings
-from plaivid_cli.domain.errors import AppError
-from plaivid_cli.domain.models import Action, PvmSession
-from plaivid_cli.infrastructure.process import ProcessResult
-from plaivid_cli.infrastructure.pvm.adapter.local import LocalPvmAdapter
-from plaivid_cli.infrastructure.pvm.adapter.requests import DASHBOARD_QUERY, DESKTOP_QUERY, VM_QUERY
-from plaivid_cli.infrastructure.pvm.sbell import SbellClient
-from pvm_control_engine.application.service import EngineService
+from plaivid_cli.engine_client.client import EngineClient, EngineRpcError
+from pvm_control_engine.application.service import EngineService, _safe_value
 from pvm_control_engine.bootstrap import _parse_socket_mode, build_runtime
+from pvm_control_engine.config import load_settings
+from pvm_control_engine.domain.errors import AppError
+from pvm_control_engine.domain.models import Action, PvmSession
+from pvm_control_engine.infrastructure.process import ProcessResult
+from pvm_control_engine.infrastructure.pvm.adapter.local import LocalPvmAdapter
+from pvm_control_engine.infrastructure.pvm.adapter.requests import (
+    DASHBOARD_QUERY,
+    DESKTOP_QUERY,
+    VM_QUERY,
+)
+from pvm_control_engine.infrastructure.pvm.sbell import SbellClient
 from pvm_control_engine.infrastructure.sbell.commands.user.objects import UserObjects
 from pvm_control_engine.ipc.dispatcher import RpcDispatcher
 from pvm_control_engine.ipc.server import UnixRpcServer
 
+ROOT = Path(__file__).parents[2]
 UUID = "abcdefab-cdef-4abc-8def-abcdefabcdef"
 
 
@@ -44,8 +52,20 @@ class FakeService:
     def host_metrics(self):
         return {"status": "current"}
 
+    def local_host(self):
+        return {"status": "current"}
+
+    def nic_samples(self):
+        return {"physical_nics": {"status": "current"}, "nic_samples": {"status": "current"}}
+
+    def recent_audit(self, limit):
+        return {"entries": [], "limit": limit}
+
     def desktop_list(self):
         return {"status": "current", "value": []}
+
+    def operate_desktop(self, action, uuids):
+        return {"action": action, "uuids": uuids}
 
     def dashboard(self):
         return {"status": "current"}
@@ -63,8 +83,8 @@ class FakeService:
     def logout(self):
         return {"authenticated": False}
 
-    def operate(self, action, uuid):
-        self.calls.append((action, uuid))
+    def operate(self, action, uuid=None, uuids=None):
+        self.calls.append((action, uuid if uuid is not None else uuids))
         return {"state": "OUTCOME_UNKNOWN"}
 
 
@@ -111,6 +131,43 @@ def start_server(
             time.sleep(0.01)
     time.sleep(0.01)
     return path, server, thread
+
+
+def test_engine_imports_without_plaivid_cli_or_textual():
+    code = '''
+import importlib.abc, sys
+class BlockUIAndCli(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".", 1)[0] in {"plaivid_cli", "textual"}:
+            raise AssertionError("forbidden runtime dependency: " + fullname)
+sys.meta_path.insert(0, BlockUIAndCli())
+import pvm_control_engine.bootstrap
+assert not any(name == "plaivid_cli" or name.startswith("plaivid_cli.") for name in sys.modules)
+assert not any(name == "textual" or name.startswith("textual.") for name in sys.modules)
+'''
+    subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
+
+
+def test_tui_client_imports_without_engine_internals():
+    code = '''
+import importlib.abc, sys
+class BlockEngine(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".", 1)[0] == "pvm_control_engine":
+            raise AssertionError("forbidden Engine import: " + fullname)
+sys.meta_path.insert(0, BlockEngine())
+import plaivid_cli.engine_client.client
+assert not any(name == "pvm_control_engine" or name.startswith("pvm_control_engine.") for name in sys.modules)
+'''
+    subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
+
+
+def test_safe_dto_serialization_redacts_secrets_but_keeps_audit_command():
+    from pvm_control_engine.domain.models import AuditEntry
+
+    entry = AuditEntry("now", "operator", "127.0.0.1", "PVM", "VM stopped", "success", True)
+    assert _safe_value(entry)["command"] == "VM stopped"
+    assert _safe_value({"password": "secret", "token": "secret", "argv": ["x"], "command": "raw"}) == {}
 
 
 def test_socket_mode_configuration_is_octal_and_restrictive():
@@ -172,6 +229,22 @@ def test_rpc_methods_work_over_private_unix_socket_and_shutdown_cleans_socket(tm
     assert not path.exists()
 
 
+def test_tui_socket_client_uses_rpc_and_maps_safe_errors(tmp_path):
+    service = FakeService()
+    path, server, thread = start_server(tmp_path, service)
+    client = EngineClient(path)
+    try:
+        assert client.call("vm.get", {"uuid": UUID}) == {"uuid": UUID}
+        assert service.calls == [("vm.get", UUID)]
+        with pytest.raises(EngineRpcError, match="Method not found") as error:
+            client.call("not.allowlisted")
+        assert error.value.code == -32601
+    finally:
+        server.close()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
 def test_rpc_worker_count_is_bounded_and_busy_requests_are_rejected(tmp_path):
     started = threading.Event()
     release = threading.Event()
@@ -209,11 +282,14 @@ def test_permitted_read_and_session_methods_are_available_over_socket(tmp_path):
         cases = (
             ("host.status", {}, "current"),
             ("host.metrics", {}, "current"),
+            ("host.local", {}, "current"),
+            ("network.nic_samples", {}, "physical_nics"),
+            ("audit.recent", {"limit": 25}, "entries"),
             ("desktop.list", {}, "current"),
+            ("desktop.operate", {"action": "stop", "uuids": [UUID]}, "action"),
             ("overview.dashboard", {}, "current"),
             ("vm.tap_mapping", {}, "current"),
             ("network.nic_list", {}, "current"),
-            ("session.login", {"username": "operator", "password": "private"}, "operator"),
             ("session.logout", {}, False),
         )
         for request_id, (method, params, expected) in enumerate(cases, 10):
@@ -222,11 +298,14 @@ def test_permitted_read_and_session_methods_are_available_over_socket(tmp_path):
             )
             assert response["result"]
             result = response["result"]
-            if method == "session.login":
-                assert result["username"] == expected
-                assert "token" not in result and "private" not in json.dumps(result)
-            elif method == "session.logout":
+            if method == "session.logout":
                 assert result["authenticated"] is expected
+            elif method == "network.nic_samples":
+                assert result["physical_nics"]["status"] == "current"
+            elif method == "audit.recent":
+                assert result[expected] == []
+            elif method == "desktop.operate":
+                assert result[expected] == "stop"
             else:
                 assert result["status"] == expected
     finally:
@@ -419,6 +498,7 @@ def test_engine_service_rejects_noncanonical_uuid_and_unknown_action_without_dis
         sessions=object(),
         session_store=Store(),
         provider=object(),
+        operations=object(),
         commands={"user.whoami": Whoami(), "vm.stop": command},
     )
     with pytest.raises(AppError) as invalid_uuid:
@@ -432,7 +512,7 @@ def test_engine_service_rejects_noncanonical_uuid_and_unknown_action_without_dis
     assert command.calls == [("secret-token", UUID)]
 
 
-def test_login_rpc_never_returns_or_prints_password_or_token(capsys):
+def test_rpc_rejects_passwords_and_login_is_not_an_ipc_method(capsys):
     service = FakeService()
     result = RpcDispatcher(service).handle(
         {
@@ -442,20 +522,16 @@ def test_login_rpc_never_returns_or_prints_password_or_token(capsys):
             "params": {"username": "operator", "password": "private-password"},
         }
     )
-    assert result["result"] == {"username": "operator"}
+    assert result["error"]["code"] == -32601
     assert "private-password" not in json.dumps(result)
-    assert "secret-token" not in json.dumps(result)
+    assert service.calls == []
     assert capsys.readouterr().out == ""
     assert capsys.readouterr().err == ""
 
 
-def test_rpc_login_requires_exact_fields_and_no_notifications():
+def test_rpc_notifications_are_rejected():
     service = FakeService()
     dispatcher = RpcDispatcher(service)
-    missing = dispatcher.handle(
-        {"jsonrpc": "2.0", "id": 1, "method": "session.login", "params": {"username": "x"}}
-    )
-    assert missing["error"]["code"] == -32602
     notification = dispatcher.handle(
         {"jsonrpc": "2.0", "method": "vm.operate", "params": {"uuid": UUID, "action": "start"}}
     )
