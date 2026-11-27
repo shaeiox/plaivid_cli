@@ -77,6 +77,7 @@ refresh.
 | Theme/palette and responsive layout | `tests/unit/test_tui_theme.py`, `tests/unit/test_group_palette.py` |
 | Config/bootstrap/setup script | `tests/unit/test_config.py`, `tests/unit/test_bootstrap.py`, `tests/unit/test_setup_script.py` |
 | Process runner / bounded child lifecycle | `tests/unit/test_process_runner.py` |
+| Standalone Engine VM actions, token provider, RPC allowlist, package boundaries | `tests/unit/test_engine_vm_operations.py`, `tests/unit/test_engine_auth_provider.py`, `tests/unit/test_pvm_control_engine.py`, `tests/unit/test_distribution.py` |
 
 ## Feature → test lookup
 

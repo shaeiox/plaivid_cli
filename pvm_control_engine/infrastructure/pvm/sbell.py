@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 
 from pvm_control_engine.domain.errors import AppError
 from pvm_control_engine.domain.models import ErrorKind, PvmReply
-from pvm_control_engine.infrastructure.process import ProcessRunner
+from pvm_control_engine.infrastructure.process import (
+    ProcessError,
+    ProcessRunner,
+    ProcessStartError,
+    ProcessTimeout,
+)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -47,11 +52,18 @@ class SbellResponse:
 class SbellClient:
     """Run an existing ``sbell MODULE COMMAND PARAMS [TOKEN]`` invocation."""
 
-    def __init__(self, executable: Sequence[str], runner: ProcessRunner) -> None:
+    def __init__(
+        self,
+        executable: Sequence[str],
+        runner: ProcessRunner,
+        *,
+        allow_credential_argv: bool = False,
+    ) -> None:
         if not executable or any(not part for part in executable):
             raise ValueError("sbell executable must be a non-empty argv")
         self._executable = tuple(executable)
         self._runner = runner
+        self._allow_credential_argv = allow_credential_argv
 
     def call(
         self,
@@ -66,12 +78,27 @@ class SbellClient:
             raise ValueError("invalid sbell module or command")
         if not isinstance(params, str) or not params:
             raise ValueError("sbell params must be non-empty XML text")
+        if token and not self._allow_credential_argv:
+            raise AppError(
+                ErrorKind.POLICY,
+                "sbell token argv exposure requires explicit operator acknowledgement",
+                code="CREDENTIAL_ARGV_ACK_REQUIRED",
+            )
         argv = [*self._executable, module, command, params]
         if token:
             argv.append(token)
-        result = (
-            self._runner.run(argv) if timeout is None else self._runner.run(argv, timeout=timeout)
-        )
+        try:
+            result = (
+                self._runner.run(argv)
+                if timeout is None
+                else self._runner.run(argv, timeout=timeout)
+            )
+        except ProcessStartError as exc:
+            raise AppError(ErrorKind.PROCESS, str(exc), code="PROCESS_START_FAILED") from exc
+        except ProcessTimeout as exc:
+            raise AppError(ErrorKind.PROCESS, str(exc), code="PVM_COMMAND_TIMEOUT") from exc
+        except ProcessError as exc:
+            raise AppError(ErrorKind.PROCESS, str(exc), code="PVM_PROCESS_ERROR") from exc
         if result.stdout_truncated:
             raise AppError(
                 ErrorKind.PROTOCOL,

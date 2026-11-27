@@ -1,7 +1,7 @@
 # API, protocol, and command contracts
 
 All examples below are extracted from implementation files, tests, or synthetic fixtures.
-There is **no HTTP API, RPC service, or network endpoint** in this repository. Navigation:
+The CLI has no HTTP or network API. The separate PVM Control Engine exposes a local Unix-domain JSON-RPC socket; that protocol is summarized in section 9 and specified in `docs/PVM_CONTROL_ENGINE.md`. Navigation:
 [`../README.md`](../README.md) · [`MODULE_CONTRACTS.md`](MODULE_CONTRACTS.md) ·
 [`DATA_MODELS.md`](DATA_MODELS.md) · [`../codebase/ENTRYPOINTS.md`](../codebase/ENTRYPOINTS.md).
 
@@ -243,3 +243,18 @@ Widget/message contracts: `CheckableTable.CheckRequested`, `DataTable.RowHighlig
 `dashboard`, `desktops`, `local_host`, `physical_nics`, `nic_samples`, plus dynamic
 `detail:<canonical-uuid>`. TUI demand lists in
 `plaivid_cli/presentation/tui/refresh.py::RefreshMixin` must use these exact strings.
+
+## 9. Standalone Engine Unix JSON-RPC
+
+The independent `pvm-control-engine` process exposes `plaivid.engine.v1` over a private AF_UNIX
+socket. The bounded JSON-RPC methods, schemas, peer authorization, frame limits, and error
+contract are documented in [`../../PVM_CONTROL_ENGINE.md`](../../PVM_CONTROL_ENGINE.md). No
+method accepts raw XML, module/command names, arbitrary argv, a password, or an Engine session
+token. Mutating methods accept only allowlisted VM action names and canonical UUID target(s).
+
+VM lifecycle payload construction is owned by the concrete Engine action module, for example
+`pvm_control_engine/infrastructure/sbell/commands/vm/start.py::StartVM.build_params`; the fixed
+module/command and exact start XML are tested by `tests/unit/test_engine_vm_operations.py`.
+The Engine still uses the existing `OperationResult` domain value and preserves uncertain
+outcomes in RPC results. This Engine command path is separate from the CLI lifecycle commands
+in sections 1–2.

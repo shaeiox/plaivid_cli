@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid as uuidlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from pvm_control_engine.application.collection import CollectionCoordinator, CollectionSuperseded
@@ -18,6 +19,7 @@ from pvm_control_engine.domain.models import (
     OperationPlan,
     OperationResult,
     OperationState,
+    PvmReply,
     SectionSnapshot,
     TargetOutcome,
     VMRecord,
@@ -29,16 +31,18 @@ from pvm_control_engine.domain.policies import (
     outcome_stops_batch,
 )
 from pvm_control_engine.domain.redaction import redact_text
+from pvm_control_engine.infrastructure.sbell.commands.desktop.common import DesktopOperationExecutor
 
-from .bulk_dispatch import execute_bounded_batch
-from .desktop_executor import DesktopOperationExecutor
+from .bulk import execute_bounded_batch
 from .planner import OperationPlanner
 from .results import ProgressSink, _aggregate_message, aggregate_state, report_progress
+
+Dispatch = Callable[[str, str], PvmReply]
 
 logger = logging.getLogger("plaivid")
 
 
-class OperationCoordinator:
+class VMOperationCoordinator:
     """Own operation admission, mutation barriers, and bounded batch accounting."""
 
     def create_plan(
@@ -97,6 +101,7 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan,
+        dispatch: Dispatch,
         on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         return self._desktop_executor.execute(
@@ -106,6 +111,7 @@ class OperationCoordinator:
             section,
             is_bulk=is_bulk,
             plan=plan,
+            dispatch=dispatch,
             on_progress=on_progress,
         )
 
@@ -141,6 +147,7 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan | None = None,
+        dispatch: Dispatch,
         on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         if self._closing.is_set():
@@ -155,6 +162,7 @@ class OperationCoordinator:
                 inventory,
                 is_bulk=is_bulk,
                 plan=plan,
+                dispatch=dispatch,
                 on_progress=on_progress,
             )
 
@@ -167,6 +175,7 @@ class OperationCoordinator:
         *,
         is_bulk: bool,
         plan: OperationPlan | None,
+        dispatch: Dispatch,
         on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         current_plan = self.create_plan(action, targets, inventory, is_bulk=is_bulk)
@@ -202,7 +211,9 @@ class OperationCoordinator:
         try:
             outcomes = execute_bounded_batch(
                 targets,
-                lambda record: self._dispatch_one(token, action, record, on_progress=on_progress),
+                lambda record: self._dispatch_one(
+                    token, action, record, dispatch=dispatch, on_progress=on_progress
+                ),
                 max_concurrency=self._settings.max_concurrency,
                 is_bulk=is_bulk,
                 must_stop=lambda outcome: outcome_stops_batch(
@@ -243,7 +254,7 @@ class OperationCoordinator:
             targets=tuple(outcomes),
             started_at=started,
             finished_at=datetime.now(UTC),
-            message=_aggregate_message(aggregate, outcomes),
+            message=_aggregate_message(aggregate, list(outcomes)),
         )
 
     def _check_daemon_alive(self, token: str, timeout: float = 2.0) -> bool:
@@ -266,10 +277,11 @@ class OperationCoordinator:
         action: Action,
         record: VMRecord | VirtualDesktop,
         *,
+        dispatch: Dispatch,
         on_progress: ProgressSink | None = None,
     ) -> TargetOutcome:
         report_progress(on_progress, record.uuid, OperationState.RUNNING, "dispatching…")
-        outcome = self._dispatch_outcome(token, action, record)
+        outcome = self._dispatch_outcome(token, action, record, dispatch)
         if outcome.code == COMMAND_TIMEOUT_CODE or outcome.state in {
             OperationState.FAILED,
             OperationState.OUTCOME_UNKNOWN,
@@ -306,10 +318,14 @@ class OperationCoordinator:
         return outcome
 
     def _dispatch_outcome(
-        self, token: str, action: Action, record: VMRecord | VirtualDesktop
+        self,
+        token: str,
+        action: Action,
+        record: VMRecord | VirtualDesktop,
+        dispatch: Dispatch,
     ) -> TargetOutcome:
         try:
-            reply = self._provider.dispatch_action(token, action, record.uuid)
+            reply = dispatch(token, record.uuid)
         except AppError as exc:
             if exc.kind is ErrorKind.POLICY:
                 return TargetOutcome(

@@ -158,3 +158,14 @@ repository-relative; symbols are verified by `scripts/validate_brain.py`. Naviga
 - **Consumers:** none in the shipped wheel; `setup.py::RuntimeBuildPy` filters it out.
 - **Tests:** `tests/unit/test_distribution.py` asserts exclusion (not behavior).
 - **Docs:** [`../codebase/MODULE_INDEX.md`](../codebase/MODULE_INDEX.md), `REFACTOR.md`.
+
+## 15. Standalone PVM Control Engine command architecture
+
+- **Location:** `pvm_control_engine/bootstrap.py`, `pvm_control_engine/application/service.py`, `pvm_control_engine/auth/`, `pvm_control_engine/targets/`, `pvm_control_engine/infrastructure/sbell/commands/`.
+- **Responsibility:** independent local Unix-socket Engine; explicit command registry, per-action VM lifecycle classes, validated session/target providers, bounded local sbell transport, and shared mutation safeguards.
+- **Public interface:** `pvm_control_engine.infrastructure.sbell.commands.vm.start.StartVM.execute`, `pvm_control_engine.infrastructure.sbell.commands.registry.CommandRegistry`, `pvm_control_engine.auth.provider.AuthProvider`, `pvm_control_engine.targets.vm_resolver.VMResolver`.
+- **Dependencies:** Engine domain models/errors, Engine collection/application read services, `SbellClient`, `ProcessRunner`; composition is in `pvm_control_engine/bootstrap.py`.
+- **Consumers:** `pvm_control_engine/ipc/dispatcher.py`, `pvm_control_engine/ipc/server.py`; the TUI uses the separate RPC client and does not import Engine internals.
+- **Details:** `StartVM` owns `vm/start` and ElementTree XML. `VMOperationCoordinator` under `commands/vm/common.py` retains inventory freshness, mutation barriers, bounded bulk handling, uncertain outcomes, and reconciliation. `pvm_control_engine/application/operations/` has been removed. Read collections still use `LocalPvmAdapter`; that migration remains incomplete.
+- **Tests:** `tests/unit/test_engine_vm_operations.py`, `tests/unit/test_engine_auth_provider.py`, `tests/unit/test_pvm_control_engine.py`, `tests/unit/test_distribution.py`.
+- **Docs:** `docs/PVM_CONTROL_ENGINE.md`, [`../contracts/MODULE_CONTRACTS.md`](../contracts/MODULE_CONTRACTS.md), [`DATA_FLOW.md`](DATA_FLOW.md).

@@ -25,9 +25,14 @@ from pvm_control_engine.domain.policies import (
     batch_stop_reason,
     outcome_stops_batch,
 )
+from pvm_control_engine.infrastructure.sbell.commands.vm.bulk import execute_bounded_batch
+from pvm_control_engine.infrastructure.sbell.commands.vm.results import (
+    ProgressSink,
+    _aggregate_message,
+    aggregate_state,
+)
 
-from .bulk_dispatch import execute_bounded_batch
-from .results import ProgressSink, _aggregate_message, aggregate_state
+Dispatch = Callable[[str, str], object]
 
 
 class PlanFactory(Protocol):
@@ -74,6 +79,7 @@ class DesktopOperationExecutor:
         *,
         is_bulk: bool,
         plan: OperationPlan,
+        dispatch: Dispatch,
         on_progress: ProgressSink | None = None,
     ) -> OperationResult:
         if self._closing.is_set():
@@ -106,7 +112,9 @@ class DesktopOperationExecutor:
             try:
                 outcomes = execute_bounded_batch(
                     targets,
-                    lambda item: self._dispatch_one(token, action, item, on_progress=on_progress),
+                    lambda item: self._dispatch_one(
+                        token, action, item, dispatch=dispatch, on_progress=on_progress
+                    ),
                     max_concurrency=self._max_concurrency,
                     is_bulk=is_bulk,
                     must_stop=lambda outcome: outcome_stops_batch(
@@ -144,5 +152,5 @@ class DesktopOperationExecutor:
                 targets=tuple(outcomes),
                 started_at=started,
                 finished_at=datetime.now(UTC),
-                message=_aggregate_message(state, outcomes),
+                message=_aggregate_message(state, list(outcomes)),
             )

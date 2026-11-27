@@ -18,9 +18,22 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     assert "plaivid_cli.application" in packages
     assert "plaivid_cli.presentation" in packages
     assert "plaivid_cli.infrastructure.pvm" in packages
-    assert "pvm_control_engine" in find_packages(
-        where=str(ROOT), include=["pvm_control_engine*"]
+    engine_packages = find_packages(
+        where=str(ROOT),
+        include=["pvm_control_engine*"],
+        exclude=[
+            "pvm_control_engine.build*",
+            "pvm_control_engine.tests*",
+            "pvm_control_engine.egg-info*",
+        ],
     )
+    assert "pvm_control_engine" in engine_packages
+    assert "pvm_control_engine.auth" in engine_packages
+    assert "pvm_control_engine.targets" in engine_packages
+    assert "pvm_control_engine.infrastructure.sbell.commands.vm" in engine_packages
+    assert "pvm_control_engine.infrastructure.sbell.commands.desktop" in engine_packages
+    assert "pvm_control_engine.application.operations" not in engine_packages
+    assert not (ROOT / "pvm_control_engine" / "application" / "operations").exists()
     for nested in (
         "application.collection",
         "application.operations",
@@ -50,8 +63,10 @@ def test_distribution_excludes_legacy_packages_and_entry_modules() -> None:
     spec.loader.exec_module(module)
     assert module.LEGACY_PACKAGE not in module.RUNTIME_PACKAGES
     assert "plaivid_cli.presentation" in module.RUNTIME_PACKAGES
-    assert not any(package == "pvm_control_engine" or package.startswith("pvm_control_engine.")
-                   for package in module.RUNTIME_PACKAGES)
+    assert not any(
+        package == "pvm_control_engine" or package.startswith("pvm_control_engine.")
+        for package in module.RUNTIME_PACKAGES
+    )
     for nested in (
         "presentation.tui.components",
         "presentation.tui.pages.overview.components",

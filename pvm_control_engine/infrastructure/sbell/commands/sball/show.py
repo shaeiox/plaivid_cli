@@ -1,9 +1,12 @@
-"""Explicit sball/show query facade."""
+"""Authenticated sball/show query command."""
+
+from pvm_control_engine.auth.provider import AuthProvider
 
 
 class SballShow:
-    def __init__(self, application):
-        self.application = application
+    def __init__(self, application, auth: AuthProvider):
+        self._application = application
+        self._auth = auth
 
-    def execute(self, token: str):
-        return self.application.host_status(token)
+    def execute(self):
+        return self._application.host_status(self._auth.token())

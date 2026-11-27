@@ -13,12 +13,11 @@ from pathlib import Path
 import pytest
 
 from plaivid_cli.engine_client.client import EngineClient, EngineRpcError
-from pvm_control_engine.application.operations.vm.kill_vm import KillVM
 from pvm_control_engine.application.service import EngineService, _safe_value
 from pvm_control_engine.bootstrap import _parse_socket_mode, build_runtime
 from pvm_control_engine.config import load_settings
 from pvm_control_engine.domain.errors import AppError
-from pvm_control_engine.domain.models import Action, PvmSession
+from pvm_control_engine.domain.models import PvmSession
 from pvm_control_engine.infrastructure.process import ProcessResult
 from pvm_control_engine.infrastructure.pvm.adapter.local import LocalPvmAdapter
 from pvm_control_engine.infrastructure.pvm.adapter.requests import (
@@ -28,6 +27,7 @@ from pvm_control_engine.infrastructure.pvm.adapter.requests import (
 )
 from pvm_control_engine.infrastructure.pvm.sbell import SbellClient
 from pvm_control_engine.infrastructure.sbell.commands.user.objects import UserObjects
+from pvm_control_engine.infrastructure.sbell.commands.vm.kill import KillVM
 from pvm_control_engine.ipc.dispatcher import RpcDispatcher
 from pvm_control_engine.ipc.server import UnixRpcServer
 
@@ -185,16 +185,21 @@ def test_engine_composition_registers_each_permitted_vm_action_without_starting_
     settings = load_settings({"PLAIVID_STATE_DIR": str(tmp_path / "state")})
     runtime = build_runtime(settings, tmp_path / "engine.sock")
     try:
-        assert set(runtime.service.vm_operations) == {
-            "start",
-            "stop",
-            "kill",
-            "reset",
-            "pause",
-            "resume",
+        assert isinstance(runtime.service.registry.vm_action("kill"), KillVM)
+        assert set(runtime.service.registry.commands) == {
+            "user.login",
+            "user.whoami",
+            "user.logout",
+            "user.objects",
+            "sball.show",
+            "monitoring.metrics",
+            "network.nic_list",
+            "local.host_metrics",
+            "local.nic_samples",
+            "local.audit",
+            "desktop.operate",
         }
-        assert isinstance(runtime.service.vm_operations["kill"], KillVM)
-        assert not any(key.startswith("vm.") for key in runtime.service.commands)
+        assert not any(key.startswith("vm.") for key in runtime.service.registry.commands)
     finally:
         runtime.close()
     assert not (tmp_path / "engine.sock").exists()
@@ -372,7 +377,10 @@ def test_canonical_adapter_uses_exact_explicit_sbell_commands_and_xml():
 
     runner = Runner()
     adapter = LocalPvmAdapter(
-        SbellClient(("sbell",), runner), runner, ("pvm-running-vms",), allow_credential_argv=True
+        SbellClient(("sbell",), runner, allow_credential_argv=True),
+        runner,
+        ("pvm-running-vms",),
+        allow_credential_argv=True,
     )
     adapter.login("operator", "synthetic-password")
     adapter.validate_session(PvmSession("operator", "synthetic-token"))
@@ -385,8 +393,6 @@ def test_canonical_adapter_uses_exact_explicit_sbell_commands_and_xml():
     adapter.host_status("synthetic-token")
     adapter.host_metrics("synthetic-token")
     adapter.physical_nics("synthetic-token")
-    for action in Action:
-        adapter.dispatch_action("synthetic-token", action, UUID)
 
     actual = [(call[1], call[2], call[3]) for call in runner.calls]
     expected = [
@@ -410,16 +416,6 @@ def test_canonical_adapter_uses_exact_explicit_sbell_commands_and_xml():
         ("monitoring", "metrics", "<params/>"),
         ("network", "nic-list", "<params/>"),
     ]
-    expected.extend(
-        (
-            "vm",
-            action.value,
-            f"<vm_key>{UUID}</vm_key>"
-            if action is not Action.START
-            else f"<vm_start><vm_key>{UUID}</vm_key><host>auto</host><version_start><version_enable>no</version_enable><version_vkey></version_vkey></version_start><exit_from_replicate>yes</exit_from_replicate></vm_start>",
-        )
-        for action in Action
-    )
     assert actual == expected
     assert all(call[-1] == "synthetic-token" for call in runner.calls[1:])
 
@@ -448,6 +444,41 @@ def test_sbell_errors_for_malformed_incomplete_and_empty_responses_are_safe():
         assert "synthetic-secret" not in repr(error.value)
 
 
+def test_sbell_client_enforces_token_gate_and_maps_process_timeout():
+    from pvm_control_engine.domain.models import ErrorKind
+    from pvm_control_engine.infrastructure.process import ProcessTimeout
+
+    class Runner:
+        def __init__(self, result=None, error=None):
+            self.calls = []
+            self.result = result
+            self.error = error
+
+        def run(self, argv, *, timeout=None):
+            self.calls.append((tuple(argv), timeout))
+            if self.error is not None:
+                raise self.error
+            return self.result
+
+    denied_runner = Runner()
+    denied = SbellClient(("sbell",), denied_runner)
+    with pytest.raises(AppError) as gated:
+        denied.call("vm", "start", "<vm_key>x</vm_key>", "secret-token")
+    assert gated.value.kind is ErrorKind.POLICY
+    assert gated.value.code == "CREDENTIAL_ARGV_ACK_REQUIRED"
+    assert denied_runner.calls == []
+
+    timeout_runner = Runner(error=ProcessTimeout(reaped=True))
+    allowed = SbellClient(("sbell",), timeout_runner, allow_credential_argv=True)
+    with pytest.raises(AppError) as timed_out:
+        allowed.call("vm", "start", "<vm_key>x</vm_key>", "secret-token", timeout=4.0)
+    assert timed_out.value.code == "PVM_COMMAND_TIMEOUT"
+    assert timeout_runner.calls == [
+        (("sbell", "vm", "start", "<vm_key>x</vm_key>", "secret-token"), 4.0)
+    ]
+    assert "secret-token" not in str(timed_out.value)
+
+
 def test_rpc_framing_rejects_invalid_utf8_and_oversized_frame(tmp_path):
     service = FakeService()
     path, server, thread = start_server(tmp_path, service, max_message_bytes=1024)
@@ -472,13 +503,20 @@ def test_objects_command_accepts_only_known_query_inputs():
         def inventory(self, token):
             return (None, "inventory-section")
 
-    command = UserObjects(App())
-    assert command.execute("fake-token", "vm_inventory") == "inventory-section"
+    class Auth:
+        def token(self):
+            return "fake-token"
+
+    command = UserObjects(App(), Auth())
+    assert command.execute("vm_inventory") == "inventory-section"
     with pytest.raises(ValueError, match="unsupported"):
-        command.execute("fake-token", "<query>arbitrary</query>")
+        command.execute("<query>arbitrary</query>")
 
 
-def test_engine_service_rejects_noncanonical_uuid_and_unknown_action_without_dispatch(tmp_path):
+def test_engine_service_dispatches_only_registered_vm_actions():
+    from pvm_control_engine.domain.models import Action
+    from pvm_control_engine.infrastructure.sbell.commands.registry import CommandRegistry
+
     class Store:
         def load(self):
             return PvmSession("operator", "secret-token")
@@ -486,37 +524,37 @@ def test_engine_service_rejects_noncanonical_uuid_and_unknown_action_without_dis
         def clear(self):
             pass
 
-    class Whoami:
-        def execute(self, session):
-            return True
+    class Auth:
+        def stored_session(self):
+            return Store().load()
+
+        def session(self):
+            return Store().load()
 
     class Command:
         def __init__(self):
             self.calls = []
 
-        def execute(self, token, uuid):
-            self.calls.append((token, uuid))
+        def execute(self, uuid):
+            self.calls.append(uuid)
+            return {"state": "SUCCEEDED"}
+
+        def execute_many(self, uuids):
+            self.calls.append(uuids)
             return {"state": "SUCCEEDED"}
 
     command = Command()
-    service = EngineService(
-        application=object(),
-        sessions=object(),
-        session_store=Store(),
-        provider=object(),
-        operations=object(),
-        vm_operations={"stop": command},
-        commands={"user.whoami": Whoami()},
+    registry = CommandRegistry(
+        {"desktop.operate": object()},
+        {action: command for action in Action},
     )
-    with pytest.raises(AppError) as invalid_uuid:
-        service.operate("stop", UUID.upper())
-    assert invalid_uuid.value.code == "INVALID_UUID"
+    service = EngineService(application=object(), auth=Auth(), registry=registry)
     with pytest.raises(AppError) as invalid_action:
         service.operate("poweroff", UUID)
     assert invalid_action.value.code == "INVALID_ACTION"
     assert command.calls == []
     assert service.operate("stop", UUID) == {"state": "SUCCEEDED"}
-    assert command.calls == [("secret-token", UUID)]
+    assert command.calls == [UUID]
 
 
 def test_rpc_rejects_passwords_and_login_is_not_an_ipc_method(capsys):

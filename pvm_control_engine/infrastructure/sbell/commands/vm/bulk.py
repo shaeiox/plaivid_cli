@@ -18,13 +18,14 @@ from .results import ProgressSink, report_progress
 
 
 class HasUuid(Protocol):
-    uuid: str
+    @property
+    def uuid(self) -> str: ...
 
 
 T = TypeVar("T", bound=HasUuid)
 
 
-def execute_bounded_batch(
+def execute_bounded_batch(  # noqa: UP047 — retain TypeVar syntax for local Python 3.11 checks
     targets: Sequence[T],
     dispatch: Callable[[T], TargetOutcome],
     *,

@@ -174,6 +174,53 @@ Status→state mapping and exit codes: [`../contracts/API_CONTRACTS.md`](../cont
   is floored by `plaivid_cli/presentation/tui/pages/virtual_desktops/policy.py::MIN_REFRESH_SECONDS`
   (15 s). Tests: `tests/unit/test_virtual_desktops.py`.
 
+## 6. Standalone Engine VM command (Unix JSON-RPC)
+
+Evidence: `pvm_control_engine/ipc/dispatcher.py::RpcDispatcher.dispatch`,
+`pvm_control_engine/application/service.py::EngineService.operate`,
+`pvm_control_engine/infrastructure/sbell/commands/vm/start.py::StartVM`,
+`pvm_control_engine/targets/vm_resolver.py::VMResolver`,
+`pvm_control_engine/infrastructure/sbell/commands/vm/common.py::VMOperationCoordinator`,
+`pvm_control_engine/infrastructure/pvm/sbell.py::SbellClient`,
+`tests/unit/test_engine_vm_operations.py`.
+
+```mermaid
+sequenceDiagram
+    participant RPC as RpcDispatcher
+    participant S as EngineService
+    participant R as CommandRegistry
+    participant C as StartVM.execute
+    participant A as AuthProvider
+    participant VR as VMResolver
+    participant M as VMOperationCoordinator
+    participant SC as SbellClient
+    participant PR as ProcessRunner
+    RPC->>S: operate(start, uuid)
+    S->>R: vm_action(start)
+    R-->>S: fixed StartVM command
+    S->>C: execute(uuid)
+    C->>A: token()
+    A-->>C: validated cached token
+    C->>VR: resolve_many(uuid, token)
+    VR-->>C: exact inventory record + section
+    C->>M: execute(plan, fixed dispatch callback)
+    M->>M: revalidate freshness + begin mutation barrier
+    M->>C: dispatch(token, uuid)
+    C->>SC: call(vm, start, StartVM.build_params(uuid), token, timeout)
+    SC->>PR: run(configured local argv)
+    PR-->>SC: bounded process result
+    SC-->>M: parsed PVM reply
+    M->>M: classify outcome + end barrier + reconcile
+    M-->>S: OperationResult (including uncertainty)
+    S-->>RPC: redacted safe JSON value
+```
+
+The action module owns the fixed sbell identifiers and action-specific XML; `VMResolver` and the
+shared command coordinator own target validation and policy. Engine read collections still use
+the existing `PlaividApplication` → `LocalPvmAdapter` read path (see
+`docs/PVM_CONTROL_ENGINE.md`); this flow documents the completed command-centered mutation path,
+not a claim that every read adapter has been moved.
+
 ## Flow boundaries and unknowns
 
 - All external data enters through `LocalPvmAdapter` / `ProcessRunner` or

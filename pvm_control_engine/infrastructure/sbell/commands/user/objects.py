@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 
+from pvm_control_engine.auth.provider import AuthProvider
 from pvm_control_engine.domain.models import canonical_uuid
 
 
@@ -14,10 +15,12 @@ class ObjectsQuery(StrEnum):
 
 
 class UserObjects:
-    def __init__(self, application):
+    def __init__(self, application, auth: AuthProvider):
         self.application = application
+        self.auth = auth
 
-    def execute(self, token: str, query: ObjectsQuery | str, *, uuid: str | None = None):
+    def execute(self, query: ObjectsQuery | str, *, uuid: str | None = None):
+        token = self.auth.token()
         try:
             query = ObjectsQuery(query)
         except ValueError as exc:

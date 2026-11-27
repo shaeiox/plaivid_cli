@@ -110,3 +110,17 @@ tree. Verified by an AST import scan; see
 ## Engine separation transition note
 
 `pvm_control_engine/` contains the Engine-owned runtime and JSON-RPC server. `tui/src/plaivid_cli/engine_client/` contains the TUI-side client. The Textual UI still has direct application coupling, so boundary and capability separation are not complete; see `docs/PVM_CONTROL_ENGINE.md`.
+
+### Standalone Engine canonical modules
+
+| Responsibility | Canonical module |
+|---|---|
+| Engine composition and RPC service | `pvm_control_engine/bootstrap.py`, `pvm_control_engine/application/service.py` |
+| Session token access and storage | `pvm_control_engine/auth/provider.py`, `pvm_control_engine/auth/session_store.py`, `pvm_control_engine/application/session_manager.py` |
+| VM input validation and inventory binding | `pvm_control_engine/targets/vm_resolver.py` |
+| VM command registration | `pvm_control_engine/infrastructure/sbell/commands/registry.py` |
+| VM action-owned XML and execution | `pvm_control_engine/infrastructure/sbell/commands/vm/start.py`, `pvm_control_engine/infrastructure/sbell/commands/vm/stop.py`, `pvm_control_engine/infrastructure/sbell/commands/vm/kill.py`, `pvm_control_engine/infrastructure/sbell/commands/vm/reset.py`, `pvm_control_engine/infrastructure/sbell/commands/vm/pause.py`, `pvm_control_engine/infrastructure/sbell/commands/vm/resume.py` |
+| Shared VM mutation/freshness/bulk/reconciliation safeguards | `pvm_control_engine/infrastructure/sbell/commands/vm/common.py`, `planner.py`, `bulk.py`, `results.py` |
+| Action-neutral local sbell transport | `pvm_control_engine/infrastructure/pvm/sbell.py` |
+
+The standalone Engine does not have `pvm_control_engine/application/operations/`; these Engine command paths are independent from the separate `plaivid_cli/application/operations/` implementation. Authenticated collection reads still use `LocalPvmAdapter`; see the documented remaining gap in `docs/PVM_CONTROL_ENGINE.md`.

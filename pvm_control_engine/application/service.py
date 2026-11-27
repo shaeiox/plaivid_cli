@@ -1,4 +1,4 @@
-"""Engine use cases exposed to the local JSON-RPC boundary."""
+"""Engine-facing allowlisted service for the local JSON-RPC boundary."""
 
 from __future__ import annotations
 
@@ -6,65 +6,37 @@ import math
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any
 
-from pvm_control_engine.application.session import SessionManager, SessionStore
+from pvm_control_engine.auth.provider import AuthProvider
 from pvm_control_engine.domain.errors import AppError
 from pvm_control_engine.domain.models import ErrorKind, InventoryData, VMDetail, canonical_uuid
-
-
-class EngineCommand(Protocol):
-    def execute(self, *args: Any, **kwargs: Any) -> Any: ...
-
-
-class VMOperation(Protocol):
-    def execute(self, token: str, vm_uuid: str) -> Any: ...
-
-    def execute_many(self, token: str, vm_uuids: tuple[str, ...]) -> Any: ...
+from pvm_control_engine.infrastructure.sbell.commands.registry import CommandRegistry
 
 
 class EngineService:
-    """Structured, allowlisted calls over the existing application contracts."""
+    """Authenticate once per request, then delegate only to registered commands."""
 
     def __init__(
         self,
         *,
         application,
-        sessions: SessionManager,
-        session_store: SessionStore,
-        provider,
-        operations,
-        vm_operations: dict[str, VMOperation],
-        commands: dict[str, EngineCommand],
+        auth: AuthProvider,
+        registry: CommandRegistry,
     ) -> None:
         self.application = application
-        self.sessions = sessions
-        self.session_store = session_store
-        self.provider = provider
-        self.operations = operations
-        self.vm_operations = vm_operations
-        self.commands = commands
+        self.auth = auth
+        self.registry = registry
 
     def _session(self):
-        session = self.session_store.load()
-        if session is None:
-            raise AppError(ErrorKind.AUTHENTICATION, "login required", code="LOGIN_REQUIRED")
-        if not self.commands["user.whoami"].execute(session):
-            self.session_store.clear()
-            raise AppError(ErrorKind.AUTHENTICATION, "login required", code="LOGIN_REQUIRED")
-        return session
+        return self.auth.session()
 
     def login(self, username: str, password: str) -> dict[str, Any]:
-        session, created = self.commands["user.login"].execute(username, password)
-        # Never serialize PvmSession: its token is intentionally not part of the IPC contract.
+        session, created = self.registry.get("user.login").execute(username, password)
         return {"authenticated": True, "username": session.username, "new_session": created}
 
     def logout(self) -> dict[str, bool]:
-        session = self.session_store.load()
-        if session is not None:
-            self.commands["user.logout"].execute(session)
-        else:
-            self.sessions.clear_local_cache()
+        self.registry.get("user.logout").execute()
         return {"authenticated": False}
 
     def snapshot(self, sections: tuple[str, ...]) -> dict[str, Any]:
@@ -102,8 +74,7 @@ class EngineService:
         }
 
     def list_vms(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["user.objects"].execute(session.token, "vm_inventory")
+        section = self.registry.get("user.objects").execute("vm_inventory")
         value = section.value if section.value is not None else section.last_good_value
         if not isinstance(value, InventoryData):
             value = None
@@ -111,53 +82,42 @@ class EngineService:
 
     def vm_detail(self, uuid: str) -> dict[str, Any]:
         key = _canonical_wire_uuid(uuid)
-        session = self._session()
-        section = self.commands["user.objects"].execute(session.token, "vm_detail", uuid=key)
+        section = self.registry.get("user.objects").execute("vm_detail", uuid=key)
         value = section.value if section.value is not None else section.last_good_value
         if not isinstance(value, VMDetail):
             value = None
         return _section_payload(section, value)
 
     def host_status(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["sball.show"].execute(session.token)
+        section = self.registry.get("sball.show").execute()
         return _section_payload(section, section.value if section else None)
 
     def host_metrics(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["monitoring.metrics"].execute(session.token)
+        section = self.registry.get("monitoring.metrics").execute()
         return _section_payload(section, section.value if section else None)
 
     def desktop_list(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["user.objects"].execute(session.token, "desktop_list")
+        section = self.registry.get("user.objects").execute("desktop_list")
         return _section_payload(section, section.value if section else None)
 
     def dashboard(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["user.objects"].execute(session.token, "dashboard")
+        section = self.registry.get("user.objects").execute("dashboard")
         return _section_payload(section, section.value if section else None)
 
     def tap_mapping(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["user.objects"].execute(session.token, "vm_tap_mapping")
+        section = self.registry.get("user.objects").execute("vm_tap_mapping")
         return _section_payload(section, section.value if section else None)
 
     def nic_list(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["network.nic_list"].execute(session.token)
+        section = self.registry.get("network.nic_list").execute()
         return _section_payload(section, section.value if section else None)
 
     def local_host(self) -> dict[str, Any]:
-        session = self._session()
-        section = self.commands["local.host_metrics"].execute(session.token)
+        section = self.registry.get("local.host_metrics").execute()
         return _section_payload(section, section.value if section else None)
 
     def nic_samples(self) -> dict[str, Any]:
-        session = self._session()
-        snapshot = self.commands["local.nic_samples"].execute(session.token)
-        physical = snapshot[0]
-        samples = snapshot[1]
+        physical, samples = self.registry.get("local.nic_samples").execute()
         return {
             "physical_nics": _section_payload(physical, physical.value if physical else None),
             "nic_samples": _section_payload(samples, samples.value if samples else None),
@@ -168,72 +128,22 @@ class EngineService:
             raise AppError(
                 ErrorKind.POLICY, "audit limit must be between 1 and 500", code="INVALID_LIMIT"
             )
-        entries = self.commands["local.audit"].execute(limit)
+        entries = self.registry.get("local.audit").execute(limit)
         return {"entries": _safe_value(entries), "limit": limit}
 
     def operate(
         self, action: str, uuid: str | None = None, uuids: tuple[str, ...] | None = None
     ) -> dict[str, Any]:
-        command = self.vm_operations.get(action)
-        if command is None:
-            raise AppError(ErrorKind.POLICY, "unsupported VM action", code="INVALID_ACTION")
         if (uuid is None) == (uuids is None):
             raise AppError(
                 ErrorKind.POLICY, "provide exactly one UUID or UUID list", code="INVALID_UUID"
             )
-        keys = (
-            (_canonical_wire_uuid(uuid),)
-            if uuid is not None
-            else tuple(_canonical_wire_uuid(item) for item in uuids or ())
-        )
-        session = self._session()
-        result = (
-            command.execute(session.token, keys[0])
-            if len(keys) == 1
-            else command.execute_many(session.token, keys)
-        )
+        command = self.registry.vm_action(action)
+        result = command.execute(uuid) if uuid is not None else command.execute_many(uuids or ())
         return _safe_value(result)
 
     def operate_desktop(self, action: str, uuids: tuple[str, ...]) -> dict[str, Any]:
-        from pvm_control_engine.domain.desktops import VirtualDesktop
-        from pvm_control_engine.domain.models import Action
-
-        try:
-            action_value = Action(action)
-        except ValueError as exc:
-            raise AppError(
-                ErrorKind.POLICY, "unsupported VM action", code="INVALID_ACTION"
-            ) from exc
-        keys = tuple(_canonical_wire_uuid(item) for item in uuids)
-        if not keys or len(set(keys)) != len(keys) or len(keys) > 100:
-            raise AppError(
-                ErrorKind.POLICY,
-                "Desktop UUID list must be non-empty and unique",
-                code="INVALID_UUID",
-            )
-        session = self._session()
-        section = self.application.refresh(session.token, sections=("desktops",)).section(
-            "desktops"
-        )
-        if section is None or not isinstance(section.value, tuple):
-            raise AppError(
-                ErrorKind.POLICY,
-                "current Desktop inventory is required",
-                code="INVENTORY_UNAVAILABLE",
-            )
-        by_uuid = {item.uuid: item for item in section.value if isinstance(item, VirtualDesktop)}
-        if any(key not in by_uuid for key in keys):
-            raise AppError(
-                ErrorKind.POLICY,
-                "Desktop is not present in current inventory",
-                code="DESKTOP_NOT_FOUND",
-            )
-        targets = tuple(by_uuid[key] for key in keys)
-        is_bulk = len(targets) > 1
-        plan = self.operations.create_desktop_plan(action_value, targets, section, is_bulk=is_bulk)
-        result = self.operations.execute_desktop(
-            session.token, action_value, targets, section, is_bulk=is_bulk, plan=plan
-        )
+        result = self.registry.get("desktop.operate").execute(action, uuids)
         return _safe_value(result)
 
 

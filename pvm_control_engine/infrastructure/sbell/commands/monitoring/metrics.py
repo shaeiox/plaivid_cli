@@ -1,9 +1,12 @@
-"""Explicit monitoring/metrics query facade."""
+"""Authenticated monitoring/metrics query command."""
+
+from pvm_control_engine.auth.provider import AuthProvider
 
 
 class MonitoringMetrics:
-    def __init__(self, application):
-        self.application = application
+    def __init__(self, application, auth: AuthProvider):
+        self._application = application
+        self._auth = auth
 
-    def execute(self, token: str):
-        return self.application.host_metrics(token)
+    def execute(self):
+        return self._application.host_metrics(self._auth.token())

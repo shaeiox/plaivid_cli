@@ -11,14 +11,12 @@ from datetime import UTC, datetime
 from pvm_control_engine.domain.desktops import VirtualDesktop
 from pvm_control_engine.domain.errors import AppError
 from pvm_control_engine.domain.models import (
-    Action,
     CollectionStatus,
     ErrorKind,
     HostMetrics,
     HostStatus,
     ObjectVM,
     ProcessObservation,
-    PvmReply,
     PvmSession,
     SourceResult,
     VMDetail,
@@ -49,6 +47,7 @@ from pvm_control_engine.infrastructure.pvm.parsers import (
 )
 from pvm_control_engine.infrastructure.pvm.sbell import SbellClient, SbellResponse
 from pvm_control_engine.infrastructure.pvm.uptime import sball_uptime_seconds
+from pvm_control_engine.infrastructure.sbell.commands.user.login import login_params
 
 from .requests import (
     DASHBOARD_QUERY,
@@ -56,8 +55,6 @@ from .requests import (
     ERRNO_HINT,
     SBALLD_STATUS_ARGV,
     VM_QUERY,
-    _action_params,
-    _login_params,
 )
 
 
@@ -137,7 +134,7 @@ class LocalPvmAdapter:
                 "sbell password argv exposure requires explicit operator acknowledgement",
                 code="CREDENTIAL_ARGV_ACK_REQUIRED",
             )
-        response = self._call("user", "login", _login_params(username, password))
+        response = self._call("user", "login", login_params(username, password))
         if not response.ok:
             details = ERRNO_HINT.get(response.errno or "", "PVM rejected login")
             raise AppError(
@@ -285,16 +282,6 @@ class LocalPvmAdapter:
             else CollectionStatus.CURRENT
         )
         return SourceResult(samples, status, "local sysfs")
-
-    def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply:
-        response = self._call(
-            "vm",
-            action.value,
-            _action_params(action, uuid),
-            token,
-            timeout=self._action_timeout,
-        )
-        return response.reply()
 
     def is_daemon_alive(self, timeout: float = 2.0, *, token: str | None = None) -> bool:
         """Probe ``sballd`` responsiveness with a short bounded deadline."""

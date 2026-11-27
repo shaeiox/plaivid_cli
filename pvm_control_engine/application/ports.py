@@ -6,13 +6,11 @@ from typing import Protocol
 
 from pvm_control_engine.domain.desktops import VirtualDesktop
 from pvm_control_engine.domain.models import (
-    Action,
     AuditEntry,
     HostMetrics,
     HostStatus,
     ObjectVM,
     ProcessObservation,
-    PvmReply,
     PvmSession,
     SourceResult,
     VMDetail,
@@ -45,8 +43,6 @@ class PvmGateway(Protocol):
     def vm_detail(self, token: str, uuid: str) -> SourceResult[VMDetail | None]: ...
 
     def tap_mapping(self, token: str) -> SourceResult[dict[str, str]]: ...
-
-    def dispatch_action(self, token: str, action: Action, uuid: str) -> PvmReply: ...
 
     def is_daemon_alive(self, timeout: float = 2.0, *, token: str | None = None) -> bool: ...
 

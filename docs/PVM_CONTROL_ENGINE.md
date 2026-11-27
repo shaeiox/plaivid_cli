@@ -32,7 +32,19 @@ Allowlisted methods currently implemented:
 - `host.status`, `host.metrics`, `host.local`, `network.nic_list`, `network.nic_samples`, `overview.dashboard`
 - `audit.recent(limit)`, `session.logout` (login is deliberately not an IPC method)
 
-No method accepts raw XML, module/command names, arbitrary argv, passwords, or session tokens. An existing locally stored Engine session is required for authenticated reads and mutations; there is not yet a supported login flow. Mutating VM/desktop methods require canonical UUIDs, enforce a maximum of 100 unique targets, verify targets against current Engine-side inventory, and route through existing freshness/policy planners. Unknown PVM outcomes remain unknown in the returned operation result. The JSON-RPC error envelope is `error: {code, message, data?}`; internal exception strings are intentionally omitted. Credentials are never included in success results.
+No method accepts raw XML, module/command names, arbitrary argv, passwords, or session tokens. An existing locally stored Engine session is required for authenticated reads and mutations; there is not yet a supported login flow. Mutating VM/desktop methods require canonical UUIDs, enforce a maximum of 100 unique targets, verify targets against current Engine-side inventory, and pass through freshness, mutation barriers, bulk admission, and reconciliation. Unknown PVM outcomes remain unknown in the returned operation result. The JSON-RPC error envelope is `error: {code, message, data?}`; internal exception strings are intentionally omitted. Credentials are never included in success results.
+
+## Engine command path
+
+VM lifecycle commands are concrete classes under `pvm_control_engine/infrastructure/sbell/commands/vm/`; the generic action-parameter switch and `application/operations/` package are removed. `StartVM` owns the fixed `vm/start` identifiers and builds its XML using ElementTree. The command takes a VM UUID (or a tuple of UUIDs for bulk), obtains the token through injected `AuthProvider`, resolves the input through `VMResolver`, and runs the shared mutation/freshness/bulk/reconciliation lane before its fixed `SbellClient.call`.
+
+The single-target start path is:
+
+`RpcDispatcher.dispatch` (`pvm_control_engine/ipc/dispatcher.py`) → `EngineService.operate` (`pvm_control_engine/application/service.py`) → `CommandRegistry.vm_action` (`pvm_control_engine/infrastructure/sbell/commands/registry.py`) → `StartVM.execute` (`pvm_control_engine/infrastructure/sbell/commands/vm/start.py`) → `AuthProvider.token` (`pvm_control_engine/auth/provider.py`) → `VMResolver.resolve_many` (`pvm_control_engine/targets/vm_resolver.py`) → `VMOperationCoordinator.execute` (`pvm_control_engine/infrastructure/sbell/commands/vm/common.py`) → `StartVM.dispatch` → `SbellClient.call` (`pvm_control_engine/infrastructure/pvm/sbell.py`) → `ProcessRunner.run` (`pvm_control_engine/infrastructure/process.py`). The start payload preserves the established `<vm_start>` field order and values, including `host=auto`, disabled versioning, an empty version key, and `exit_from_replicate=yes`.
+
+`VMOperationCoordinator` and its planner/bulk/result helpers retain the existing freshness admission, per-target inventory checks, mutation barrier, bounded dispatch, target/session failure scope, timeout/liveness classification, and post-action reconciliation. The Desktop command shares the same operation lane and dispatches only through the fixed VM action classes selected by the explicit registry. No raw module, command, XML, or argv is supplied by an RPC caller.
+
+Authenticated collection reads still enter through `PlaividApplication` and `LocalPvmAdapter`; this refactor makes VM lifecycle dispatch command-centered but does not yet move every read query's request construction out of that shared read adapter. The existing socket API and response shapes are unchanged.
 
 ### Multi-UID behavior
 

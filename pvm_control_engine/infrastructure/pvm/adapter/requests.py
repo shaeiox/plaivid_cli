@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-
-from pvm_control_engine.domain.models import Action, canonical_uuid
-
 DASHBOARD_QUERY = (
     "<params><query_path>/plaivid/overview/pvm_overview_dashboard</query_path>"
     "<page_size>0</page_size><requested_page>1</requested_page>"
@@ -37,29 +33,3 @@ ERRNO_HINT = {
 
 
 SBALLD_STATUS_ARGV = ("systemctl", "status", "sballd", "--no-pager")
-
-
-def _xml_text(tag: str, value: str) -> str:
-    element = ET.Element(tag)
-    element.text = value
-    return ET.tostring(element, encoding="unicode", short_empty_elements=False)
-
-
-def _login_params(username: str, password: str) -> str:
-    root = ET.Element("params")
-    ET.SubElement(root, "username").text = username
-    ET.SubElement(root, "password").text = password
-    return ET.tostring(root, encoding="unicode", short_empty_elements=False)
-
-
-def _action_params(action: Action, uuid: str) -> str:
-    key = canonical_uuid(uuid)
-    if action is Action.START:
-        # This parameter structure is copied from the existing source action.
-        return (
-            f"<vm_start><vm_key>{key}</vm_key><host>auto</host>"
-            "<version_start><version_enable>no</version_enable>"
-            "<version_vkey></version_vkey></version_start>"
-            "<exit_from_replicate>yes</exit_from_replicate></vm_start>"
-        )
-    return _xml_text("vm_key", key)

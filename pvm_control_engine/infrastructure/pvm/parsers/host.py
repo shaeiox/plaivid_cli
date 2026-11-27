@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections import Counter
+from typing import TypedDict
 
 from pvm_control_engine.domain.models import (
     CollectionStatus,
@@ -24,6 +25,31 @@ _PROCESS_LIMIT = 50
 _REAL_FILESYSTEMS = frozenset(
     {"ext2", "ext3", "ext4", "xfs", "btrfs", "vfat", "zfs", "nfs", "nfs4"}
 )
+
+
+class HostFacts(TypedDict):
+    host_id: str | None
+    platform_family: str | None
+    kernel_version: str | None
+    virtualization: str | None
+    boot_time: str | None
+    uptime_seconds: int | None
+    cpu_count: int | None
+    run_queue: int | None
+    blocked_tasks: int | None
+    blocked_percent: float | None
+    total_tasks: int | None
+    num_processes: int | None
+    num_threads: int | None
+    open_fds: int | None
+    context_switches: int | None
+    interrupts: int | None
+    forks: int | None
+    temperatures: tuple[TemperatureReading, ...]
+    users: tuple[UserSession, ...]
+    processes: tuple[ProcessSample, ...]
+    process_total: int | None
+    command_summary: tuple[tuple[str, int], ...]
 
 
 def parse_sball_status(root: ET.Element) -> ParseResult[HostStatus | None]:
@@ -74,7 +100,7 @@ def parse_sball_status(root: ET.Element) -> ParseResult[HostStatus | None]:
     return ParseResult(status, CollectionStatus.CURRENT, source="sball/show")
 
 
-def _host_facts(metrics: ET.Element, system: ET.Element | None) -> dict[str, object]:
+def _host_facts(metrics: ET.Element, system: ET.Element | None) -> HostFacts:
     """Fields from system_info, load_stats, process_stats, system_stats and the lists."""
     load = metrics.find(".//load_stats")
     procs = metrics.find(".//process_stats")

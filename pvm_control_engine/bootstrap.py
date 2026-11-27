@@ -11,18 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pvm_control_engine.application.collection import CollectionCoordinator
-from pvm_control_engine.application.operations import OperationCoordinator
-from pvm_control_engine.application.operations.vm.executor import VMOperationExecutor
-from pvm_control_engine.application.operations.vm.kill_vm import KillVM
-from pvm_control_engine.application.operations.vm.pause_vm import PauseVM
-from pvm_control_engine.application.operations.vm.reset_vm import ResetVM
-from pvm_control_engine.application.operations.vm.resume_vm import ResumeVM
-from pvm_control_engine.application.operations.vm.start_vm import StartVM
-from pvm_control_engine.application.operations.vm.stop_vm import StopVM
 from pvm_control_engine.application.service import EngineService
 from pvm_control_engine.application.services import PlaividApplication
-from pvm_control_engine.application.session import SessionManager, SessionStore
+from pvm_control_engine.application.session_manager import SessionManager
+from pvm_control_engine.auth.provider import AuthProvider
+from pvm_control_engine.auth.session_store import SessionStore
 from pvm_control_engine.config import ConfigurationError, Settings, load_settings
+from pvm_control_engine.domain.models import Action
 from pvm_control_engine.infrastructure.audit import ReadOnlyAuditAdapter
 from pvm_control_engine.infrastructure.local.audit import LocalAudit
 from pvm_control_engine.infrastructure.local.host_metrics import LocalHostMetrics
@@ -30,22 +25,32 @@ from pvm_control_engine.infrastructure.local.nic_samples import LocalNicSamples
 from pvm_control_engine.infrastructure.process import ProcessRunner
 from pvm_control_engine.infrastructure.pvm.adapter import LocalPvmAdapter
 from pvm_control_engine.infrastructure.pvm.sbell import SbellClient
+from pvm_control_engine.infrastructure.sbell.commands.desktop.operate import DesktopOperate
 from pvm_control_engine.infrastructure.sbell.commands.monitoring.metrics import MonitoringMetrics
 from pvm_control_engine.infrastructure.sbell.commands.network.nic_list import NetworkNicList
+from pvm_control_engine.infrastructure.sbell.commands.registry import CommandRegistry
 from pvm_control_engine.infrastructure.sbell.commands.sball.show import SballShow
 from pvm_control_engine.infrastructure.sbell.commands.user.login import UserLogin
 from pvm_control_engine.infrastructure.sbell.commands.user.logout import UserLogout
 from pvm_control_engine.infrastructure.sbell.commands.user.objects import UserObjects
 from pvm_control_engine.infrastructure.sbell.commands.user.whoami import UserWhoami
+from pvm_control_engine.infrastructure.sbell.commands.vm.common import VMOperationCoordinator
+from pvm_control_engine.infrastructure.sbell.commands.vm.kill import KillVM
+from pvm_control_engine.infrastructure.sbell.commands.vm.pause import PauseVM
+from pvm_control_engine.infrastructure.sbell.commands.vm.reset import ResetVM
+from pvm_control_engine.infrastructure.sbell.commands.vm.resume import ResumeVM
+from pvm_control_engine.infrastructure.sbell.commands.vm.start import StartVM
+from pvm_control_engine.infrastructure.sbell.commands.vm.stop import StopVM
 from pvm_control_engine.ipc.dispatcher import RpcDispatcher
 from pvm_control_engine.ipc.server import UnixRpcServer
+from pvm_control_engine.targets.vm_resolver import VMResolver
 
 
 @dataclass(slots=True)
 class EngineRuntime:
     service: EngineService
     server: UnixRpcServer
-    operations: OperationCoordinator
+    operations: VMOperationCoordinator
     collection: CollectionCoordinator
 
     def close(self) -> None:
@@ -65,7 +70,11 @@ def build_runtime(
     runner = ProcessRunner(
         timeout=settings.process_timeout, max_output_bytes=settings.max_output_bytes
     )
-    sbell = SbellClient(settings.sbell_argv, runner)
+    sbell = SbellClient(
+        settings.sbell_argv,
+        runner,
+        allow_credential_argv=settings.allow_credential_argv,
+    )
     provider = LocalPvmAdapter(
         sbell,
         runner,
@@ -76,38 +85,49 @@ def build_runtime(
     collection = CollectionCoordinator(provider, refresh_interval=settings.refresh_interval)
     audit = ReadOnlyAuditAdapter(settings.audit_database)
     application = PlaividApplication(provider, collection, settings, audit)
-    operations = OperationCoordinator(provider, collection, settings)
+    operations = VMOperationCoordinator(provider, collection, settings)
     store = SessionStore(settings.session_file)
     sessions = SessionManager(provider, settings, store)
-    executor = VMOperationExecutor(application, operations)
-    vm_operations = {
-        "start": StartVM(executor),
-        "stop": StopVM(executor),
-        "kill": KillVM(executor),
-        "reset": ResetVM(executor),
-        "pause": PauseVM(executor),
-        "resume": ResumeVM(executor),
+    auth = AuthProvider(store, provider)
+    resolver = VMResolver(application)
+    vm_actions = {
+        Action.START: StartVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
+        Action.STOP: StopVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
+        Action.KILL: KillVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
+        Action.RESET: ResetVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
+        Action.PAUSE: PauseVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
+        Action.RESUME: ResumeVM(
+            auth, resolver, operations, sbell, action_timeout=settings.action_timeout
+        ),
     }
     commands = {
         "user.login": UserLogin(sessions),
         "user.whoami": UserWhoami(provider),
-        "user.logout": UserLogout(sessions),
-        "user.objects": UserObjects(application),
-        "sball.show": SballShow(application),
-        "monitoring.metrics": MonitoringMetrics(application),
-        "network.nic_list": NetworkNicList(application),
-        "local.host_metrics": LocalHostMetrics(application),
-        "local.nic_samples": LocalNicSamples(application),
+        "user.logout": UserLogout(sessions, auth),
+        "user.objects": UserObjects(application, auth),
+        "sball.show": SballShow(application, auth),
+        "monitoring.metrics": MonitoringMetrics(application, auth),
+        "network.nic_list": NetworkNicList(application, auth),
+        "local.host_metrics": LocalHostMetrics(application, auth),
+        "local.nic_samples": LocalNicSamples(application, auth),
         "local.audit": LocalAudit(audit),
+        "desktop.operate": DesktopOperate(auth, application, operations, vm_actions),
     }
+    registry = CommandRegistry(commands, vm_actions)
     service = EngineService(
         application=application,
-        sessions=sessions,
-        session_store=store,
-        provider=provider,
-        operations=operations,
-        vm_operations=vm_operations,
-        commands=commands,
+        auth=auth,
+        registry=registry,
     )
     server = UnixRpcServer(
         socket_path,

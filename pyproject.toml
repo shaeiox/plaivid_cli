@@ -66,4 +66,6 @@ exclude = [
   ".venv",
   "tests",
   "plaivid_cli/legacy/**",
+  "pvm_control_engine/build/**",
+  "pvm_control_engine.egg-info/**",
 ]

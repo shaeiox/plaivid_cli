@@ -177,3 +177,31 @@ Section → provider source labels (from `SectionReader.collect`): `objects`/`de
 print/redact it; the collection layer converts unclassified exceptions into per-section
 `UNAVAILABLE` results. Do not leak raw argv, XML, tokens, or process `full_command` into logs or
 UI (`tests/unit/test_redaction.py`, `docs/MONITORING_DASHBOARD.md`).
+
+## 10. Standalone PVM Control Engine command contract
+
+The Engine under `pvm_control_engine/` is a separate process and package; it is not the layered
+`plaivid_cli/` runtime described above. The command-centered mutation path is:
+
+- `EngineService.operate` (`pvm_control_engine/application/service.py`) requests a concrete
+  action from `CommandRegistry.vm_action` (`pvm_control_engine/infrastructure/sbell/commands/registry.py`).
+- Each concrete `StartVM`, `StopVM`, `KillVM`, `ResetVM`, `PauseVM`, and `ResumeVM` module owns
+  its fixed `vm/<command>` identifiers and XML parameter builder. Callers supply only VM UUID
+  values, never an sbell module, command, or XML body.
+- `AuthProvider.token` validates the stored Engine session before use. `VMResolver` rejects
+  non-canonical UUIDs, duplicates, empty/over-limit batches, and targets absent from the current
+  inventory.
+- `VMOperationCoordinator` in `pvm_control_engine/infrastructure/sbell/commands/vm/common.py`
+  retains plan revalidation, freshness and completeness checks, a mutation barrier, bounded
+  bulk dispatch, target/session failure classification, uncertain timeout handling, and
+  reconciliation. It delegates the actual fixed request back to the concrete command class.
+- `SbellClient` (`pvm_control_engine/infrastructure/pvm/sbell.py`) remains action-neutral and
+  runs the configured local argv through `ProcessRunner`; its credential-argv gate is explicit.
+  `OperationResult` remains a domain/IPC value contract.
+
+The Engine's old `pvm_control_engine/application/operations/` package is removed. This does not
+change the distinct CLI/TUI `plaivid_cli/application/operations/` package or the Unix JSON-RPC
+wire contract. Engine read collection still enters through `PlaividApplication` and
+`LocalPvmAdapter`; see `docs/PVM_CONTROL_ENGINE.md` for that remaining boundary gap. Coverage:
+`tests/unit/test_engine_vm_operations.py`, `tests/unit/test_engine_auth_provider.py`,
+`tests/unit/test_pvm_control_engine.py`.
