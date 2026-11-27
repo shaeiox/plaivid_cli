@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from plaivid_cli.engine_client.client import EngineClient, EngineRpcError
+from pvm_control_engine.application.operations.vm.kill_vm import KillVM
 from pvm_control_engine.application.service import EngineService, _safe_value
 from pvm_control_engine.bootstrap import _parse_socket_mode, build_runtime
 from pvm_control_engine.config import load_settings
@@ -134,7 +135,7 @@ def start_server(
 
 
 def test_engine_imports_without_plaivid_cli_or_textual():
-    code = '''
+    code = """
 import importlib.abc, sys
 class BlockUIAndCli(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -144,12 +145,12 @@ sys.meta_path.insert(0, BlockUIAndCli())
 import pvm_control_engine.bootstrap
 assert not any(name == "plaivid_cli" or name.startswith("plaivid_cli.") for name in sys.modules)
 assert not any(name == "textual" or name.startswith("textual.") for name in sys.modules)
-'''
+"""
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
 
 
 def test_tui_client_imports_without_engine_internals():
-    code = '''
+    code = """
 import importlib.abc, sys
 class BlockEngine(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -158,7 +159,7 @@ class BlockEngine(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockEngine())
 import plaivid_cli.engine_client.client
 assert not any(name == "pvm_control_engine" or name.startswith("pvm_control_engine.") for name in sys.modules)
-'''
+"""
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
 
 
@@ -167,7 +168,10 @@ def test_safe_dto_serialization_redacts_secrets_but_keeps_audit_command():
 
     entry = AuditEntry("now", "operator", "127.0.0.1", "PVM", "VM stopped", "success", True)
     assert _safe_value(entry)["command"] == "VM stopped"
-    assert _safe_value({"password": "secret", "token": "secret", "argv": ["x"], "command": "raw"}) == {}
+    assert (
+        _safe_value({"password": "secret", "token": "secret", "argv": ["x"], "command": "raw"})
+        == {}
+    )
 
 
 def test_socket_mode_configuration_is_octal_and_restrictive():
@@ -189,6 +193,8 @@ def test_engine_composition_registers_each_permitted_vm_action_without_starting_
             "pause",
             "resume",
         }
+        assert isinstance(runtime.service.vm_operations["kill"], KillVM)
+        assert not any(key.startswith("vm.") for key in runtime.service.commands)
     finally:
         runtime.close()
     assert not (tmp_path / "engine.sock").exists()
@@ -499,7 +505,8 @@ def test_engine_service_rejects_noncanonical_uuid_and_unknown_action_without_dis
         session_store=Store(),
         provider=object(),
         operations=object(),
-        commands={"user.whoami": Whoami(), "vm.stop": command},
+        vm_operations={"stop": command},
+        commands={"user.whoami": Whoami()},
     )
     with pytest.raises(AppError) as invalid_uuid:
         service.operate("stop", UUID.upper())

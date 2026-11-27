@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pvm_control_engine.application.collection import CollectionCoordinator
 from pvm_control_engine.application.operations import OperationCoordinator
-from pvm_control_engine.application.operations.vm.common import VMOperationExecutor
+from pvm_control_engine.application.operations.vm.executor import VMOperationExecutor
 from pvm_control_engine.application.operations.vm.kill_vm import KillVM
 from pvm_control_engine.application.operations.vm.pause_vm import PauseVM
 from pvm_control_engine.application.operations.vm.reset_vm import ResetVM
@@ -37,12 +37,6 @@ from pvm_control_engine.infrastructure.sbell.commands.user.login import UserLogi
 from pvm_control_engine.infrastructure.sbell.commands.user.logout import UserLogout
 from pvm_control_engine.infrastructure.sbell.commands.user.objects import UserObjects
 from pvm_control_engine.infrastructure.sbell.commands.user.whoami import UserWhoami
-from pvm_control_engine.infrastructure.sbell.commands.vm.kill import VMKill
-from pvm_control_engine.infrastructure.sbell.commands.vm.pause import VMPause
-from pvm_control_engine.infrastructure.sbell.commands.vm.reset import VMReset
-from pvm_control_engine.infrastructure.sbell.commands.vm.resume import VMResume
-from pvm_control_engine.infrastructure.sbell.commands.vm.start import VMStart
-from pvm_control_engine.infrastructure.sbell.commands.vm.stop import VMStop
 from pvm_control_engine.ipc.dispatcher import RpcDispatcher
 from pvm_control_engine.ipc.server import UnixRpcServer
 
@@ -86,34 +80,33 @@ def build_runtime(
     store = SessionStore(settings.session_file)
     sessions = SessionManager(provider, settings, store)
     executor = VMOperationExecutor(application, operations)
-    commands = {
-        "vm.start": VMStart(StartVM(executor)),
-        "vm.stop": VMStop(StopVM(executor)),
-        "vm.kill": VMKill(KillVM(executor)),
-        "vm.reset": VMReset(ResetVM(executor)),
-        "vm.pause": VMPause(PauseVM(executor)),
-        "vm.resume": VMResume(ResumeVM(executor)),
+    vm_operations = {
+        "start": StartVM(executor),
+        "stop": StopVM(executor),
+        "kill": KillVM(executor),
+        "reset": ResetVM(executor),
+        "pause": PauseVM(executor),
+        "resume": ResumeVM(executor),
     }
-    commands.update(
-        {
-            "user.login": UserLogin(sessions),
-            "user.whoami": UserWhoami(provider),
-            "user.logout": UserLogout(sessions),
-            "user.objects": UserObjects(application),
-            "sball.show": SballShow(application),
-            "monitoring.metrics": MonitoringMetrics(application),
-            "network.nic_list": NetworkNicList(application),
-            "local.host_metrics": LocalHostMetrics(application),
-            "local.nic_samples": LocalNicSamples(application),
-            "local.audit": LocalAudit(audit),
-        }
-    )
+    commands = {
+        "user.login": UserLogin(sessions),
+        "user.whoami": UserWhoami(provider),
+        "user.logout": UserLogout(sessions),
+        "user.objects": UserObjects(application),
+        "sball.show": SballShow(application),
+        "monitoring.metrics": MonitoringMetrics(application),
+        "network.nic_list": NetworkNicList(application),
+        "local.host_metrics": LocalHostMetrics(application),
+        "local.nic_samples": LocalNicSamples(application),
+        "local.audit": LocalAudit(audit),
+    }
     service = EngineService(
         application=application,
         sessions=sessions,
         session_store=store,
         provider=provider,
         operations=operations,
+        vm_operations=vm_operations,
         commands=commands,
     )
     server = UnixRpcServer(

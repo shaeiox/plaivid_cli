@@ -19,12 +19,8 @@ class VMOperationExecutor:
         self.application = application
         self.operations = operations
 
-    def execute(self, token: str, action: Action, vm_uuid: str) -> OperationResult:
-        return self.execute_many(token, action, (vm_uuid,))
-
-    def execute_many(
-        self, token: str, action: Action, vm_uuids: tuple[str, ...]
-    ) -> OperationResult:
+    def execute(self, token: str, action: Action, vm_uuids: tuple[str, ...]) -> OperationResult:
+        """Validate targets, plan the mutation, and hand it to the operation coordinator."""
         if not vm_uuids:
             raise AppError(
                 ErrorKind.POLICY, "at least one VM UUID is required", code="INVALID_UUID"

@@ -6,11 +6,21 @@ import math
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from pvm_control_engine.application.session import SessionManager, SessionStore
 from pvm_control_engine.domain.errors import AppError
 from pvm_control_engine.domain.models import ErrorKind, InventoryData, VMDetail, canonical_uuid
+
+
+class EngineCommand(Protocol):
+    def execute(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+class VMOperation(Protocol):
+    def execute(self, token: str, vm_uuid: str) -> Any: ...
+
+    def execute_many(self, token: str, vm_uuids: tuple[str, ...]) -> Any: ...
 
 
 class EngineService:
@@ -24,19 +34,16 @@ class EngineService:
         session_store: SessionStore,
         provider,
         operations,
-        commands: dict[str, object],
+        vm_operations: dict[str, VMOperation],
+        commands: dict[str, EngineCommand],
     ) -> None:
         self.application = application
         self.sessions = sessions
         self.session_store = session_store
         self.provider = provider
         self.operations = operations
+        self.vm_operations = vm_operations
         self.commands = commands
-        self.vm_operations = {
-            key.removeprefix("vm."): value
-            for key, value in commands.items()
-            if key.startswith("vm.")
-        }
 
     def _session(self):
         session = self.session_store.load()
@@ -62,17 +69,33 @@ class EngineService:
 
     def snapshot(self, sections: tuple[str, ...]) -> dict[str, Any]:
         allowed = {
-            "inventory", "dashboard", "host_status", "host_metrics", "local_host",
-            "physical_nics", "nic_samples", "tap_mapping", "desktops",
+            "inventory",
+            "dashboard",
+            "host_status",
+            "host_metrics",
+            "local_host",
+            "physical_nics",
+            "nic_samples",
+            "tap_mapping",
+            "desktops",
         }
-        if not sections or len(sections) > len(allowed) or len(set(sections)) != len(sections) or any(item not in allowed for item in sections):
-            raise AppError(ErrorKind.POLICY, "unsupported snapshot sections", code="INVALID_SECTIONS")
+        if (
+            not sections
+            or len(sections) > len(allowed)
+            or len(set(sections)) != len(sections)
+            or any(item not in allowed for item in sections)
+        ):
+            raise AppError(
+                ErrorKind.POLICY, "unsupported snapshot sections", code="INVALID_SECTIONS"
+            )
         session = self._session()
         snapshot = self.application.refresh(session.token, sections=sections)
         return {
             "generation": snapshot.generation,
             "sections": {
-                name: _section_payload(section, section.value if section.value is not None else section.last_good_value)
+                name: _section_payload(
+                    section, section.value if section.value is not None else section.last_good_value
+                )
                 for name in sections
                 if (section := snapshot.section(name)) is not None
             },
@@ -142,20 +165,33 @@ class EngineService:
 
     def recent_audit(self, limit: int = 100) -> dict[str, Any]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
-            raise AppError(ErrorKind.POLICY, "audit limit must be between 1 and 500", code="INVALID_LIMIT")
+            raise AppError(
+                ErrorKind.POLICY, "audit limit must be between 1 and 500", code="INVALID_LIMIT"
+            )
         entries = self.commands["local.audit"].execute(limit)
         return {"entries": _safe_value(entries), "limit": limit}
 
-    def operate(self, action: str, uuid: str | None = None,
-                uuids: tuple[str, ...] | None = None) -> dict[str, Any]:
+    def operate(
+        self, action: str, uuid: str | None = None, uuids: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
         command = self.vm_operations.get(action)
         if command is None:
             raise AppError(ErrorKind.POLICY, "unsupported VM action", code="INVALID_ACTION")
         if (uuid is None) == (uuids is None):
-            raise AppError(ErrorKind.POLICY, "provide exactly one UUID or UUID list", code="INVALID_UUID")
-        keys = (_canonical_wire_uuid(uuid),) if uuid is not None else tuple(_canonical_wire_uuid(item) for item in uuids or ())
+            raise AppError(
+                ErrorKind.POLICY, "provide exactly one UUID or UUID list", code="INVALID_UUID"
+            )
+        keys = (
+            (_canonical_wire_uuid(uuid),)
+            if uuid is not None
+            else tuple(_canonical_wire_uuid(item) for item in uuids or ())
+        )
         session = self._session()
-        result = command.execute(session.token, keys[0]) if len(keys) == 1 else command.execute_many(session.token, keys)
+        result = (
+            command.execute(session.token, keys[0])
+            if len(keys) == 1
+            else command.execute_many(session.token, keys)
+        )
         return _safe_value(result)
 
     def operate_desktop(self, action: str, uuids: tuple[str, ...]) -> dict[str, Any]:
@@ -165,17 +201,33 @@ class EngineService:
         try:
             action_value = Action(action)
         except ValueError as exc:
-            raise AppError(ErrorKind.POLICY, "unsupported VM action", code="INVALID_ACTION") from exc
+            raise AppError(
+                ErrorKind.POLICY, "unsupported VM action", code="INVALID_ACTION"
+            ) from exc
         keys = tuple(_canonical_wire_uuid(item) for item in uuids)
         if not keys or len(set(keys)) != len(keys) or len(keys) > 100:
-            raise AppError(ErrorKind.POLICY, "Desktop UUID list must be non-empty and unique", code="INVALID_UUID")
+            raise AppError(
+                ErrorKind.POLICY,
+                "Desktop UUID list must be non-empty and unique",
+                code="INVALID_UUID",
+            )
         session = self._session()
-        section = self.application.refresh(session.token, sections=("desktops",)).section("desktops")
+        section = self.application.refresh(session.token, sections=("desktops",)).section(
+            "desktops"
+        )
         if section is None or not isinstance(section.value, tuple):
-            raise AppError(ErrorKind.POLICY, "current Desktop inventory is required", code="INVENTORY_UNAVAILABLE")
+            raise AppError(
+                ErrorKind.POLICY,
+                "current Desktop inventory is required",
+                code="INVENTORY_UNAVAILABLE",
+            )
         by_uuid = {item.uuid: item for item in section.value if isinstance(item, VirtualDesktop)}
         if any(key not in by_uuid for key in keys):
-            raise AppError(ErrorKind.POLICY, "Desktop is not present in current inventory", code="DESKTOP_NOT_FOUND")
+            raise AppError(
+                ErrorKind.POLICY,
+                "Desktop is not present in current inventory",
+                code="DESKTOP_NOT_FOUND",
+            )
         targets = tuple(by_uuid[key] for key in keys)
         is_bulk = len(targets) > 1
         plan = self.operations.create_desktop_plan(action_value, targets, section, is_bulk=is_bulk)
@@ -214,7 +266,7 @@ def _section_payload(section, value) -> dict[str, Any]:
     }
 
 
-def _safe_value(value):
+def _safe_value(value: object) -> Any:
     if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, float):
